@@ -761,7 +761,8 @@ browser, with these differences:
   arguments, and returns the output and the files the page asked to keep. Reset kills the
   process. The native build is pinned to the same Icarus commit as the WASM engine (`c7530db`,
   14.0-devel). `test_hdl_native.js` checks that both record the same instructions, the same
-  waveform and the same checkpoint replay. It runs on an RTL core when there is one
+  waveform and the same checkpoint replay. A dump is read through `hdlVcdFromBytes`, which turns
+  the CRLF line ends vvp writes on Windows into LF. It runs on an RTL core when there is one
   (`RVSIM_CORE_DIR`, or `RV/` beside the tests), and otherwise on the prebuilt core in
   `examples/hdl/`.
 - **Speed.** 40,000 cycles of a DIP-switch-to-LED program on an RTL core, with trace, VCD and

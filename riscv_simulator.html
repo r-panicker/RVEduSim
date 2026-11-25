@@ -15621,7 +15621,7 @@ self.onmessage = async ({ data: job }) => {
     }
     function hdlDecodeRun(r) {
       const dec = new TextDecoder();
-      return { out: r.out.join('\n'), vcd: r.files['dump.vcd'] ? dec.decode(r.files['dump.vcd']) : null, ck: hdlDecodeCk(r.files) };
+      return { out: r.out.join('\n'), vcd: r.files['dump.vcd'] ? hdlVcdFromBytes(r.files['dump.vcd'], dec) : null, ck: hdlDecodeCk(r.files) };
     }
 
     // Drop diagnostics that are artefacts of the WASM build rather than
@@ -17254,6 +17254,13 @@ endmodule
     // time 0: what the testbench reads from its plusargs (the cycle budget,
     // how many input changes there are) can differ between runs, and the
     // newest run's time-0 values are the ones that hold for the whole.
+    // A dump as text. vvp on Windows writes it with CRLF line ends; the
+    // readers here match timestamps as whole lines, so they are made plain.
+    function hdlVcdFromBytes(bytes, dec) {
+      const s = (dec || new TextDecoder()).decode(bytes);
+      return s.indexOf('\r') < 0 ? s : s.replace(/\r\n/g, '\n');
+    }
+
     function hdlVcdId(l) { return /^[bBrR]/.test(l) ? l.slice(l.indexOf(' ') + 1) : l.slice(1); }
 
     function hdlVcdFold(s, end, vals, fixed) {
@@ -18632,7 +18639,7 @@ endmodule
                   ' cycles when the run stops. A slower Real time clock lets it follow.', 'sys');
                 return;
               }
-              hdlLastVcd = hdlShiftVcd(new TextDecoder().decode(b.data), live.ck ? live.ck.k : 0);
+              hdlLastVcd = hdlShiftVcd(hdlVcdFromBytes(b.data), live.ck ? live.ck.k : 0);
               updateWaveView();
             }, () => { waveBusy = false; });
           }
@@ -18684,7 +18691,7 @@ endmodule
         if (!hdlDumpVcd) {
           hdlLastVcd = null;
         } else if (liveWave && !waveStopped && r.files && r.files['dump.vcd']) {
-          hdlLastVcd = hdlShiftVcd(new TextDecoder().decode(r.files['dump.vcd']), live.ck ? live.ck.k : 0);
+          hdlLastVcd = hdlShiftVcd(hdlVcdFromBytes(r.files['dump.vcd']), live.ck ? live.ck.k : 0);
           t.vcdScope = hdlWaveTop ? 'top' : 'all';
         } else {
           hdlStatus('building the waveform...', 'busy');

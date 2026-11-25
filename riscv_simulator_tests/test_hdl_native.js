@@ -189,6 +189,12 @@ setTimeout(async () => {
       !!tn && !!tw && JSON.stringify(tn.steps) === JSON.stringify(tw.steps));
     check('…and the same waveform',
       !!nat.win.getHdlLastVcd() && stripVcdDate(nat.win.getHdlLastVcd()) === stripVcdDate(wasm.win.getHdlLastVcd()));
+    {
+      // vvp on Windows writes the dump with CRLF line ends.
+      const v = nat.win.getHdlLastVcd();
+      check('A dump with CRLF line ends reads as the same text',
+        nat.win.hdlVcdFromBytes(new TextEncoder().encode(v.replace(/\n/g, '\r\n'))) === v);
+    }
     nat.win.hdlSeek(tn.steps.length);
     check('The LEDs show the switches (0x' + nat.win.getLedState().toString(16) + ')', nat.win.getLedState() === 0xad);
 
