@@ -18,12 +18,19 @@ case "$(uname -s)" in
   *)                  EXTRA_LDFLAGS="" ;;
 esac
 # Homebrew's flex generates the lexer, so its FlexLexer.h has to be the one
-# included, not the older copy in Apple's command line tools. Homebrew's
-# include folder is not searched by default on Apple silicon.
-if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null && [ -f "$(brew --prefix flex)/include/FlexLexer.h" ]; then
-  export CPATH="$(brew --prefix flex)/include${CPATH:+:$CPATH}"
+# included, not the copy in Apple's SDK, which declares a different class.
+EXTRA_CPPFLAGS=""
+if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null; then
+  FLEX_PREFIX=$(brew --prefix flex)
+  export LEX="$FLEX_PREFIX/bin/flex"
+  EXTRA_CPPFLAGS="-I$FLEX_PREFIX/include"
+  echo "flex: $LEX ($("$LEX" --version)), FlexLexer.h:"
+  ls -l "$FLEX_PREFIX/include" || true
+  for h in "$FLEX_PREFIX/include/FlexLexer.h" "$(xcrun --show-sdk-path 2>/dev/null)/usr/include/FlexLexer.h"; do
+    if [ -f "$h" ]; then echo "  $h: $(grep -c yyread "$h" || true) yyread"; fi
+  done
 fi
-./configure --quiet --prefix="$WORK/inst" LDFLAGS="$EXTRA_LDFLAGS" >/dev/null
+./configure --quiet --prefix="$WORK/inst" CPPFLAGS="$EXTRA_CPPFLAGS" LDFLAGS="$EXTRA_LDFLAGS" >/dev/null
 make -s -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
 make -s install >/dev/null
 
