@@ -1,12 +1,13 @@
 # RVEduSim User Guide
 
 <p align="center">
-  <a href="../riscv_simulator.html" target="_blank" rel="noopener">
+  <a href="https://r-panicker.github.io/RVEduSim/" target="_blank" rel="noopener">
     <img alt="Start the Simulator" src="https://img.shields.io/badge/▶%20Start%20the%20Simulator-2ea44f?style=for-the-badge">
   </a>
 </p>
 
-A RISC-V simulator that runs in the browser, with nothing to install.
+A RISC-V simulator that runs in the browser with nothing to install, or as a
+[desktop app](#6-the-desktop-app) with faster Verilog simulation.
 
 - **Assembly or C.** RV32I(M) assembly is assembled in the browser. C is compiled with
   GCC or Clang through Compiler Explorer.
@@ -247,9 +248,9 @@ compilation error.
 
 ## 6. The desktop app
 
-The simulator is also being packaged as a desktop app for Linux, Windows and macOS. It is
-not available for download yet, and the details below may change before it is. The app
-looks and behaves like the page, with these differences:
+RVEduSim is also a desktop app for Linux, Windows and macOS, downloaded from the
+[Releases page](https://github.com/r-panicker/RVEduSim/releases/latest). It looks and behaves
+like the page, with these differences:
 
 - Icarus Verilog runs as a native program, so HDL mode works offline. It is about one and a
   half times as fast as in the browser.

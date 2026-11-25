@@ -10,7 +10,7 @@
 | [`vendor/`](vendor/README.md) | Local copies of the external engines: the CodeMirror 6 bundle, Icarus Verilog compiled to WebAssembly, and Yosys (`@yowasp/yosys`). |
 | [`electron/`](electron/README.md) | The desktop app: this page in an Electron window, with Icarus Verilog and Verilator built natively for each platform. See [§5.18](#518-the-desktop-app). |
 
-**Live:** <https://r-panicker.github.io/RVEduSim/>. A copy is also served on the [CG3207](https://nus-cg3207.github.io/) course site, <https://nus-cg3207.github.io/rv_resources/web_sim/riscv_simulator/>. Vibe coded by Rajesh Panicker.
+**Live:** <https://r-panicker.github.io/RVEduSim/>. Desktop installers: <https://github.com/r-panicker/RVEduSim/releases>. Vibe coded by Rajesh Panicker.
 
 The page is a self-contained RISC-V assembler, C compiler front-end, emulator and visual
 debugger, with an optional second engine that simulates a Verilog processor. The editor
