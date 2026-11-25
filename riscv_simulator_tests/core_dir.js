@@ -7,6 +7,9 @@
  *
  * coreDir(suite) returns that folder, or ends the suite as skipped.
  * findCoreDir() returns it, or null.
+ * coreOrPrebuilt() returns { dir, prebuilt }: that folder, or without one
+ * examples/hdl, which holds the Wrapper and a prebuilt gate-level core.
+ * RVSIM_PREBUILT=1 picks examples/hdl even when there is RTL.
  */
 const fs = require('fs');
 const path = require('path');
@@ -27,4 +30,9 @@ function coreDir(suite) {
   process.exit(0);
 }
 
-module.exports = { coreDir, findCoreDir };
+function coreOrPrebuilt() {
+  const dir = process.env.RVSIM_PREBUILT ? null : findCoreDir();
+  return dir ? { dir, prebuilt: false } : { dir: path.resolve(__dirname, '..', 'examples', 'hdl'), prebuilt: true };
+}
+
+module.exports = { coreDir, findCoreDir, coreOrPrebuilt };

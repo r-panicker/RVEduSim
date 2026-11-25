@@ -24,7 +24,8 @@ try { JSDOM = require('jsdom').JSDOM; }
 catch (e) { JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM; }
 
 const ROOT = path.resolve(__dirname, '..');
-const RV = require('./core_dir').coreDir('test_hdl_native');
+// The RTL core, or the prebuilt one in examples/hdl (see core_dir.js).
+const { dir: RV, prebuilt: PREBUILT } = require('./core_dir').coreOrPrebuilt();
 const ENGINE = process.env.HDL_ENGINE_DIR || path.join(ROOT, 'vendor', 'verisim');
 const { createRunner, findBinDir, readFolder } = require(path.join(ROOT, 'electron', 'hdl_native.js'));
 const OS = { darwin: 'mac', win32: 'win' }[process.platform] || process.platform;
@@ -32,8 +33,14 @@ const NATIVE = findBinDir([process.env.HDL_NATIVE_DIR, path.join(ROOT, 'electron
 
 const html = fs.readFileSync(path.join(ROOT, 'riscv_simulator.html'), 'utf8');
 const CM6 = fs.readFileSync(path.join(__dirname, 'cm6_bundle.min.js'), 'utf8');
-const DESIGN = ['ALU.v', 'Decoder.v', 'Extend.v', 'MCycle.v', 'PC_Logic.v', 'ProgramCounter.v',
-                'RegFile.v', 'Shifter.v', 'RV.v', 'Wrapper.v'];
+const DESIGN = PREBUILT ? fs.readdirSync(RV).filter(f => /\.v$/.test(f))
+  : ['ALU.v', 'Decoder.v', 'Extend.v', 'MCycle.v', 'PC_Logic.v', 'ProgramCounter.v',
+     'RegFile.v', 'Shifter.v', 'RV.v', 'Wrapper.v'];
+// The file the folder tests edit and break, and a module it declares.
+const EDIT = PREBUILT ? 'RV_reference.v' : 'ALU.v';
+const EDIT_MODULE = PREBUILT ? 'RV' : 'ALU';
+const EDIT_RE = EDIT.replace(/\./g, '\\.');
+const BACKUP = EDIT.replace(/\.v$/, '_backup.v');
 
 let passed = 0, failed = 0;
 function check(label, cond) {
@@ -136,6 +143,9 @@ setTimeout(async () => {
     // Vivado run folder holding a generated copy, and VHDL files.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rvsim-folder-'));
     for (const f of fs.readdirSync(RV)) if (/\.(v|vhd)$/.test(f)) fs.copyFileSync(path.join(RV, f), path.join(dir, f));
+    // The prebuilt core comes without testbenches; one stands in for them.
+    if (PREBUILT) fs.writeFileSync(path.join(dir, 'test_Wrapper_DIP_to_LED.v'), 'module test_Wrapper_DIP_to_LED;\n  Wrapper dut();\nendmodule\n');
+    const testbenches = fs.readdirSync(dir).filter(f => /^test_.*\.v$/.test(f)).length;
     fs.mkdirSync(path.join(dir, 'proj.runs', 'synth_1'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'proj.runs', 'synth_1', 'RV_stub.v'), 'module RV(input CLK); endmodule\n');
     const folder = { next: dir };
@@ -148,14 +158,14 @@ setTimeout(async () => {
     console.log('\n[1] A folder loads what sits under Wrapper');
     for (const p of [nat, wasm]) await p.win.hdlPickFolder();
     const names = nat.win.getHdlFiles().map(f => f.name).sort();
-    check('The ten design files are loaded (' + names.join(', ') + ')',
+    check('The ' + DESIGN.length + ' design files are loaded (' + names.join(', ') + ')',
       names.join() === DESIGN.slice().sort().join());
     check('The testbenches beside them are left out, and the console names them',
-      consoleText(nat.doc).some(l => /Left out 6 file/.test(l) && /test_Wrapper_DIP_to_LED\.v/.test(l)));
+      consoleText(nat.doc).some(l => new RegExp('Left out ' + testbenches + ' file').test(l) && /test_Wrapper_DIP_to_LED\.v/.test(l)));
     check('The copy under proj.runs/ is not loaded',
       !nat.win.getHdlFiles().some(f => /RV_stub/.test(f.folderPath || '')));
     check('The sources note names the folder',
-      new RegExp('10 loaded from ' + path.basename(dir) + ', Wrapper found')
+      new RegExp(DESIGN.length + ' loaded from ' + path.basename(dir) + ', Wrapper found')
         .test(nat.doc.getElementById('hdlSourcesNote').textContent));
     check('Picking a folder switches to HDL mode', nat.win.getSimEngineMode() === 'hdl');
     check('The folder button is offered', nat.doc.getElementById('hdlFolderBtn').style.display !== 'none');
@@ -187,14 +197,17 @@ setTimeout(async () => {
     // save and restore exactly as the WASM one does.
     console.log('\n[3] An input change replays from a checkpoint');
     const at = Math.floor(tn.steps.length * 0.9);
-    const before = [nat, wasm].map(p => p.win.getHdlTrace());
     for (const p of [nat, wasm]) { p.win.hdlSeek(at); p.doc.getElementById('console').innerHTML = ''; }
     const t2 = Date.now();
     nat.win.setDipSwitches(0x0072);
-    await until(() => nat.win.getHdlTrace() !== before[0] && nat.win.getHdlTrace());
+    // The replay is joined onto the recording in place; it is done once the
+    // recording's input timeline holds the change and nothing runs.
+    const replayed = (win, v) => { const t = win.getHdlTrace();
+      return !!t && !win.eval('hdlRunning') && !!t.timeline && t.timeline.stim.some(s => s.value === v); };
+    await until(() => replayed(nat.win, 0x72), 120000);
     const tResim = Date.now() - t2;
     wasm.win.setDipSwitches(0x0072);
-    await until(() => wasm.win.getHdlTrace() !== before[1] && wasm.win.getHdlTrace());
+    await until(() => replayed(wasm.win, 0x72), 120000);
     await sleep(200);
     const rn = nat.win.getHdlTrace(), rw = wasm.win.getHdlTrace();
     console.log('    native replay: ' + tResim + ' ms');
@@ -213,33 +226,34 @@ setTimeout(async () => {
     check('Nothing changed, so nothing is reloaded and the recording stays',
       (await nat.win.hdlReadFolder()) === false && nat.win.getHdlTrace() === rn &&
       !consoleText(nat.doc).some(l => /Reloaded/.test(l)));
-    fs.appendFileSync(path.join(dir, 'ALU.v'), '\n// edited\n');
+    fs.appendFileSync(path.join(dir, EDIT), '\n// edited\n');
     fs.mkdirSync(path.join(dir, 'old'));
-    fs.writeFileSync(path.join(dir, 'old', 'ALU_backup.v'), fs.readFileSync(path.join(RV, 'ALU.v'), 'utf8'));
+    fs.writeFileSync(path.join(dir, 'old', BACKUP), fs.readFileSync(path.join(RV, EDIT), 'utf8'));
     nat.win.dispatchEvent(new nat.win.Event('focus'));
     await nat.win.hdlReadFolder();
     await sleep(50);
     const log4 = consoleText(nat.doc);
     check('An edited file is reloaded, and the console says which',
-      log4.some(l => /Reloaded from .*ALU\.v changed/.test(l)));
+      log4.some(l => new RegExp('Reloaded from .*' + EDIT_RE + ' changed').test(l)));
     check('A second file declaring the same module is named in a warning',
-      log4.some(l => /More than one file .* declares ALU \(ALU\.v, old\/ALU_backup\.v\)/.test(l)));
+      log4.some(l => { const m = new RegExp('More than one file .* declares (?:.*; )?' + EDIT_MODULE + ' \\(([^)]*)\\)').exec(l);
+        return !!m && m[1].split(', ').sort().join() === [EDIT, 'old/' + BACKUP].sort().join(); }));
     check('The recording of the old sources is discarded', nat.win.getHdlTrace() === null);
-    nat.win.hdlRemoveFile('ALU_backup.v');
+    nat.win.hdlRemoveFile(BACKUP);
     nat.doc.getElementById('console').innerHTML = '';
     nat.win.dispatchEvent(new nat.win.Event('focus'));
     await nat.win.hdlReadFolder();
     check('A file removed with × stays out when the folder is read again',
-      !nat.win.getHdlFiles().some(f => f.name === 'ALU_backup.v'));
+      !nat.win.getHdlFiles().some(f => f.name === BACKUP));
 
     // --- 5. Errors and cancellation -----------------------------------
     console.log('\n[5] Compile errors and Reset');
     nat.doc.getElementById('console').innerHTML = '';
-    fs.writeFileSync(path.join(dir, 'ALU.v'), fs.readFileSync(path.join(RV, 'ALU.v'), 'utf8').replace(/endmodule/, 'endmodul'));
+    fs.writeFileSync(path.join(dir, EDIT), fs.readFileSync(path.join(RV, EDIT), 'utf8').replace(/endmodule/, 'endmodul'));
     const bad = await nat.win.hdlStartTrace(2000);
     check('A syntax error is reported with its file and line, and nothing runs',
-      bad === null && consoleText(nat.doc).some(l => /ALU\.v:\d+: error/.test(l)));
-    fs.copyFileSync(path.join(RV, 'ALU.v'), path.join(dir, 'ALU.v'));
+      bad === null && consoleText(nat.doc).some(l => new RegExp(EDIT_RE + ':\\d+: error').test(l)));
+    fs.copyFileSync(path.join(RV, EDIT), path.join(dir, EDIT));
     const long = nat.win.hdlStartTrace(5000000).then(t => ({ t }), e => ({ e }));
     await sleep(800);
     nat.win.hdlStopWorker();

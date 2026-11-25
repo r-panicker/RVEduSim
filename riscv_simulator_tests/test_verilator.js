@@ -22,7 +22,11 @@ try { JSDOM = require('jsdom').JSDOM; }
 catch (e) { JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM; }
 
 const ROOT = path.resolve(__dirname, '..');
-const RV = require('./core_dir').coreDir('test_verilator');
+// The RTL core, or the prebuilt one in examples/hdl (see core_dir.js). The
+// checks that need a particular RTL module are left out with the prebuilt one.
+const { dir: RV, prebuilt: PREBUILT } = require('./core_dir').coreOrPrebuilt();
+const EDIT = PREBUILT ? 'RV_reference.v' : 'ALU.v';
+const EDIT_RE = EDIT.replace(/\./g, '\\.');
 const ENGINE = process.env.HDL_ENGINE_DIR || path.join(ROOT, 'vendor', 'verisim');
 const { createRunner, findBinDir, readFolder } = require(path.join(ROOT, 'electron', 'hdl_native.js'));
 const { createVerilator, findVerilator } = require(path.join(ROOT, 'electron', 'verilator_native.js'));
@@ -231,10 +235,17 @@ async function checkpointSection(dir, cache) {
   // (The Wrapper-only waveform stays: turning it off would select another model.)
   for (const x of [cp, cq]) { x.win.setHdlLiveWave('pause'); x.win.setHdlDumpVcd(false); }
   ct = cp.win.getHdlTrace();
+  // The prebuilt netlist saves its flip-flops in another order, so there
+  // every saved value is changed.
   for (const c of ct.vlCks) {
     const lines = c.txt.split('\n');
-    const i = lines.length - 2;
-    lines[i] = lines[i].slice(0, -3) + (lines[i].slice(-3) === '000' ? '100' : '000');
+    if (PREBUILT) {
+      for (let i = 0; i < lines.length; i++)
+        if (/[01]$/.test(lines[i])) lines[i] = lines[i].slice(0, -1) + (lines[i].endsWith('0') ? '1' : '0');
+    } else {
+      const i = lines.length - 2;
+      lines[i] = lines[i].slice(0, -3) + (lines[i].slice(-3) === '000' ? '100' : '000');
+    }
     c.txt = lines.join('\n');
   }
   await cp.win.runHdlSimulation();
@@ -245,6 +256,7 @@ async function checkpointSection(dir, cache) {
   check('…and checkpoints stay off for those sources', !cp.win.getHdlTrace().vlCks);
 
   // A design that sets its initial values with <= overrides the restore.
+  if (PREBUILT) { clearInterval(watch7); return; }
   const pcSrc = fs.readFileSync(path.join(RV, 'ProgramCounter.v'), 'utf8');
   const oldPc = pcSrc.replace(/output reg \[31:0\] PC = PC_INIT\s*\);/, 'output reg [31:0] PC\n    );\n    initial begin\n        PC <= PC_INIT;\n    end');
   check('(the old ProgramCounter can be rebuilt for this)', oldPc !== pcSrc);
@@ -294,7 +306,7 @@ if (process.argv[2] === '--checkpoints') {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rvsim-folder-'));
     for (const f of fs.readdirSync(RV)) if (/\.v$/.test(f)) fs.copyFileSync(path.join(RV, f), path.join(dir, f));
     // A register file that reads with <=, so that there is a warning to count.
-    fs.writeFileSync(path.join(dir, 'RegFile.v'),
+    if (!PREBUILT) fs.writeFileSync(path.join(dir, 'RegFile.v'),
       fs.readFileSync(path.join(RV, 'RegFile.v'), 'utf8').replace(/RD([12]) = /g, 'RD$1 <= '));
     const vl = createVerilator({ root: VL_ROOT, cacheDir: cache });
     const ic = makePage(createRunner(NATIVE), { next: dir }, null);
@@ -329,7 +341,7 @@ if (process.argv[2] === '--checkpoints') {
       [...seen].some(s => /Verilator: compiling the model \(\d+ of \d+ files\)/.test(s)) && [...seen].some(s => /Verilator: linking/.test(s)));
     check('The console says Verilator is two-state', log2.some(l => /two-state logic/.test(l)));
     check('…and how long the build took', log2.some(l => /Verilator build [\d.]+ s/.test(l)));
-    check('Its warnings are counted by kind', log2.some(l => /Verilator COMBDLY ×\d+: /.test(l)));
+    if (!PREBUILT) check('Its warnings are counted by kind', log2.some(l => /Verilator COMBDLY ×\d+: /.test(l)));
     const ti = await ic.win.hdlStartTrace(40000);
     check('It records the same ' + tv.steps.length + ' instructions, register and memory writes as Icarus',
       !!tv && !!ti && arch(tv) === arch(ti));
@@ -348,7 +360,10 @@ if (process.argv[2] === '--checkpoints') {
     const before = win.getHdlTrace();
     win.hdlSeek(Math.floor(before.steps.length * 0.9));
     win.setDipSwitches(0x0072);
-    await until(() => win.getHdlTrace() !== before && win.getHdlTrace());
+    // The replay is joined onto the recording in place; it is done once the
+    // recording's input timeline holds the change and nothing runs.
+    await until(() => { const t = win.getHdlTrace();
+      return !!t && !win.eval('hdlRunning') && !!t.timeline && t.timeline.stim.some(s => s.value === 0x72); }, 120000);
     await sleep(200);
     win.hdlSeek(win.getHdlTrace().steps.length);
     check('A switch change replays, and the LEDs follow (0x' + win.getLedState().toString(16) + ')', win.getLedState() === 0x72);
@@ -368,11 +383,11 @@ if (process.argv[2] === '--checkpoints') {
 
     console.log('\n[5] Errors and Reset');
     doc.getElementById('console').innerHTML = '';
-    fs.writeFileSync(path.join(dir, 'ALU.v'), fs.readFileSync(path.join(RV, 'ALU.v'), 'utf8').replace(/endmodule/, 'endmodul'));
+    fs.writeFileSync(path.join(dir, EDIT), fs.readFileSync(path.join(RV, EDIT), 'utf8').replace(/endmodule/, 'endmodul'));
     const bad = await win.hdlStartTrace(2000);
     check('A syntax error is reported with its file and line, and nothing runs',
-      bad === null && consoleText(doc).some(l => /ALU\.v:\d+:\d+: /.test(l)));
-    fs.writeFileSync(path.join(dir, 'ALU.v'), fs.readFileSync(path.join(RV, 'ALU.v'), 'utf8') + '\n// changed\n');
+      bad === null && consoleText(doc).some(l => new RegExp(EDIT_RE + ':\\d+:\\d+: ').test(l)));
+    fs.writeFileSync(path.join(dir, EDIT), fs.readFileSync(path.join(RV, EDIT), 'utf8') + '\n// changed\n');
     const pending = win.hdlStartTrace(2000).then(t => ({ t }), e => ({ e }));
     await until(() => /Verilator: (translating|compiling)/.test(doc.getElementById('statusBar').textContent), 20000);
     win.hdlStopWorker();
@@ -382,7 +397,7 @@ if (process.argv[2] === '--checkpoints') {
     const left = process.platform === 'win32' ? [] : execSync('ps -eo args', { encoding: 'utf8' }).split('\n')
       .filter(l => /verilator_bin|cc1plus|rvsim-vl-/.test(l) && !/ps -eo/.test(l));
     check('…and leaves no compiler running (' + left.length + ')', left.length === 0);
-    fs.copyFileSync(path.join(RV, 'ALU.v'), path.join(dir, 'ALU.v'));
+    fs.copyFileSync(path.join(RV, EDIT), path.join(dir, EDIT));
 
     console.log('\n[6] Live runs');
     const steps2arch = t => arch(t);

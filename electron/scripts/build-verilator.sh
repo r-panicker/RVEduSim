@@ -17,20 +17,19 @@ case "$(uname -s)" in
   Linux|MINGW*|MSYS*) EXTRA_LDFLAGS="-static-libstdc++ -static-libgcc" ;;
   *)                  EXTRA_LDFLAGS="" ;;
 esac
-# Homebrew's flex generates the lexer, so its FlexLexer.h has to be the one
-# included, not the copy in Apple's SDK, which declares a different class.
-EXTRA_CPPFLAGS=""
-if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null; then
-  FLEX_PREFIX=$(brew --prefix flex)
-  export LEX="$FLEX_PREFIX/bin/flex"
-  EXTRA_CPPFLAGS="-I$FLEX_PREFIX/include"
-  echo "flex: $LEX ($("$LEX" --version)), FlexLexer.h:"
-  ls -l "$FLEX_PREFIX/include" || true
-  for h in "$FLEX_PREFIX/include/FlexLexer.h" "$(xcrun --show-sdk-path 2>/dev/null)/usr/include/FlexLexer.h"; do
-    if [ -f "$h" ]; then echo "  $h: $(grep -c yyread "$h" || true) yyread"; fi
-  done
+# Verilator's lexer does not build with flex 2.6.16 and later, whose
+# FlexLexer.h declares a yyread the lexer does not define. Where the flex on
+# the PATH is that new (Homebrew's, on Apple silicon), flex 2.6.4 is built
+# for this build; configure then takes that flex's own FlexLexer.h.
+flex_num=$(flex --version | awk '{ split($2, v, "."); print v[1] * 10000 + v[2] * 100 + v[3] }')
+if [ "$flex_num" -ge 20616 ]; then
+  echo "flex $(flex --version | awk '{ print $2 }') is too new for Verilator $REV; building flex 2.6.4"
+  curl -fsSL https://github.com/westes/flex/releases/download/v2.6.4/flex-2.6.4.tar.gz | tar -xz -C "$WORK"
+  (cd "$WORK/flex-2.6.4" && ./configure --quiet --prefix="$WORK/flex" --disable-shared >/dev/null &&
+     make -s -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null && make -s install >/dev/null)
+  export PATH="$WORK/flex/bin:$PATH"
 fi
-./configure --quiet --prefix="$WORK/inst" CPPFLAGS="$EXTRA_CPPFLAGS" LDFLAGS="$EXTRA_LDFLAGS" >/dev/null
+./configure --quiet --prefix="$WORK/inst" LDFLAGS="$EXTRA_LDFLAGS" >/dev/null
 make -s -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
 make -s install >/dev/null
 

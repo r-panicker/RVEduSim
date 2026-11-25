@@ -94,7 +94,7 @@ npm install
 npm test
 ```
 
-Each suite is a Node script that loads the page in jsdom and can be run on its own. The suites that simulate a processor's RTL skip themselves unless `RVSIM_CORE_DIR` names a folder holding `RV.v`, its modules and `Wrapper.v` (see `core_dir.js`); the native engine and app suites also need the desktop app's builds.
+Each suite is a Node script that loads the page in jsdom and can be run on its own. The suites that need a processor's RTL skip themselves unless `RVSIM_CORE_DIR` names a folder holding `RV.v`, its modules and `Wrapper.v` (see `core_dir.js`). The native engine, Verilator and app suites run on the prebuilt core in `examples/hdl/` without one; they need the desktop app's builds.
 
 ## Licence
 

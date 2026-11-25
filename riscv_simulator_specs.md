@@ -761,8 +761,9 @@ browser, with these differences:
   arguments, and returns the output and the files the page asked to keep. Reset kills the
   process. The native build is pinned to the same Icarus commit as the WASM engine (`c7530db`,
   14.0-devel). `test_hdl_native.js` checks that both record the same instructions, the same
-  waveform and the same checkpoint replay; it reads the RTL from the folder named by
-  `RVSIM_CORE_DIR` and skips itself when that is not set.
+  waveform and the same checkpoint replay. It runs on an RTL core when there is one
+  (`RVSIM_CORE_DIR`, or `RV/` beside the tests), and otherwise on the prebuilt core in
+  `examples/hdl/`.
 - **Speed.** 40,000 cycles of a DIP-switch-to-LED program on an RTL core, with trace, VCD and
   checkpoints on: preprocess and compile 40 ms native against 180 ms in WASM, simulation 5.2 s
   against 8.6 s; replaying an input change near the end, 0.65 s. With all three off, native
@@ -800,8 +801,8 @@ Differences from Icarus:
 
 - **Two-state.** What Icarus shows as `x` (a register never written, an output never driven) is
   0, and the console says so on the first build. Instruction, register and memory records
-  otherwise match Icarus; `test_verilator.js` checks 40,000 cycles, reading the RTL from
-  `RVSIM_CORE_DIR` and skipping itself when that is not set.
+  otherwise match Icarus; `test_verilator.js` checks 40,000 cycles, on an RTL core when there
+  is one and otherwise on the prebuilt core in `examples/hdl/`.
 - **Builds are cached** by content (sources, testbench, language, Verilator version, compiler) in
   the app's data folder; the last 8 are kept (`KEEP_MODELS`). Changing the program, Reset and
   input changes reuse the model. Verilator's runtime is compiled once per compiler.
@@ -1250,7 +1251,7 @@ The Node/jsdom harness is in [`riscv_simulator_tests/`](riscv_simulator_tests). 
 
 Shared infrastructure, not suites: `godbolt_cache.js` with `godbolt_cache*.json` answers the Godbolt compile requests for the examples, and `examples_fetch.js` serves `examples/` from disk. Both stand in for network access that jsdom does not have. `cm6_bundle.min.js` is the CodeMirror bundle injected into each page.
 
-**RTL and engines.** Suites that simulate a processor need its Verilog sources (a Wrapper and core with the standard module names). They read them from the folder named by the environment variable `RVSIM_CORE_DIR`, or from `RV/` beside `riscv_simulator_tests/` when there is one (`core_dir.js`), and skip themselves when there is neither. `test_electron_app.js` runs on the prebuilt core in `examples/hdl/` instead. The prebuilt gate-level core in `examples/hdl/` (`RV_reference.v`, with `Wrapper.v`) needs no sources. The WASM Icarus engine is read from `HDL_ENGINE_DIR`, default `vendor/verisim/` (`ivlpp`, `ivl`, `vvp`, each `.js` plus `.wasm`). The Emscripten modules are ES modules that use `import.meta`, so Node 20 or later is required.
+**RTL and engines.** Suites that simulate a processor need its Verilog sources (a Wrapper and core with the standard module names). They read them from the folder named by the environment variable `RVSIM_CORE_DIR`, or from `RV/` beside `riscv_simulator_tests/` when there is one (`core_dir.js`), and skip themselves when there is neither. `test_hdl_native.js`, `test_verilator.js` and `test_electron_app.js` run on the prebuilt core in `examples/hdl/` instead (`coreOrPrebuilt()`; `RVSIM_PREBUILT=1` chooses it even when there is RTL), leaving out only the checks that edit a particular RTL module. The prebuilt gate-level core in `examples/hdl/` (`RV_reference.v`, with `Wrapper.v`) needs no sources. The WASM Icarus engine is read from `HDL_ENGINE_DIR`, default `vendor/verisim/` (`ivlpp`, `ivl`, `vvp`, each `.js` plus `.wasm`). The Emscripten modules are ES modules that use `import.meta`, so Node 20 or later is required.
 
 ### Suites run by `npm test`
 
@@ -1289,8 +1290,8 @@ Shared infrastructure, not suites: `godbolt_cache.js` with `godbolt_cache*.json`
 
 | Test script | Needs | What it checks |
 |---|---|---|
-| `test_hdl_native.js` | A native Icarus build (`npm run build:iverilog` in `electron/`, or `HDL_NATIVE_DIR`); `RVSIM_CORE_DIR` | Two pages, one bridged to `electron/iverilog/<os>-<arch>` and one to `vendor/verisim/` run in Node, load the same sources as a folder, run 40,000 cycles of DIP to LED and replay a switch change from a checkpoint; recordings and waveforms must be identical. Also folder selection (testbenches, a Vivado `.runs` copy, a duplicate module), re-reading on focus, a compile error, and Reset killing `vvp`. On the native page, chunked runs: a switch moved mid-run, Pause and Run, a breakpoint, *Real time*, no trace, the waveform, the mid-run display against the same point shown from scratch, and a 90,000-cycle run's waveform window against a run from reset. |
-| `test_verilator.js` | Native Icarus and Verilator builds (`npm run build:verilator`), a C++20 compiler (or `RVSIM_FORCE_ZIG=1` with network access, which fetches Zig); `RVSIM_CORE_DIR` | The Simulator setting (disabled with a tooltip in a browser); a build reported on the status line and cached by content; a 40,000-cycle run recording what Icarus records; an input change, Resume, the Wrapper-only waveform, a compile error, Reset during a build; live runs (a switch moved mid-run checked against a replay, Pause under real-time pacing, Resume, a breakpoint, typed UART input, the per-simulator cycle defaults, a 5,000,000-cycle run trimmed to its last 2,000,000, a live dump stopping at 20 MB); 200,000 cycles timed on both simulators with the waveform on and off; and, in a separate process, checkpoints (Resume, an input change and both waveforms from one, each equal to a run from reset; a corrupted checkpoint and an `initial` block with `<=` falling back to reset). |
+| `test_hdl_native.js` | A native Icarus build (`npm run build:iverilog` in `electron/`, or `HDL_NATIVE_DIR`); `RVSIM_CORE_DIR` optional | Two pages, one bridged to `electron/iverilog/<os>-<arch>` and one to `vendor/verisim/` run in Node, load the same sources as a folder, run 40,000 cycles of DIP to LED and replay a switch change from a checkpoint; recordings and waveforms must be identical. Also folder selection (testbenches, a Vivado `.runs` copy, a duplicate module), re-reading on focus, a compile error, and Reset killing `vvp`. On the native page, chunked runs: a switch moved mid-run, Pause and Run, a breakpoint, *Real time*, no trace, the waveform, the mid-run display against the same point shown from scratch, and a 90,000-cycle run's waveform window against a run from reset. |
+| `test_verilator.js` | Native Icarus and Verilator builds (`npm run build:verilator`), a C++20 compiler (or `RVSIM_FORCE_ZIG=1` with network access, which fetches Zig); `RVSIM_CORE_DIR` optional | The Simulator setting (disabled with a tooltip in a browser); a build reported on the status line and cached by content; a 40,000-cycle run recording what Icarus records; an input change, Resume, the Wrapper-only waveform, a compile error, Reset during a build; live runs (a switch moved mid-run checked against a replay, Pause under real-time pacing, Resume, a breakpoint, typed UART input, the per-simulator cycle defaults, a 5,000,000-cycle run trimmed to its last 2,000,000, a live dump stopping at 20 MB); 200,000 cycles timed on both simulators with the waveform on and off; and, in a separate process, checkpoints (Resume, an input change and both waveforms from one, each equal to a run from reset; a corrupted checkpoint and an `initial` block with `<=` falling back to reset). |
 | `test_hdl_folder_browser.js` | Chrome (`CHROME_CHANNEL` selects another); `RVSIM_CORE_DIR` | The folder picker in headless Chrome, using an origin-private folder in place of a picked one: what loads, re-reading on focus, the handle surviving a reload, *Clear files* forgetting it, and the `webkitdirectory` fallback. |
 | `test_electron_app.js` | The desktop app (`npm install` and `npm run build:iverilog` in `electron/`), a display; `RVSIM_CORE_DIR` optional | Launches `electron/` through Playwright, or a packaged build named by `RVSIM_APP_EXE`: `app://` loading, no Node in the page, the folder button with the dialog stubbed, Run lighting the LEDs, Verilator selected in Settings and run, a switch flipped during a live run showing on the LEDs before Pause, nothing fetched for the engines, and the folder remembered across a restart. |
 
