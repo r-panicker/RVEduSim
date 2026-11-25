@@ -1,0 +1,138 @@
+# Builds the desktop app (electron/) for Linux, Windows and macOS. Icarus
+# Verilog and Verilator are built from source on each runner, so every
+# installer carries native builds for its own platform. (Zig, Verilator's
+# fallback C++ compiler, is not bundled: the app downloads it on first use
+# where the computer has no compiler.)
+#
+# Run it from the Actions tab, or push a tag named desktop-v*. The installers
+# are attached to the run as artifacts; a desktop-v* tag also gets a draft
+# GitHub release holding them.
+#
+# Signing is optional. Without secrets the macOS app is signed ad hoc (users
+# open it once with right-click > Open, or System Settings > Privacy &
+# Security > Open Anyway) and the Windows installer is unsigned (SmartScreen
+# shows "More info > Run anyway"). With these secrets set, electron-builder
+# signs, and on macOS notarizes:
+#   macOS:   CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
+#   Windows: WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD
+name: Desktop app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04,    target: linux-x64, builder: --linux --x64 }
+          - { os: windows-2022,    target: win-x64,   builder: --win --x64 }
+          - { os: macos-15,        target: mac-arm64, builder: --mac --arm64 }
+          - { os: macos-15-intel,  target: mac-x64,   builder: --mac --x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Icarus build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y autoconf gperf flex bison zlib1g-dev libbz2-dev libfl-dev help2man perl python3
+
+      - name: Icarus build tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install autoconf gperf bison flex help2man
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+
+      - name: Icarus build tools (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git make autoconf gperf flex bison perl python help2man
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-zlib mingw-w64-x86_64-bzip2
+
+      - name: Build Icarus Verilog
+        if: runner.os != 'Windows'
+        run: bash electron/scripts/build-iverilog.sh electron/iverilog/${{ matrix.target }}
+
+      - name: Build Icarus Verilog (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash electron/scripts/build-iverilog.sh electron/iverilog/${{ matrix.target }}
+
+      - name: Build Verilator
+        if: runner.os != 'Windows'
+        run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
+
+      - name: Build Verilator (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
+
+      - name: Install
+        working-directory: electron
+        run: npm ci
+
+      # The same checks as on a developer's machine, against this runner's build.
+      - name: Native engine against WASM
+        working-directory: riscv_simulator_tests
+        run: npm ci && node test_hdl_native.js
+
+      # Verilator against Icarus. The runners have a C++ compiler; on Windows
+      # it is MSYS2's, put on the PATH for this step.
+      - name: Verilator against Icarus
+        working-directory: riscv_simulator_tests
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then export PATH="/c/msys64/mingw64/bin:$PATH"; fi
+          node test_verilator.js
+
+      - name: Package
+        working-directory: electron
+        shell: bash
+        env:
+          CSC_LINK: ${{ runner.os == 'Windows' && secrets.WIN_CSC_LINK || secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          extra=""
+          if [ "$RUNNER_OS" = "macOS" ] && [ -z "$CSC_LINK" ]; then extra="-c.mac.identity=- -c.mac.notarize=false"; fi
+          if [ -z "$CSC_LINK" ]; then export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
+          npx electron-builder ${{ matrix.builder }} --publish never $extra
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rvedusim-${{ matrix.target }}
+          path: |
+            electron/dist/*.AppImage
+            electron/dist/*.exe
+            electron/dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/*

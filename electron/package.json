@@ -1,0 +1,77 @@
+{
+  "name": "rvedusim",
+  "productName": "RVEduSim",
+  "version": "24.128.0",
+  "description": "RISC-V functional and HDL simulator, with Icarus Verilog built in",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build:iverilog": "node -e \"const o={darwin:'mac',win32:'win'}[process.platform]||process.platform;console.log('iverilog/'+o+'-'+process.arch)\" | xargs bash scripts/build-iverilog.sh",
+    "dist": "electron-builder --publish never",
+    "build:verilator": "node -e \"const o={darwin:'mac',win32:'win'}[process.platform]||process.platform;console.log('verilator/'+o+'-'+process.arch)\" | xargs bash scripts/build-verilator.sh"
+  },
+  "build": {
+    "appId": "io.github.r-panicker.rvedusim",
+    "productName": "RVEduSim",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "hdl_native.js",
+      "verilator_native.js",
+      "package.json",
+      "build/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../riscv_simulator.html",
+        "to": "web/riscv_simulator.html"
+      },
+      {
+        "from": "../vendor",
+        "to": "web/vendor",
+        "filter": [
+          "**/*",
+          "!README.md"
+        ]
+      },
+      {
+        "from": "../examples",
+        "to": "web/examples"
+      },
+      {
+        "from": "iverilog/${os}-${arch}",
+        "to": "iverilog"
+      },
+      {
+        "from": "verilator/${os}-${arch}",
+        "to": "verilator"
+      }
+    ],
+    "linux": {
+      "target": "AppImage",
+      "category": "Education"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.education",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  }
+}

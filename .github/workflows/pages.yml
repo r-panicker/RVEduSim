@@ -1,0 +1,43 @@
+# Publishes the simulator to GitHub Pages at <owner>.github.io/<repository>/,
+# with riscv_simulator.html as the index. Only what the page loads is published.
+# Pages must be set to deploy from GitHub Actions (Settings > Pages > Source).
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          mkdir _site
+          cp -r riscv_simulator.html riscv_simulator.md riscv_simulator_specs.md examples vendor _site/
+          cp riscv_simulator.html _site/index.html
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
