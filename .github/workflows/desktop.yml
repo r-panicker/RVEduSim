@@ -109,7 +109,10 @@ jobs:
         run: |
           extra=""
           if [ "$RUNNER_OS" = "macOS" ] && [ -z "$CSC_LINK" ]; then extra="-c.mac.identity=- -c.mac.notarize=false"; fi
-          if [ -z "$CSC_LINK" ]; then export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
+          # A secret that is not set arrives as an empty variable, which
+          # electron-builder would take for a certificate path.
+          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
+          for v in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do [ -n "${!v}" ] || unset "$v"; done
           npx electron-builder ${{ matrix.builder }} --publish never $extra
 
       - uses: actions/upload-artifact@v4

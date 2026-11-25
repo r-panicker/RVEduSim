@@ -17,6 +17,12 @@ case "$(uname -s)" in
   Linux|MINGW*|MSYS*) EXTRA_LDFLAGS="-static-libstdc++ -static-libgcc" ;;
   *)                  EXTRA_LDFLAGS="" ;;
 esac
+# Homebrew's flex generates the lexer, so its FlexLexer.h has to be the one
+# included, not the older copy in Apple's command line tools. Homebrew's
+# include folder is not searched by default on Apple silicon.
+if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null && [ -f "$(brew --prefix flex)/include/FlexLexer.h" ]; then
+  export CPATH="$(brew --prefix flex)/include${CPATH:+:$CPATH}"
+fi
 ./configure --quiet --prefix="$WORK/inst" LDFLAGS="$EXTRA_LDFLAGS" >/dev/null
 make -s -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
 make -s install >/dev/null
