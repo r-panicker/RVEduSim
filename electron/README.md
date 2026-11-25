@@ -17,6 +17,7 @@ measured speed, are in [§5.18 of the specs](../riscv_simulator_specs.md#518-the
 | `build/entitlements.mac.plist` | macOS hardened-runtime entitlements; `ivl` and `vvp` load plugins at run time |
 | `build/icon.svg`, `build/icon.png` | The page's favicon at 1024 px; electron-builder makes the `.icns` and `.ico` from the PNG |
 | `../.github/workflows/desktop.yml` | Builds the installers for all three platforms |
+| `../.github/workflows/toolchain.yml`, `scripts/toolchain-key.js` | Builds Icarus and Verilator for every platform once, as a prerelease the installer workflow downloads |
 
 `iverilog/`, `verilator/`, `node_modules/` and `dist/` are build output and not committed.
 
@@ -52,6 +53,13 @@ platform's Icarus, so every platform is built on its own machine; the
 [workflow](../.github/workflows/desktop.yml) does that on GitHub's runners. Start it
 from the Actions tab, or push a tag `desktop-v<version>`, which also makes a draft
 release holding the installers. The version shown is `version` in `package.json`.
+
+The workflow does not build Icarus and Verilator itself when the
+[Toolchain workflow](../.github/workflows/toolchain.yml) has published them: it downloads
+the prerelease named `toolchain-<hash>`, where the hash is of the two build scripts
+(`node scripts/toolchain-key.js` prints it). After changing either build script, run the
+Toolchain workflow from the Actions tab; until then the installer workflow builds them
+from source as a fallback.
 
 The page and its resources come from the repository at build time
 (`riscv_simulator.html`, `vendor/`, `examples/`), so an installer carries whatever the

@@ -206,8 +206,10 @@ function createVerilator({ root, cacheDir }) {
   // The variables of the makefiles Verilator writes, which say which runtime
   // files the model needs and the -D flags it is compiled with.
   function readMk(objDir) {
+    // Verilator writes them with CRLF line ends on Windows.
     const mk = ['V' + TOP + '.mk', 'V' + TOP + '_classes.mk']
-      .map(n => { try { return fs.readFileSync(path.join(objDir, n), 'utf8'); } catch (e) { return ''; } }).join('\n');
+      .map(n => { try { return fs.readFileSync(path.join(objDir, n), 'utf8'); } catch (e) { return ''; } }).join('\n')
+      .replace(/\r\n/g, '\n');
     const vars = {};
     for (const m of mk.matchAll(/^([A-Z_]+)\s*[+:]?=\s*((?:.*\\\n)*.*)$/gm)) {
       vars[m[1]] = ((vars[m[1]] || '') + ' ' + m[2].replace(/\\\n/g, ' ')).trim();

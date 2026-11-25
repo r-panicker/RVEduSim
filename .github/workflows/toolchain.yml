@@ -1,0 +1,96 @@
+# Builds Icarus Verilog and Verilator for each platform the desktop app ships
+# on, and keeps them as a prerelease that the desktop workflow downloads
+# instead of building them. The release is named after a hash of the two build
+# scripts, which pin the versions (electron/scripts/toolchain-key.js), so it
+# is needed again only when a build script changes. Run it from the Actions
+# tab; a release that already exists for these scripts is replaced.
+name: Toolchain
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04,    target: linux-x64, builder: --linux --x64 }
+          - { os: windows-2022,    target: win-x64,   builder: --win --x64 }
+          - { os: macos-15,        target: mac-arm64, builder: --mac --arm64 }
+          - { os: macos-15-intel,  target: mac-x64,   builder: --mac --x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Icarus build tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y autoconf gperf flex bison zlib1g-dev libbz2-dev libfl-dev help2man perl python3
+
+      - name: Icarus build tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install autoconf gperf bison flex help2man
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+
+      - name: Icarus build tools (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git make autoconf gperf flex bison perl python help2man
+            mingw-w64-x86_64-gcc mingw-w64-x86_64-zlib mingw-w64-x86_64-bzip2
+
+      - name: Build Icarus Verilog
+        if: runner.os != 'Windows'
+        run: bash electron/scripts/build-iverilog.sh electron/iverilog/${{ matrix.target }}
+
+      - name: Build Icarus Verilog (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash electron/scripts/build-iverilog.sh electron/iverilog/${{ matrix.target }}
+
+      - name: Build Verilator
+        if: runner.os != 'Windows'
+        run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
+
+      - name: Build Verilator (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
+
+      - name: Pack
+        shell: bash
+        run: tar -czf toolchain-${{ matrix.target }}.tar.gz -C electron iverilog/${{ matrix.target }} verilator/${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: toolchain-${{ matrix.target }}
+          path: toolchain-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(node electron/scripts/toolchain-key.js)
+          gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" dist/toolchain-*.tar.gz --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "Toolchain $tag" \
+            --notes "Icarus Verilog and Verilator built by the Toolchain workflow for the desktop workflow to package. Not an app release."

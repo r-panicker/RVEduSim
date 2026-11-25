@@ -10,7 +10,7 @@ Runs in the browser with nothing to install, or as a desktop app on Windows, mac
 
 [![Pages](https://github.com/r-panicker/RVEduSim/actions/workflows/pages.yml/badge.svg)](https://github.com/r-panicker/RVEduSim/actions/workflows/pages.yml)
 [![Desktop app](https://github.com/r-panicker/RVEduSim/actions/workflows/desktop.yml/badge.svg)](https://github.com/r-panicker/RVEduSim/actions/workflows/desktop.yml)
-[![Latest release](https://img.shields.io/github/v/release/r-panicker/RVEduSim?include_prereleases&sort=semver)](https://github.com/r-panicker/RVEduSim/releases)
+[![Latest release](https://img.shields.io/github/v/release/r-panicker/RVEduSim)](https://github.com/r-panicker/RVEduSim/releases)
 
 **[Open in the browser](https://r-panicker.github.io/RVEduSim/)** · [Download the desktop app](https://github.com/r-panicker/RVEduSim/releases/latest) · [User guide](riscv_simulator.md) · [Specification](riscv_simulator_specs.md)
 

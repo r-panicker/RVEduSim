@@ -1,6 +1,7 @@
-# Builds the desktop app (electron/) for Linux, Windows and macOS. Icarus
-# Verilog and Verilator are built from source on each runner, so every
-# installer carries native builds for its own platform. (Zig, Verilator's
+# Builds the desktop app (electron/) for Linux, Windows and macOS. Every
+# installer carries native Icarus Verilog and Verilator for its own platform,
+# taken from the Toolchain workflow's release for the current build scripts,
+# or built from source on the runner when there is none. (Zig, Verilator's
 # fallback C++ compiler, is not bundled: the app downloads it on first use
 # where the computer has no compiler.)
 #
@@ -34,25 +35,42 @@ jobs:
           - { os: macos-15-intel,  target: mac-x64,   builder: --mac --x64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
+      # Icarus and Verilator come prebuilt from the Toolchain workflow's release
+      # for these build scripts; without one they are built here.
+      - name: Fetch toolchain
+        id: toolchain
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(node electron/scripts/toolchain-key.js)
+          if gh release download "$tag" -p "toolchain-${{ matrix.target }}.tar.gz" -D .toolchain; then
+            tar -xzf ".toolchain/toolchain-${{ matrix.target }}.tar.gz" -C electron
+            echo "Using $tag:"; cat electron/iverilog/${{ matrix.target }}/VERSION electron/verilator/${{ matrix.target }}/VERSION
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No $tag release for ${{ matrix.target }}: building the toolchain (run the Toolchain workflow to keep one)"
+          fi
+
       - name: Icarus build tools (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.toolchain.outputs.hit != 'true'
         run: sudo apt-get update && sudo apt-get install -y autoconf gperf flex bison zlib1g-dev libbz2-dev libfl-dev help2man perl python3
 
       - name: Icarus build tools (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.toolchain.outputs.hit != 'true'
         run: |
           brew install autoconf gperf bison flex help2man
           echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
 
       - name: Icarus build tools (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.toolchain.outputs.hit != 'true'
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -62,20 +80,20 @@ jobs:
             mingw-w64-x86_64-gcc mingw-w64-x86_64-zlib mingw-w64-x86_64-bzip2
 
       - name: Build Icarus Verilog
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && steps.toolchain.outputs.hit != 'true'
         run: bash electron/scripts/build-iverilog.sh electron/iverilog/${{ matrix.target }}
 
       - name: Build Icarus Verilog (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.toolchain.outputs.hit != 'true'
         shell: msys2 {0}
         run: bash electron/scripts/build-iverilog.sh electron/iverilog/${{ matrix.target }}
 
       - name: Build Verilator
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && steps.toolchain.outputs.hit != 'true'
         run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
 
       - name: Build Verilator (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.toolchain.outputs.hit != 'true'
         shell: msys2 {0}
         run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
 
@@ -115,7 +133,7 @@ jobs:
           for v in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do [ -n "${!v}" ] || unset "$v"; done
           npx electron-builder ${{ matrix.builder }} --publish never $extra
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: rvedusim-${{ matrix.target }}
           path: |
@@ -131,11 +149,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           draft: true
           files: dist/*
