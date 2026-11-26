@@ -243,7 +243,7 @@ export function dpPhases(m: DpEval) {
   const c = m.ctrl;
   const fmt = ({ 0x33: 'R', 0x13: 'I', 0x03: 'I', 0x67: 'I', 0x23: 'S', 0x63: 'B', 0x6F: 'J', 0x17: 'U', 0x37: 'U' } as Record<number, string>)[m.op] ?? '';
   const uses = { rs1: 'RISB'.includes(fmt), rs2: 'RSB'.includes(fmt), rd: 'RIUJ'.includes(fmt) };
-  const bin = (v: { toString: (arg0: number) => string; }, n: number) => v.toString(2).padStart(n, '0');
+  const bin = (v: number, n: number) => v.toString(2).padStart(n, '0');
   const ctl = (name: string, text?: string): DpRouteUse => [name, /x/.test(dpCtrlValue(c, name)) ? 'x' : 'ctrl', text || dpCtrlValue(c, name)];
   // A 2-bit select bus: the trunk carries the value, and each bit's own
   // branch is a don't-care or not on its own account.
@@ -1202,7 +1202,7 @@ export function pdpHazardNotes(m: PdpModel) {
       ? 'PCSrcE: the jump or taken branch in E redirects the PC, and FlushD and FlushE squash the two instructions behind it'
       : 'PCSrcE redirects the PC, but branch flushing is switched off: the two instructions behind it carry on');
   }
-  const off = [];
+  const off: string[] = [];
   if (!H.fwdE) off.push('M/W to E forwarding');
   if (!H.fwdD) off.push('W to D forwarding');
   if (!H.fwdM) off.push('the mem-mem copy');
@@ -1555,7 +1555,7 @@ export function setDpHeight(px: number | null, persist: boolean) {
 }
 
 export function dpSavedHeight() {
-  let v = null;
+  let v: number | null = null;
   try { v = parseInt(localStorage.getItem(DP_H_KEY) || '', 10); } catch (e) { v = null; }
   return Number.isFinite(v) ? v : DP_H_DEFAULT;
 }

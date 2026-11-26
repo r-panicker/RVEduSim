@@ -88,7 +88,7 @@ export async function hdlWithBusy<T>(fn: () => Promise<T> | T): Promise<T | null
 // middle of a run that was given the old one. Once the run is done the
 // change goes on the timeline where the recording now stands, and the
 // run is replayed with it.
-export function hdlCatchUpInputs(before: { [x: string]: any; dip?: number; pb?: number; accel?: number; adrdy?: boolean; }) {
+export function hdlCatchUpInputs(before: ReturnType<typeof hdlCurrentInputs>) {
   if (ui.engine !== 'hdl' || hdlActivity.running) return;
   let again = hdlRec.pendingResim;
   hdlRec.pendingResim = false;

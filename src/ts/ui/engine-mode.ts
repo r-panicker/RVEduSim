@@ -12,6 +12,7 @@ import { updateRegisters } from './panels';
 import { updateToolbarButtonStates } from './run-control';
 import { hdlInitSimulator, hdlRefreshRegPathHint, hdlSimulatorName, initWaveCanvas, initWavePicker, initWaveResizer, updateWaveAvailability } from './waveform';
 import { byId } from './dom';
+import { errorMessage } from '../errors';
 
 export function setSimEngineMode(mode: string) {
   const want = (mode === 'hdl') ? 'hdl' : 'js';
@@ -57,7 +58,7 @@ export function setSimEngineMode(mode: string) {
     } else {
       setStatus('HDL mode - Run and Step execute your Verilog through ' + hdlSimulatorName(), 'info');
     }
-    loadHdlEngine().catch(e => hdlLog(String(e.message || e), 'err'));
+    loadHdlEngine().catch((e: unknown) => hdlLog(errorMessage(e), 'err'));
   } else {
     // Leave registers, memory and peripherals exactly as the recording
     // left them: the functional engine carries straight on from here.
@@ -90,7 +91,7 @@ export function initConsoleResizer() {
   const bar = byId('consoleResizer');
   const el = byId('console');
   if (!bar || !el) return;
-  let saved = null;
+  let saved: number | null = null;
   try { saved = parseInt(localStorage.getItem(CONSOLE_H_KEY) || '', 10); } catch (e) { saved = null; }
   if (Number.isFinite(saved)) setConsoleHeight(saved, false);
 

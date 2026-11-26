@@ -14,7 +14,7 @@ import { decodeAndExecute, fetchInstruction } from '../machine/execute';
 import { readMem } from '../machine/memory';
 import { DEFAULT_BASE, DEFAULT_DATA_BASE } from '../machine/memory-map';
 import { PIPE_BP_DEFAULT, PIPE_HAZ_DEFAULT, pipeline } from '../machine/pipeline';
-import { cpu, layout, program, run, uart, ui, type CycleConfig } from '../machine/state';
+import { cpu, layout, program, run, uart, ui, type CycleConfig, type MachineLine, type PlacedLine } from '../machine/state';
 import { uartTickDelivery } from '../machine/uart';
 import { updateDisassembly, updateMachineCode } from './disassembly';
 import { RISCV_INSTRUCTIONS_SET, editor, log, setExecLineEffect, setPipeStagesEffect, setStatus } from './editor';
@@ -185,7 +185,7 @@ export function showVisitCount() {
   if (!el || !visitCounterOn()) return;
   fetch('https://' + GOATCOUNTER_SITE + '.goatcounter.com/counter/' + encodeURIComponent(location.pathname) + '.json')
     .then(r => r.ok ? r.json() : null)
-    .then(j => { if (j && j.count) { el.textContent = j.count + ' visits'; el.hidden = false; } })
+    .then((j: { count?: number } | null) => { if (j && j.count) { el.textContent = j.count + ' visits'; el.hidden = false; } })
     .catch(() => { /* offline, or the site not set up: say nothing */ });
 }
 
@@ -240,7 +240,7 @@ export function switchSettingsTab(tabName: string) {
   if (activeContent) activeContent.classList.add('active');
 }
 
-export function parseHexAddr(str: any, fallback: number) {
+export function parseHexAddr(str: string, fallback: number) {
   let v = parseInt(String(str || '').trim(), 16);
   if (isNaN(v) || v < 0) v = fallback;
   return v & ~3; // word align
@@ -430,7 +430,7 @@ export function downloadTextFile(name: string, text: BlobPart) {
 }
 
 // Build a Verilog $readmemh-format dump of code and data memories.
-export function buildMemFileText(items: string | any[]) {
+export function buildMemFileText(items: PlacedLine[]) {
   if (!items.length) return '';
   let result = '';
   let lastAddr = -1;
@@ -453,7 +453,7 @@ export function buildMemFileText(items: string | any[]) {
 
 export function segmentItems(isData: boolean) {
   return program.machineCode
-    .filter(i => !i.error && i.bytes && (i.address >= layout.dataBase) === isData)
+    .filter((i): i is PlacedLine => !i.error && !!i.bytes && (i.address >= layout.dataBase) === isData)
     .sort((a, b) => a.address - b.address);
 }
 
@@ -555,17 +555,17 @@ export function highlightCurrentLine() {
 
 // CodeMirror's scrollIntoView also scrolls every scrollable ancestor, so
 // on a phone each step would drag the page back up to the editor.
-export function centreEditorLine(pos: any) {
-  const sc = editorState.cm.scrollDOM;
+export function centreEditorLine(pos: number) {
+  const sc: HTMLElement = editorState.cm.scrollDOM;
   if (!sc.clientHeight) return;
-  const blk = editorState.cm.lineBlockAt(pos);
-  const docTop = editorState.cm.documentTop - sc.getBoundingClientRect().top + sc.scrollTop;
+  const blk: CmBlockInfo = editorState.cm.lineBlockAt(pos);
+  const docTop: number = editorState.cm.documentTop - sc.getBoundingClientRect().top + sc.scrollTop;
   sc.scrollTop = Math.max(0, docTop + blk.top + blk.height / 2 - sc.clientHeight / 2);
   sc.scrollLeft = 0;
 }
 
 export function findNextValidInstructionLine(targetLine: number) {
-  const totalLines = editorState.cm ? editorState.cm.state.doc.lines : (editor ? editor.value.split('\n').length : 1);
+  const totalLines: number = editorState.cm ? editorState.cm.state.doc.lines : (editor ? editor.value.split('\n').length : 1);
   if (targetLine < 1) targetLine = 1;
   if (targetLine > totalLines) targetLine = totalLines;
 
@@ -596,7 +596,7 @@ export function findNextValidInstructionLine(targetLine: number) {
 
   // 1. If currently assembled and code is up to date, use program.machineCode source mapping
   if (program.assembled && Array.isArray(program.machineCode) && program.machineCode.length > 0 && editorState.lastAssembledCode === (editor ? editor.value : null)) {
-    const validLines: any[] = [];
+    const validLines: number[] = [];
     for (const item of program.machineCode) {
       if (!item.error && item.line && !validLines.includes(item.line)) {
         validLines.push(item.line);
@@ -761,14 +761,14 @@ export function uartClockTick() {
   }
 }
 
-export function firstExecutableLine(mc: any) {
+export function firstExecutableLine(mc: MachineLine[]) {
   for (const item of mc) {
     if (!item.error && item.bytes) return item.line;
   }
   return -1;
 }
 
-export function highlightFirstLine(mc: any[]) {
+export function highlightFirstLine(mc: MachineLine[]) {
   run.currentLine = firstExecutableLine(mc);
   highlightCurrentLine();
 }

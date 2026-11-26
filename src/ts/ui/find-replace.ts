@@ -132,7 +132,7 @@ export function findPrev() {
   selectFindMatch(editorState.find.activeIndex, false);
 }
 
-export function handleFindKey(e: { key: string; preventDefault: () => void; shiftKey: any; }) {
+export function handleFindKey(e: KeyboardEvent) {
   if (e.key === 'Enter') {
     e.preventDefault();
     if (e.shiftKey) findPrev();
@@ -180,9 +180,9 @@ export function replaceAll() {
   }
 }
 
-export function scrollToCursor(ed: { value: any; selectionStart: any; selectionEnd: any; scrollTop: any; scrollLeft: any; focus(): void; setSelectionRange(start: any, end: any): void; }) {
+export function scrollToCursor(_ed: typeof editor) {
   if (editorState.cm) {
-    const pos = editorState.cm.state.selection.main.head;
+    const pos: number = editorState.cm.state.selection.main.head;
     editorState.cm.dispatch({
       effects: CM6.EditorView.scrollIntoView(pos, { y: 'center' })
     });
@@ -209,13 +209,13 @@ export function initCodeMirrorEditor() {
   // reference to BAKED_ASM_EXAMPLE rather than a second copy of it.
   const initialText = BAKED_ASM_EXAMPLE;
 
-  const startState = CM6.EditorState.create({
+  const startState: CmState = CM6.EditorState.create({
     doc: initialText,
     extensions: [
       CM6.lineNumbers({
         domEventHandlers: {
-          mousedown(view: { state: { doc: { lineAt: (arg0: any) => { (): any; new(): any; number: any; }; }; }; }, line: { from: any; }, event: any) {
-            const lineNo = view.state.doc.lineAt(line.from).number;
+          mousedown(view: CmView, line: CmBlockInfo, _event: MouseEvent) {
+            const lineNo: number = view.state.doc.lineAt(line.from).number;
             toggleBreakpoint(lineNo);
             return true;
           }
@@ -224,15 +224,15 @@ export function initCodeMirrorEditor() {
       breakpointGutter,
       execLineField,
       pipeStagesField,
-      CM6.gutter({ class: 'cm-pipe-gutter', markers: (v: { state: { field: (arg0: null) => { state: { field: (arg0: null) => any; }; }; }; }) => v.state.field(pipeStagesField) }),
+      CM6.gutter({ class: 'cm-pipe-gutter', markers: (v: CmView) => v.state.field(pipeStagesField) }),
       signatureHelpField,
       riscvHoverTooltip,
       CM6.EditorView.domEventHandlers({
-        click(event: { clientX: any; clientY: any; }, view: { posAtCoords: (arg0: { x: any; y: any; }) => any; state: { doc: { lineAt: (arg0: any) => any; }; }; }) {
+        click(event: MouseEvent, view: CmView) {
           if (editorState.language !== 'c') return false;
-          const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+          const pos: number | null = view.posAtCoords({ x: event.clientX, y: event.clientY });
           if (pos == null) return false;
-          const line = view.state.doc.lineAt(pos);
+          const line: CmLine = view.state.doc.lineAt(pos);
           const col = pos - line.from;
           const lineText = line.text;
           const commentIdx = lineText.indexOf('//');
@@ -270,11 +270,11 @@ export function initCodeMirrorEditor() {
         ...CM6.completionKeymap,
         {
           key: "Tab",
-          run: (view: { state: any; dispatch: any; }) => {
+          run: (view: CmView) => {
             if (CM6.acceptCompletion && CM6.acceptCompletion(view)) return true;
             const { state, dispatch } = view;
-            if (state.selection.ranges.every((r: { empty: { empty: any; }; }) => r.empty)) {
-              dispatch(state.changeByRange((range: { from: number; }) => ({
+            if (state.selection.ranges.every((r: CmSelectionRange) => r.empty)) {
+              dispatch(state.changeByRange((range: CmSelectionRange) => ({
                 changes: { from: range.from, insert: '	' },
                 range: CM6.EditorSelection.cursor(range.from + 1)
               })));
@@ -321,8 +321,8 @@ export function initCodeMirrorEditor() {
         },
         {
           key: "F9",
-          run: (view: { state: { doc: { lineAt: (arg0: any) => { (): any; new(): any; number: any; }; }; selection: { main: { head: any; }; }; }; }) => {
-            const lineNo = view.state.doc.lineAt(view.state.selection.main.head).number;
+          run: (view: CmView) => {
+            const lineNo: number = view.state.doc.lineAt(view.state.selection.main.head).number;
             toggleBreakpoint(lineNo);
             return true;
           }
@@ -336,7 +336,7 @@ export function initCodeMirrorEditor() {
           run: () => { saveFile(); return true; }
         }
       ]),
-      CM6.EditorView.updateListener.of((update: { docChanged: any; }) => {
+      CM6.EditorView.updateListener.of((update: CmViewUpdate) => {
         if (update.docChanged) {
           updateEditor();
         }

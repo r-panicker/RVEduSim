@@ -887,6 +887,29 @@ setTimeout(async () => {
     console.log('MMIO straddle, unmapped words, and panel edits verified');
     console.log('✅ Encodings, FP register file, atomics and MMIO edges verified!');
 
+    // Opening a file: a program goes to the editor (and, being assembly, is
+    // assembled); a Verilog source goes to the HDL sources instead.
+    const openFile = async (name, text) => {
+      const input = doc.getElementById('fileLoader');
+      const f = new win.File([text], name);
+      if (!f.text) f.text = async () => text;   // jsdom's File has no text()
+      Object.defineProperty(input, 'files', { configurable: true, value: [f] });
+      input.dispatchEvent(new win.Event('change'));
+      for (let t = 0; t < 100 && !doc.getElementById('console').textContent.includes(name); t++) await new Promise(r => setTimeout(r, 20));
+    };
+    win.setLanguageMode('asm');
+    doc.getElementById('console').innerHTML = '';
+    await openFile('opened.s', '.text\nmain: addi t0, zero, 7\nhalt: j halt\n');
+    if (!win.editor.value.includes('addi t0, zero, 7')) throw new Error('an opened .s file did not reach the editor');
+    if (!win.eval('program.assembled')) throw new Error('an opened .s file was not assembled');
+    const filesBefore = win.eval('hdlSources.files.length');
+    doc.getElementById('console').innerHTML = '';
+    await openFile('opened.v', 'module opened(input a, output b); assign b = a; endmodule\n');
+    if (win.eval('hdlSources.files.length') !== filesBefore + 1 || !win.eval("hdlSources.files.some(f => f.name === 'opened.v')"))
+      throw new Error('an opened .v file did not reach the HDL sources');
+    if (win.editor.value.includes('module opened')) throw new Error('an opened .v file was put in the editor');
+    console.log('✅ Opening a file: a program goes to the editor, a Verilog source to the HDL sources');
+
     console.log('\n===========================================================');
     console.log('🎉 ALL COMPREHENSIVE TESTS PASSED WITH 100% SUCCESS!');
     console.log('===========================================================');

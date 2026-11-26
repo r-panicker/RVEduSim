@@ -5,6 +5,7 @@
 import type { HdlCheckpoint, HdlWave } from './checkpoints';
 import type { hdlMemFiles } from './memory-images';
 import type { HdlLiveRun } from './live';
+import type { HdlBase } from './seek';
 
 // Cycles a run records, per simulator: long enough to use the inputs while
 // it runs (about 11 s natively with Icarus). A post-synthesis run is
@@ -34,7 +35,7 @@ export interface HdlSource { name: string; src: string; isPrebuilt?: boolean; fo
 export interface HdlFolder {
   kind: 'native' | 'handle' | 'snapshot'; name: string;
   pending: boolean; excluded: Set<string>;
-  path?: string; handle?: any;
+  path?: string; handle?: DirHandle;
 }
 
 export const hdlSources = {
@@ -83,7 +84,7 @@ export interface HdlTrace {
   lastCyc?: number;                                        // the latest cycle a record named
   budget: number;                                          // cycles recorded
   offset?: number;                                         // instructions folded into base (Verilator)
-  base?: any;                                              // the state those instructions left
+  base?: HdlBase;                                          // the state those instructions left
   timeline?: HdlTimeline;                                  // the inputs it was recorded with
   joinKey?: string;                                        // what a later run must match to join on
   regBank?: string | null;                                 // the register file's path, if found
@@ -98,7 +99,9 @@ export const hdlRec = {
   rx: [] as TimedByte[],           // UART bytes on the timeline
   base: { dip: 0, pb: 0, accel: 0, adrdy: true },   // inputs at cycle 0
   regKnown: new Uint8Array(32),    // has the hardware written this register yet?
-  seekMark: null as any,           // { trace, idx, acks } as the last seek left them
+  // Where the last seek left the page: the recording and index, the UART
+  // acknowledgements counted, and how far into the last step's records it applied.
+  seekMark: null as { trace: HdlTrace | null; idx: number; acks: number; tail?: number[] | null } | null,
   // A second input moved while the first is still re-simulating must not
   // be dropped, or the recording would stop matching the switches.
   pendingResim: false,

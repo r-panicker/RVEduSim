@@ -159,7 +159,7 @@ export function hdlCkModules() {
     // Attributes go too, minding that `@(*)` is not one.
     const src = hdlStripNoise(f.src).replace(/\(\*(?!\s*\))[\s\S]*?\*\)/g, ' ');
     const re = /\bmodule\s+([A-Za-z_]\w*)/g;
-    let m;
+    let m: RegExpExecArray | null;
     while ((m = re.exec(src)) !== null) {
       const end = src.indexOf('endmodule', m.index);
       if (!mods.has(m[1])) mods.set(m[1], src.slice(m.index, end < 0 ? src.length : end));
@@ -195,7 +195,7 @@ export function hdlCkSplit(s: string) {
 // The names a declaration declares, after its keyword: `[7:0] a, b [0:3] = ...`.
 export function hdlCkDeclarators(text: string) {
   let t = text.replace(/^\s*(signed|unsigned)\b/, '');
-  for (let m; (m = /^\s*\[[^\]]*\]/.exec(t)) !== null;) t = t.slice(m[0].length);
+  for (let m: RegExpExecArray | null; (m = /^\s*\[[^\]]*\]/.exec(t)) !== null;) t = t.slice(m[0].length);
   t = t.replace(/^\s*(signed|unsigned)\b/, '');
   return hdlCkSplit(t).map(d => {
     const m = /^\s*(\\\S+|[A-Za-z_][\w$]*)\s*((?:\[[^\]]*\]\s*)*)/.exec(d);
@@ -245,7 +245,7 @@ export function hdlCkScan(body: string, mods: Map<string, string>):
   // taken for one of the module's.
   const re = /\\\S+|[A-Za-z_][\w$]*/g;
   re.lastIndex = i;
-  let depth = 0, m;
+  let depth = 0, m: RegExpExecArray | null;
   while ((m = re.exec(body)) !== null) {
     const w = m[0];
     if (/^(begin|fork|case|casex|casez)$/.test(w)) { depth++; continue; }
@@ -300,7 +300,7 @@ export function hdlCkHeld(body: string) {
   const held = new Set<string>();
   const re = /\b(always_ff|always_latch|always_comb|always|task)\b/g;
   const stop = /\b(always_ff|always_latch|always_comb|always|initial|assign|task|function|endmodule)\b/g;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = re.exec(body)) !== null) {
     const i = re.lastIndex;
     if (m[1] === 'always_comb' || (m[1] === 'always' && /^\s*@\s*(\*|\(\s*\*\s*\))/.test(body.slice(i, i + 40)))) continue;
@@ -506,7 +506,7 @@ export function hdlVcdFold(s: string, end: number, vals: Map<string, string>, fi
 // Where the first timestamp after `t` starts, searching forward or back.
 export function hdlVcdAfter(s: string, t: number) {
   const re = /^#(\d+)$/gm;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = re.exec(s)) !== null) if (+m[1] > t) return m.index;
   return s.length;
 }

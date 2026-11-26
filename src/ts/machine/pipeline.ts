@@ -296,7 +296,7 @@ export function pipeClock(s: Signals): void {
   if (M && M.MemtoReg) readData = pipeLoad(M.aluResult, M.f3, false);
   if (M && M.MemWrite) pipeStore(M.aluResult, s.writeDataM, M.f3);
 
-  let redirect = null;
+  let redirect: number | null = null;
   if (s.serialExec && D) {
     const instr = D.instr;
     const exiting = D.dec.op === 0x73 && D.dec.f3 === 0 && (instr >>> 20) === 0 &&
@@ -390,7 +390,7 @@ export function pipeCopy(p: PipeRegs): PipeRegs {
 
 // One line for the log: what the hazard unit did this cycle.
 export function pipeEvents(s: Signals): string {
-  const ev = [];
+  const ev: string[] = [];
   if (s.lwStall) ev.push('load-use stall');
   if (s.drain) ev.push('draining for a serial instruction');
   if (s.serialExec) ev.push('serial instruction executed in Decode');
@@ -400,7 +400,7 @@ export function pipeEvents(s: Signals): string {
   } else if (s.pcSrcE) {
     ev.push('taken to 0x' + s.target!.toString(16) + (s.flushD ? ', D and E flushed' : ', no flush'));
   }
-  const f = [];
+  const f: string[] = [];
   if (s.forwardAE !== '00') f.push('ForwardAE=' + s.forwardAE);
   if (s.forwardBE !== '00') f.push('ForwardBE=' + s.forwardBE);
   if (s.forward1D) f.push('Forward1D');

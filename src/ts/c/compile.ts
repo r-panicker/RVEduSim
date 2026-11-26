@@ -65,7 +65,7 @@ export function stripCCommentsAndStrings(line: string | string[]) {
   return out;
 }
 
-export function buildCVariableLocations(sourceText: string, mc: any[]) {
+export function buildCVariableLocations(sourceText: string, mc: MachineLine[]) {
   cProgram.functionLocals = new Map();
   if (!sourceText || !mc || !mc.length) return;
   const rawLines = sourceText.split('\n');
@@ -91,7 +91,7 @@ export function buildCVariableLocations(sourceText: string, mc: any[]) {
       }
     }
     if (endLine === -1) continue;
-    const params: any[] = [];
+    const params: string[] = [];
     const paramsRaw = m[2].trim();
     if (paramsRaw && paramsRaw !== 'void') {
       paramsRaw.split(',').forEach((p) => {
@@ -222,11 +222,11 @@ export function highlightFirstCLine(mc: MachineLine[]) {
   highlightCurrentLine();
 }
 
-export function warnAboutLibgccHelpers(asm: any, optLevel: string) {
-  const names = new Set();
+export function warnAboutLibgccHelpers(asm: GodboltAsmLine[] | undefined, optLevel: string) {
+  const names = new Set<string>();
   for (const item of (asm || [])) {
     const t = (item && item.text) || '';
-    let m;
+    let m: RegExpExecArray | null;
     LIBGCC_HELPER_RE.lastIndex = 0;
     while ((m = LIBGCC_HELPER_RE.exec(t)) !== null) names.add(m[0]);
   }
@@ -247,7 +247,7 @@ export function warnAboutLibgccHelpers(asm: any, optLevel: string) {
   setStatus(`\u26a0\ufe0f Multiply/divide without the M extension \u2014 ${list} cannot be resolved`, 'warn');
 }
 
-export async function compileAndAssembleC(cSourceText?: undefined) {
+export async function compileAndAssembleC(cSourceText?: string) {
   const source = (typeof cSourceText === 'string') ? cSourceText : (editor ? editor.value : '');
   if (!source.trim()) {
     log('No C code to compile.', 'error');
@@ -266,7 +266,7 @@ export async function compileAndAssembleC(cSourceText?: undefined) {
   setStatus(`Compiling C with Godbolt (${compilerId}, ${optLevel})...`, 'info');
   log(`Compiling C code via Godbolt Compiler Explorer (${compilerId}, ${optLevel}, ${archFlags})...`, 'info');
 
-  let godboltData = null;
+  let godboltData: GodboltResponse | null = null;
 
   // 1. Try Live Godbolt API request
   if (typeof fetch === 'function') {
@@ -302,7 +302,7 @@ export async function compileAndAssembleC(cSourceText?: undefined) {
       if (timeoutId) clearTimeout(timeoutId);
 
       if (resp && resp.ok) {
-        godboltData = await resp.json();
+        godboltData = await resp.json() as GodboltResponse;
       } else if (resp) {
         log(`Godbolt HTTP ${resp.status} status.`, 'warn');
       }
@@ -335,9 +335,9 @@ export async function compileAndAssembleC(cSourceText?: undefined) {
   if (godboltData.code !== 0 && (!godboltData.asm || godboltData.asm.length === 0)) {
     let errText = '';
     if (godboltData.stderr && Array.isArray(godboltData.stderr)) {
-      errText = godboltData.stderr.map((e: { text: { text: any; }; }) => e.text).join('\n');
+      errText = godboltData.stderr.map(e => e.text).join('\n');
     } else if (godboltData.buildResult && godboltData.buildResult.stderr) {
-      errText = godboltData.buildResult.stderr.map((e: { text: { text: any; }; }) => e.text).join('\n');
+      errText = godboltData.buildResult.stderr.map(e => e.text).join('\n');
     }
     log(`C Compilation Errors:\n${errText || 'Non-zero exit code from compiler'}`, 'error');
     setStatus('C Compilation Failed — see console log', 'error');
@@ -371,7 +371,7 @@ export async function compileAndAssembleC(cSourceText?: undefined) {
         const n = parseImm(toks[1]);
         if (n > 0) estimatedDataBytes += n;
       } else if (DATA_DIRECTIVE_WIDTH[mn]) {
-        const count = t.slice(first.length).split(',').filter((s: { trim: () => { (): any; new(): any; length: number; }; }) => s.trim().length > 0).length;
+        const count = t.slice(first.length).split(',').filter(s => s.trim().length > 0).length;
         estimatedDataBytes += count * DATA_DIRECTIVE_WIDTH[mn];
       } else if (mn === '.ascii' || mn === '.asciz' || mn === '.asciiz' || mn === '.string') {
         const qIdx = t.search(/["']/);
@@ -402,7 +402,7 @@ export async function compileAndAssembleC(cSourceText?: undefined) {
   // as a plain `call` fallback would sit) so PC running off the end of the real
   // program - for any reason - lands on a defined infinite loop instead of running
   // into unmapped memory beyond the assembled code.
-  const startup = [
+  const startup: GodboltAsmLine[] = [
     { text: '.text', source: null },
     { text: '.globl _start', source: null },
     { text: '_start:', source: null },
@@ -411,7 +411,7 @@ export async function compileAndAssembleC(cSourceText?: undefined) {
     { text: '    j main', source: null }
   ];
 
-  const haltTrap = [
+  const haltTrap: GodboltAsmLine[] = [
     { text: '.text', source: null },
     { text: '__halt:', source: null },
     { text: '    j __halt', source: null }

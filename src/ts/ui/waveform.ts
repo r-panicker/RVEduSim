@@ -311,7 +311,7 @@ export function setWaveHeight(px: number | null, persist: boolean) {
 }
 
 export function waveSavedHeight() {
-  let saved = null;
+  let saved: number | null = null;
   try { saved = parseInt(localStorage.getItem(WAVE_H_KEY) || '', 10); } catch (e) { saved = null; }
   return Number.isFinite(saved) ? saved : WAVE_H_DEFAULT;
 }
@@ -628,7 +628,7 @@ export function updateWaveHeaderAndDraw() {
     const first = waveFirstCycle(p);
     // Once the PC stops, the hardware keeps counting cycles while the
     // waveform stops; saying only "cycle 200 ... of 7" would look wrong.
-    const notes = [];
+    const notes: string[] = [];
     if (cyc > last) notes.push(`PC last advanced at cycle ${last - 1}`);
     if (cyc < first) notes.push(`the waveform starts at cycle ${first}`);
     if (waveDropped) {
@@ -730,7 +730,7 @@ export function initWaveCanvas() {
       updateWaveHeaderAndDraw();
     }
   });
-  const end = (e: { pointerId: number; clientX: any; }) => {
+  const end = (e: PointerEvent) => {
     if (!dragging) return;
     dragging = false;
     canvas.classList.remove('wave-panning');
@@ -962,12 +962,9 @@ export function drawWaveforms() {
 // The saved testbench replays the last recorded run's inputs. Before any
 // run, or in JS mode, it starts from the inputs as they are now.
 export function hdlDownloadTestbench() {
-  let run;
-  if (ui.engine === 'hdl' && hdlRec.trace) {
-    run = { cycles: hdlConfig.cycleBudget, base: hdlRec.base, stim: hdlRec.stim.slice().sort((a, b) => a.cycle - b.cycle), rx: hdlRec.rx };
-  } else {
-    run = { cycles: hdlConfig.cycleBudget, base: hdlCurrentInputs(), stim: [], rx: [] };
-  }
+  const run = ui.engine === 'hdl' && hdlRec.trace
+    ? { cycles: hdlConfig.cycleBudget, base: hdlRec.base, stim: hdlRec.stim.slice().sort((a, b) => a.cycle - b.cycle), rx: hdlRec.rx }
+    : { cycles: hdlConfig.cycleBudget, base: hdlCurrentInputs(), stim: [], rx: [] };
   downloadTextFile('cg3207_hdl_tb.v', hdlBuildTestbench({ run }));
   setStatus('Saved the testbench for this run to cg3207_hdl_tb.v; it needs AA_IROM.mem and AA_DMEM.mem beside it', 'success');
 }
@@ -998,7 +995,7 @@ export function setHdlDumpVcd(on: boolean) {
   updateWaveView();
   hdlRefreshDetail();
 }
-export function setHdlWaveTop(on: any) { hdlConfig.waveTop = !!on;   hdlRefreshDetail();
+export function setHdlWaveTop(on: boolean) { hdlConfig.waveTop = !!on;   hdlRefreshDetail();
 }
 export function setHdlLiveWave(v: string) { hdlConfig.liveWave = v === 'live' ? 'live' : 'pause';   hdlRefreshDetail();
 }
@@ -1088,7 +1085,7 @@ export function hdlInitSimulator() {
       'simulation needs Icarus.'
     : window.rvNative ? 'This build of the desktop app has no Verilator.'
     : 'Verilator is available only in the desktop app.';
-  let saved = null;
+  let saved: string | null = null;
   try { saved = localStorage.getItem(HDL_SIMULATOR_KEY); } catch (e) { /* private mode */ }
   setHdlSimulator(saved === 'verilator' ? 'verilator' : 'icarus', true);
 }
@@ -1115,13 +1112,13 @@ export function setHdlSimulator(v: string, restoring = false) {
 export function hdlSimulatorName() {
   return hdlConfig.simulator === 'verilator' ? 'Verilator' : hdlNative ? 'Icarus Verilog' : 'Icarus/WASM';
 }
-export function setHdlTrace(on: any) {
+export function setHdlTrace(on: boolean) {
   hdlConfig.traceEnabled = !!on;
   hdlDiscardTrace();
   updateToolbarButtonStates();
   hdlRefreshDetail();
 }
-export function setHdlCompare(on: any) { hdlConfig.compareEnabled = !!on;   hdlRefreshDetail();
+export function setHdlCompare(on: boolean) { hdlConfig.compareEnabled = !!on;   hdlRefreshDetail();
 }
 // Ticking this is what triggers the one-off Yosys download. If a run has
 // already been recorded, synthesise and check it now instead of waiting
@@ -1134,7 +1131,7 @@ export function setHdlSynth(on: boolean) {
   hdlRefreshDetail();
   if (!hdlConfig.synthEnabled || was) return;
   if (!hdlRec.trace || !hdlBuild.lastRtlOut) {
-    loadYosysEngine().catch(e => {
+    loadYosysEngine().catch((e: unknown) => {
       hdlLog(errorMessage(e), 'err');
       hdlStatus('the synthesiser failed to load', 'err');
     });

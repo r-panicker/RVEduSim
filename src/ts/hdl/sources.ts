@@ -2,7 +2,7 @@
 // prebuilt core, a source folder that is read again on change, and the
 // file list and Wrapper check.
 
-import { hdlLog, hdlStatus } from './engine';
+import { hdlLog, hdlStatus, hdlBridge } from './engine';
 import { hdlReportLint } from './lint';
 import { hdlSyncReferenceWrapperDepths } from './memory-images';
 import { hdlDiscardTrace } from './run';
@@ -16,14 +16,14 @@ import { updateToolbarButtonStates } from '../ui/run-control';
 import { hdlRefreshRegPathHint } from '../ui/waveform';
 import { byId } from '../ui/dom';
 import { errorMessage } from '../errors';
-export function hdlAddFiles(fileList: any[] | FileList) {
-  const pending = [];
-  for (const file of fileList) {
+export function hdlAddFiles(fileList: ArrayLike<File>) {
+  const pending: Promise<HdlSource>[] = [];
+  for (const file of Array.from(fileList)) {
     if (!/\.(v|sv|vh|svh)$/i.test(file.name)) {
       hdlLog('Skipped ' + file.name + ' (not a Verilog source)', 'warn');
       continue;
     }
-    pending.push(file.text().then((src: any) => ({ name: file.name, src })));
+    pending.push(file.text().then(src => ({ name: file.name, src })));
   }
   if (!pending.length) return Promise.resolve();
   return Promise.all(pending).then(loaded => {
@@ -102,15 +102,15 @@ export const HDL_FOLDER_SKIP = /^\.|\.(cache|runs|sim|hw|ip_user_files|gen)$|^(n
 export const HDL_SOURCE_RE = /\.(v|sv|vh|svh)$/i;
 export const HDL_FOLDER_MAX = 500;
 
-export function hdlFolderMakeState(kind: HdlFolder['kind'], name: string, extra?: { path?: string; handle?: any }): HdlFolder {
+export function hdlFolderMakeState(kind: HdlFolder['kind'], name: string, extra?: { path?: string; handle?: DirHandle }): HdlFolder {
   return Object.assign({ kind, name, pending: false, excluded: new Set<string>() }, extra);
 }
 
 // A file of a source folder, by its path in the folder.
 export interface FolderFile { path: string; src: string }
 
-export async function hdlWalkHandle(dir: any, rel: string, out: FolderFile[]): Promise<FolderFile[]> {
-  for await (const [name, entry] of dir.entries() as AsyncIterable<[string, any]>) {
+export async function hdlWalkHandle(dir: DirHandle, rel: string, out: FolderFile[]): Promise<FolderFile[]> {
+  for await (const [name, entry] of dir.entries()) {
     if (out.length >= HDL_FOLDER_MAX) break;
     const r = rel ? rel + '/' + name : name;
     if (entry.kind === 'directory') {
@@ -235,14 +235,16 @@ export function hdlReadFolder(first = false): Promise<boolean> {
     try {
       let list: FolderFile[];
       if (f.kind === 'native') {
-        list = await window.rvNative.readFolder(f.path);
+        list = await hdlBridge().readFolder(f.path ?? '');
       } else {
-        if ((await f.handle.queryPermission({ mode: 'read' })) !== 'granted') {
+        const handle = f.handle;
+        if (!handle) return false;
+        if ((await handle.queryPermission({ mode: 'read' })) !== 'granted') {
           f.pending = true;
           renderHdlFileList();
           return false;
         }
-        list = await hdlWalkHandle(f.handle, '', []);
+        list = await hdlWalkHandle(handle, '', []);
       }
       if (f !== hdlSources.folder) return false;
       return hdlApplyFolderFiles(list, first);
@@ -266,7 +268,7 @@ export async function hdlPickFolder() {
     } else if (window.showDirectoryPicker) {
       const folder = hdlSources.folder;
       if (folder && folder.pending) {
-        if ((await folder.handle.requestPermission({ mode: 'read' })) !== 'granted') return;
+        if (!folder.handle || (await folder.handle.requestPermission({ mode: 'read' })) !== 'granted') return;
         folder.pending = false;
       } else {
         const handle = await window.showDirectoryPicker({ id: 'hdl-sources', mode: 'read' });
@@ -314,7 +316,7 @@ export function hdlRenderFolderButton() {
 // One IndexedDB record holds the browser's folder handle, which
 // localStorage cannot store.
 export function hdlFolderStore(op: 'get' | 'put' | 'delete', value?: unknown) {
-  return new Promise<any>((resolve, reject) => {
+  return new Promise<unknown>((resolve, reject) => {
     if (!window.indexedDB) { resolve(null); return; }
     const open = indexedDB.open('rvsim', 1);
     open.onupgradeneeded = () => open.result.createObjectStore('kv');
@@ -358,7 +360,8 @@ export function hdlInitFolder() {
       hdlReadFolder(true);
     }
   } else if (window.showDirectoryPicker) {
-    hdlFolderStore('get').then(handle => {
+    hdlFolderStore('get').then(stored => {
+      const handle = stored as DirHandle | undefined;
       if (!handle || hdlSources.folder || hdlSources.files.length) return;
       hdlSources.folder = hdlFolderMakeState('handle', handle.name, { handle });
       hdlReadFolder(true);

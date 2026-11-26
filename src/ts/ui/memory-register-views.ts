@@ -54,7 +54,7 @@ export function updateMemoryView() {
   // When a label is NOT word-aligned, a title tooltip reveals the exact
   // byte address (hover only — zero visual clutter).
   const labelAnnotationHtml = (wordStart: number, inner: string) => {
-    const names: (string | any[] | null)[] = [];
+    const names: string[] = [];
     const offsets: number[] = [];
     for (let c = 0; c < 4; c++) {
       const offset = isStackView ? ((wordStart - c) >>> 0) : ((wordStart + c) >>> 0);
@@ -131,7 +131,7 @@ export function updateMemoryView() {
 
   // Every branch below emits the same row shape, so they share one exit
   // point - which is also where the panel's row filter gets applied.
-  const emitMemRow = (rowStart: number, hexVals: any, contentVals: string, text: string) => {
+  const emitMemRow = (rowStart: number, hexVals: string, contentVals: string, text: string) => {
     built++;
     if (!panelFindMatch('memory', text + ' ' + memRowNames(rowStart))) return;
     shown++;
@@ -205,7 +205,7 @@ export function updateMemoryView() {
         `0x${wordStart.toString(16).padStart(8, '0')} ${hexText} ${asciiText}`);
     } else if (wordMode) {
       // Word view: the one 32-bit word at this row (little-endian)
-      const offsets = [];
+      const offsets: number[] = [];
       let wordVal = 0;
       let isChanged = false;
       let allReadonly = true;
@@ -284,7 +284,7 @@ export function setMemViewMode(mode: string) {
   setStatus(memViewMode === 'word' ? 'Memory view: 32-bit word display' : 'Memory view: separate byte display', 'info');
 }
 
-export function setMemDecSigned(signed: any) {
+export function setMemDecSigned(signed: boolean) {
   memDecSigned = !!signed;
   updateMemoryView();
 }
@@ -617,7 +617,7 @@ export function commitRegEdit(el: HTMLElement) {
   }
   const type = el.dataset.type;
   const text = (el.textContent || '').trim();
-  let newVal;
+  let newVal: number;
   if (type === 'hex') {
     const hexStr = text.replace(/^0x/i, '');
     newVal = parseInt(hexStr, 16);
@@ -730,7 +730,7 @@ export function popRegEditModal(event: { preventDefault: () => void; stopPropaga
   setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 10);
 }
 
-export function commitRegEditModal(idx: number, text: any) {
+export function commitRegEditModal(idx: number, text: string) {
   closeRegEditModal();
   if (idx < 0 || idx > 31) return;
   if (idx === 0) {

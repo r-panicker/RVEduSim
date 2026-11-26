@@ -6,7 +6,7 @@ import { hdlEnsureCompiled, hdlRxFile, hdlStimFile } from './compile';
 import { HDL_VCD_WINDOW, hdlLog, hdlRunModel, hdlSimulate, hdlStatus, loadHdlEngine, type HdlToolFiles, type HdlVlCheckpoints } from './engine';
 import { hdlMemFiles, hdlRequiredDepths, hdlSyncReferenceWrapperDepths } from './memory-images';
 import { hdlCutTrace, hdlTrimTrace } from './seek';
-import { hdlBuild, hdlCheckpoints, hdlConfig, hdlRec, type HdlStep, type HdlTrace } from './state';
+import { hdlBuild, hdlCheckpoints, hdlConfig, hdlRec, type HdlStep, type HdlTrace, type HdlMemImages } from './state';
 import { hdlPostSynthCheck } from './synthesis';
 import { hdlFindWrapper, hdlHash, hdlHex32 } from './verilog';
 import { RT_FOLLOW_HZ, cpuHz } from '../machine/clock';
@@ -27,7 +27,7 @@ import { errorMessage } from '../errors';
 export const HDL_NONE = Object.freeze([]) as never[];
 export function hdlTraceParser(base?: HdlTrace) {
   const t: HdlTrace = base || { steps: [], pre: [], preAcks: 0, final: null, next: null, userOutput: '', budget: 0 };
-  const userLines: any[] = [];
+  const userLines: string[] = [];
   const inputs: { cycle: number; code?: number; value?: number; byte?: number; }[] = [];          // @@V / @@U: inputs a live run applied, with their cycles
   let cur: HdlStep | null = t.steps.length ? t.steps[t.steps.length - 1] : null;
   let partial = '';
@@ -174,7 +174,7 @@ export async function hdlPrepareRun(opts: BuildTraceOptions = {}) {
   // run recorded in chunks carries on from what it last showed.
   hdlSyncReferenceWrapperDepths();
   const memKey = [program.machineCode, layout.baseAddress, layout.dataBase, wrapper.src];
-  let mem;
+  let mem: HdlMemImages;
   if (hdlBuild.memCache && hdlBuild.memCache.key.every((v, i) => v === memKey[i])) {
     mem = hdlBuild.memCache.mem;
   } else {
@@ -311,7 +311,7 @@ export async function hdlBuildTrace(budget: number, opts: BuildTraceOptions = {}
 
   // The post-synthesis check compares a whole run from reset.
   hdlBuild.lastRtlOut = joinAt ? null : out;
-  let t;
+  let t: HdlTrace;
   if (prior) {
     // A run following its own end goes on from where the page last
     // showed it, when that is before the join.

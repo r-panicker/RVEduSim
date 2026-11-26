@@ -418,7 +418,7 @@ int main()
 
 export async function loadExample(name: string) {
   const myToken = ++editorState.exampleLoadToken;
-  let source;
+  let source: string;
 
   if (name === 'dip_led' || name === 'dip_led_c') {
     // Built in, so it loads with no server - see "Built-in examples" at

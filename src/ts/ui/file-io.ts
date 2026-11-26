@@ -12,19 +12,21 @@ import { assembleOnly, resetAll, updateToolbarButtonStates } from './run-control
 import { byId } from './dom';
 
 // Load file from file input
-export function loadFile(event: { target: { files: any[]; value: string; }; }) {
-  const file = event.target.files[0];
+export function loadFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files && input.files[0];
   if (!file) return;
 
-  const ext = file.name.split('.').pop().toLowerCase();
+  const ext = (file.name.split('.').pop() ?? '').toLowerCase();
   // Verilog is a processor description, not a program: it belongs to the
   // HDL engine's source list, not in the editor.
   if (/^(v|sv|vh|svh)$/.test(ext)) {
-    hdlAddFiles(event.target.files).then(() => {
+    const files = Array.from(input.files ?? []);
+    hdlAddFiles(files).then(() => {
       openSettingsModal('simulator');
-      setStatus('Loaded ' + event.target.files.length + ' Verilog file(s)', 'success');
+      setStatus('Loaded ' + files.length + ' Verilog file(s)', 'success');
     });
-    event.target.value = '';
+    input.value = '';
     return;
   }
   if (ext === 'c' || ext === 'h') {
@@ -75,7 +77,7 @@ export function loadFile(event: { target: { files: any[]; value: string; }; }) {
   reader.readAsText(file);
 
   // Reset the file input so the same file can be loaded again
-  event.target.value = '';
+  input.value = '';
 }
 
 // Run once the page has loaded every module (main.ts), in page order. It

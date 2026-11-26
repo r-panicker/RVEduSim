@@ -69,7 +69,7 @@ export function updateLocalsView() {
   setPanelFindCount('locals', shown, fn.vars.length);
 }
 
-export function setLocalsDecSigned(signed: any) {
+export function setLocalsDecSigned(signed: boolean) {
   localsDecSigned = !!signed;
   updateLocalsView();
 }

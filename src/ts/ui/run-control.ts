@@ -16,7 +16,7 @@ import { restoreOledPages } from '../machine/oled';
 import { capturePeriphState, restorePeriphState } from '../machine/peripherals';
 import { pipeDone, pipeEvents, pipeRestore, pipeSnapshot, pipeStatementStep, pipeStep, pipeline, type Signals } from '../machine/pipeline';
 import { initializeState, loadProgram } from '../machine/reset';
-import { accel, board, clock, cpu, layout, oled, program, run, stepHistory, uart, ui } from '../machine/state';
+import { accel, board, clock, cpu, layout, oled, program, run, stepHistory, uart, ui, type MachineLine } from '../machine/state';
 import { dpOnStateChange, updateFloatSteps } from './datapath';
 import { updateDisassembly, updateMachineCode } from './disassembly';
 import { clearLog, editor, editorHistory, log, setStatus } from './editor';
@@ -175,6 +175,7 @@ export function stepBack() {
     return;
   }
   const st = stepHistory.entries.pop();
+  if (!st) return;
   for (let i = st.writes.length - 1; i >= 0; i--) {
     const w = st.writes[i];
     setMemByte(w.addr, w.old);
@@ -446,7 +447,7 @@ export function runProgram() {
     }
 
     let batchCount = 0;
-    let stopReason = null;
+    let stopReason: string | null = null;
     const hasBreakpoints = run.breakpoints.size > 0;
     const paced = clock.pace === 'real';
     const tick0 = performance.now(), hz = cpuHz();
@@ -618,7 +619,7 @@ export function resetAll() {
     program.assembled = false;
     highlightCurrentLine();
     setStatus('Reset');
-    let mc: any[] = [];
+    let mc: MachineLine[] = [];
     try { if (editor.value.trim()) mc = assemble(editor.value, undefined, { language: editorState.language, report: log }); } catch (e) { }
     highlightFirstLine(mc);
   }

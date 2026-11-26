@@ -43,9 +43,19 @@ export const HDL_ENGINE_SOURCES = [
 // the same files and arguments the WASM build would.
 export const hdlNative = (window.rvNative && window.rvNative.icarus) ? window.rvNative : null;
 // The app carries vendor/ beside the page, so the local copies come first.
-export const hdlNativeJobs = new Set();
+export const hdlNativeJobs = new Set<number>();
+// The desktop app's bridge, for code only reached in the app.
+export function hdlBridge(): RvNative {
+  if (!window.rvNative) throw new Error('This needs the desktop app.');
+  return window.rvNative;
+}
 // An Emscripten module factory: instantiates the tool with its output hooks.
-export type HdlToolFactory = (opts: { print: (s: string) => void; printErr: (s: string) => void }) => Promise<any>;
+// An instantiated Emscripten tool: its in-memory file system and its main().
+export interface HdlToolModule {
+  FS: { writeFile(path: string, data: string | Uint8Array): void; readdir(path: string): string[]; readFile(path: string): Uint8Array };
+  callMain(args: string[]): number;
+}
+export type HdlToolFactory = (opts: { print: (s: string) => void; printErr: (s: string) => void }) => Promise<HdlToolModule>;
 export type HdlToolName = 'ivlpp' | 'ivl' | 'vvp';
 // A stage's input files, and what it returns: its output lines and the files it kept.
 export type HdlToolFiles = Record<string, string | Uint8Array>;
@@ -98,7 +108,7 @@ export async function loadHdlEngine() {
     for (const base of HDL_ENGINE_SOURCES) {
       try {
         hdlStatus('loading engine from ' + base + ' …', 'busy');
-        const [ivlpp, ivl, vvp] = await Promise.all([
+        const [ivlpp, ivl, vvp]: { default: HdlToolFactory }[] = await Promise.all([
           import(/* webpackIgnore: true */ base + 'ivlpp.js'),
           import(/* webpackIgnore: true */ base + 'ivl.js'),
           import(/* webpackIgnore: true */ base + 'vvp.js')
@@ -285,9 +295,9 @@ export async function hdlSimulate(vvpBytes: Uint8Array, memFiles: HdlToolFiles, 
 export async function hdlRunModel(model: unknown, files: HdlToolFiles, plusargs: string[]) {
   const id = ++hdlActivity.jobSeq;
   hdlNativeJobs.add(id);
-  let r;
+  let r: RvNativeRun;
   try {
-    r = await window.rvNative.vlRun(id, model, files, plusargs || [], { merge: true, keep: HDL_RUN_KEEP.source });
+    r = await hdlBridge().vlRun(id, model, files, plusargs || [], { merge: true, keep: HDL_RUN_KEEP.source });
   } finally {
     hdlNativeJobs.delete(id);
   }
@@ -346,16 +356,16 @@ export async function hdlVerilate(tb: string, gen: string, ck: string) {
   hdlStatus('building with Verilator...', 'busy');
   const id = ++hdlActivity.jobSeq;
   hdlNativeJobs.add(id);
-  let r;
+  let r: RvNativeBuild;
   try {
-    r = await window.rvNative.vlBuild(id, files, { language, headers, waveTop: hdlConfig.waveTop });
+    r = await hdlBridge().vlBuild(id, files, { language, headers, waveTop: hdlConfig.waveTop });
   } finally {
     hdlNativeJobs.delete(id);
   }
   if (r.cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
   if (r.ok) {
     hdlLog(r.cached ? 'Reusing the Verilator model built earlier for these sources.'
-      : 'Verilator build ' + ((r.ms.verilate + r.ms.cxx) / 1000).toFixed(1) + ' s (' + r.compiler + ')', 'sys');
+      : 'Verilator build ' + (r.ms ? ((r.ms.verilate + r.ms.cxx) / 1000).toFixed(1) : '?') + ' s (' + r.compiler + ')', 'sys');
   }
   return { ok: !!r.ok, model: r.ok ? r.key : null, log: r.log || '' };
 }
@@ -364,7 +374,7 @@ export async function hdlVerilate(tb: string, gen: string, ck: string) {
 // have by the hundred, are counted by kind with the first of each; the
 // testbench's own are left out.
 export function hdlReportVerilator(log: string) {
-  const errs = [], warn = new Map();
+  const errs: string[] = [], warn = new Map<string, { n: number; first: string }>();
   for (const line of String(log || '').split(/\r?\n/)) {
     const m = /^%(Error|Warning)(?:-([A-Z0-9_]+))?: (.*)$/.exec(line);
     if (!m) continue;
@@ -372,7 +382,7 @@ export function hdlReportVerilator(log: string) {
     if (/cg3207_hdl_(tb|ck)\.v/.test(m[3])) continue;
     const k = m[2] || 'WARNING';
     if (!warn.has(k)) warn.set(k, { n: 0, first: m[3] });
-    warn.get(k).n++;
+    warn.get(k)!.n++;
   }
   for (const [k, w] of warn) hdlLog('Verilator ' + k + (w.n > 1 ? ' ×' + w.n : '') + ': ' + w.first, 'warn');
   for (const e of errs) hdlLog(e, 'err');

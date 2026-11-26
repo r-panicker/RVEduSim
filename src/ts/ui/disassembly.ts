@@ -66,7 +66,7 @@ export function updateDisassembly() {
 
   function annotateLabels(text: string) {
     if (!text) return '';
-    return text.replace(/\b(0x[0-9a-fA-F]+|\d+)\b/g, (match: any, numStr: string) => {
+    return text.replace(/\b(0x[0-9a-fA-F]+|\d+)\b/g, (match: string, numStr: string) => {
       const target = (numStr.startsWith('0x') || numStr.startsWith('0X')) ? parseInt(numStr, 16) : parseInt(numStr, 10);
       if (!isNaN(target) && addrToLabels[target >>> 0] && addrToLabels[target >>> 0].length > 0) {
         if (target >= 0x1000 || numStr.startsWith('0x') || numStr.startsWith('0X')) {
@@ -81,7 +81,7 @@ export function updateDisassembly() {
   // way just gains a marker carrying the other readings. Any label badge
   // annotateLabels would have added stays outside the marker, so the
   // underline covers the number alone.
-  function renderNativeCell(item: MachineLine, native: string | any[]) {
+  function renderNativeCell(item: MachineLine, native: string) {
     const readings = nativeImmReadings(item.imm ?? null);
     const from = item.immFrom ?? -1, to = item.immTo ?? -1;
     if (!readings.length || from < 0 || to > native.length) {

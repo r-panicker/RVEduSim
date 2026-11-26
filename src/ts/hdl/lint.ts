@@ -15,16 +15,16 @@ export const HDL_LINT_OK_TASKS = /^\$(readmemh|readmemb|signed|unsigned|clog2|bi
 // Split a module body into its `always` blocks, with the line each starts
 // on. Brace/`begin`-`end` matching is enough - these are flat RTL blocks.
 export function hdlAlwaysBlocks(src: string) {
-  const blocks = [];
+  const blocks: { start: number; line: number; sens: string; body: string }[] = [];
   const re = /\balways\b\s*(@\s*\(([^)]*)\)|@\s*\*|@\*)?/g;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
     const start = m.index;
     let i = re.lastIndex, depth = 0, seen = false;
     // Walk begin/end pairs; a block with no `begin` is a single statement.
     const tok = /\b(begin|end|case|casex|casez|endcase|fork|join)\b|;/g;
     tok.lastIndex = i;
-    let t, endIdx = src.length;
+    let t: RegExpExecArray | null, endIdx = src.length;
     while ((t = tok.exec(src)) !== null) {
       const w = t[1];
       if (w === 'begin' || w === 'fork') { depth++; seen = true; }
@@ -44,16 +44,19 @@ export function hdlAlwaysBlocks(src: string) {
   return blocks;
 }
 
+// A lint note: where it is, 'err' (will not synthesise) or 'warn', and what.
+export interface HdlLintHit { file: string; line: number; level: string; msg: string }
+
 // One uploaded file -> a list of {line, level, msg}.
 export function hdlLintFile(name: string, rawSrc: string) {
   const src = hdlStripNoise(rawSrc);
-  const found: { file: any; line: any; level: any; msg: any; }[] = [];
+  const found: HdlLintHit[] = [];
   const lineOf = (idx: number | undefined) => src.slice(0, idx).split('\n').length;
   const add = (line: number, level: string, msg: string) => found.push({ file: name, line: line, level: level, msg: msg });
 
   // Delays are discarded by synthesis. A `#` is only a delay when a
   // number follows it: `#(` is a parameter list or override.
-  let m, re = /(^|[^\w$])#\s*\d/g;
+  let m: RegExpExecArray | null, re = /(^|[^\w$])#\s*\d/g;
   while ((m = re.exec(src)) !== null) {
     add(lineOf(m.index), 'err', 'delay `#` — ignored by synthesis, so the hardware will not match this simulation');
   }
@@ -124,13 +127,13 @@ export function hdlLintFile(name: string, rawSrc: string) {
 
 // Lint every uploaded source except anything that looks like a testbench.
 export function hdlSynthLint() {
-  const out: any[] = [];
+  const out: HdlLintHit[] = [];
   for (const f of hdlSources.files) {
     if (/(^|[_\-])tb\.v$|_tb\.|testbench/i.test(f.name)) continue;
     out.push.apply(out, hdlLintFile(f.name, f.src));
   }
   // One report per line.
-  const seen = new Set();
+  const seen = new Set<string>();
   return out.filter(x => {
     const k = x.file + ':' + x.line + ':' + x.msg;
     if (seen.has(k)) return false;

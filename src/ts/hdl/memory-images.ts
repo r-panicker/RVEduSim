@@ -7,7 +7,7 @@ import { renderHdlFileList } from './sources';
 import { hdlSources } from './state';
 import { hdlFindWrapper, hdlModuleBody } from './verilog';
 import { getMemByte } from '../machine/memory';
-import { layout, program, type MachineLine } from '../machine/state';
+import { layout, program, type MachineLine, type PlacedLine } from '../machine/state';
 import { setStatus } from '../ui/editor';
 import { DEFAULT_DEPTH_BITS } from '../ui/examples-language';
 import { byId } from '../ui/dom';
@@ -19,7 +19,7 @@ import { byId } from '../ui/dom';
 // back out of the uploaded file rather than assuming the defaults —
 // a student who enlarged IROM_DEPTH_BITS for a bigger program should
 // get a correspondingly larger image.
-export function hdlDepthBits(wrapperSrc: any, name: string, fallback: number) {
+export function hdlDepthBits(wrapperSrc: string, name: string, fallback: number) {
   const m = new RegExp('localparam\\s+' + name + '\\s*=\\s*(\\d+)').exec(wrapperSrc || '');
   const v = m ? parseInt(m[1], 10) : NaN;
   return Number.isFinite(v) && v > 2 && v <= 24 ? v : fallback;
@@ -31,7 +31,7 @@ export function hdlDepthBits(wrapperSrc: any, name: string, fallback: number) {
 // and silently shift everything after the gap).
 export function hdlBuildMemImage(baseAddr: number, depthBits: number, lastUsedAddr: number) {
   const words = Math.pow(2, depthBits - 2);
-  const lines = [];
+  const lines: string[] = [];
   // Only emit up to the last word the program actually uses, mirroring
   // what RARS dumps. Trailing words stay uninitialised (X), exactly as
   // they would in Vivado.
@@ -52,7 +52,7 @@ export function hdlBuildMemImage(baseAddr: number, depthBits: number, lastUsedAd
 export function hdlMemFiles(wrapperSrc: string) {
   const iromBits = hdlDepthBits(wrapperSrc, 'IROM_DEPTH_BITS', 9);
   const dmemBits = hdlDepthBits(wrapperSrc, 'DMEM_DEPTH_BITS', 14);
-  const placed = (i: MachineLine): i is MachineLine & { bytes: number[] } => !i.error && !!i.bytes;
+  const placed = (i: MachineLine): i is PlacedLine => !i.error && !!i.bytes;
   const codeItems = program.machineCode.filter(placed).filter(i => i.address < layout.dataBase);
   const dataItems = program.machineCode.filter(placed).filter(i => i.address >= layout.dataBase);
   const lastCode = codeItems.reduce((m, i) => Math.max(m, i.address + i.bytes.length - 1), layout.baseAddress - 1);
@@ -149,7 +149,7 @@ export function hdlDiscoverRegBank() {
 
   // Otherwise look inside each module the core instantiates.
   const instRe = /^[^\S\n]*([A-Za-z_]\w*)\s*(?:#\s*\([\s\S]*?\)\s*)?([A-Za-z_]\w*)\s*\(/gm;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = instRe.exec(coreBody)) !== null) {
     const modName = m[1], instName = m[2];
     if (HDL_NOT_AN_INSTANCE.has(modName) || HDL_NOT_AN_INSTANCE.has(instName)) continue;

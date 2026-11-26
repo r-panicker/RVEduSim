@@ -35,7 +35,7 @@ export async function hdlCompareWithJs() {
   // not have, so the comparison ends there.
   const stop = hdlRec.stim.length ? Math.min(...hdlRec.stim.map(e => e.cycle)) : Infinity;
 
-  const hwReg = [], hwMem = [];
+  const hwReg: { r: number; v: number; cyc: number }[] = [], hwMem: { a: number; v: number; cyc: number }[] = [];
   const hwShadow = new Int32Array(32);
   for (const s of hdlRec.trace.steps) {
     for (const w of s.regw) {
@@ -64,7 +64,7 @@ export async function hdlCompareWithJs() {
   stepHistory.journalEnabled = false;
   loadProgram(program.machineCode);
   run.finished = false;
-  const jsReg = [], jsMem: { a: number; v: number; pc: number; }[] = [];
+  const jsReg: { r: number; v: number; pc: number }[] = [], jsMem: { a: number; v: number; pc: number; }[] = [];
   const jsShadow = new Int32Array(32);
   let curPc = 0, fault: unknown = null;
   observeWrites((addr, val, size) => {
@@ -93,15 +93,15 @@ export async function hdlCompareWithJs() {
     [board.dip, board.buttons, accel.x, accel.y, accel.z, accel.temp, accel.dready] = saved;
   }
 
-  const firstDiff = (hw: string | any[], js: string | any[], same: { (a: any, b: any): boolean; (a: any, b: any): boolean; (arg0: any, arg1: any): any; }) => {
+  const firstDiff = <H, J>(hw: H[], js: J[], same: (a: H, b: J) => boolean) => {
     for (let i = 0; i < hw.length; i++)
       if (i >= js.length || !same(hw[i], js[i])) return { hw: hw[i], js: js[i] || null };
     return null;
   };
-  const dr = hdlRec.trace.regBank ? firstDiff(hwReg, jsReg, (a: { r: any; v: any; }, b: { r: any; v: any; }) => a.r === b.r && a.v === b.v) : null;
-  const dm = firstDiff(hwMem, jsMem, (a: { a: any; v: any; }, b: { a: any; v: any; }) => a.a === b.a && a.v === b.v);
-  const by = (d: { hw?: any; js: any; }) => d && d.js ? ' by the instruction at 0x' + d.js.pc.toString(16) + ' (line ' + sourceLineForPc(d.js.pc) + ')' : '';
-  let msg = null;
+  const dr = hdlRec.trace.regBank ? firstDiff(hwReg, jsReg, (a, b) => a.r === b.r && a.v === b.v) : null;
+  const dm = firstDiff(hwMem, jsMem, (a, b) => a.a === b.a && a.v === b.v);
+  const by = (d: { js: { pc: number } | null }) => d && d.js ? ' by the instruction at 0x' + d.js.pc.toString(16) + ' (line ' + sourceLineForPc(d.js.pc) + ')' : '';
+  let msg: string | null = null;
   if (dr && (!dm || dr.hw.cyc <= dm.hw.cyc)) {
     msg = 'first difference at cycle ' + dr.hw.cyc + ': the hardware set x' + dr.hw.r + ' = 0x' + hdlHex32(dr.hw.v) +
       (dr.js ? '; the model\'s next register change is x' + dr.js.r + ' = 0x' + hdlHex32(dr.js.v) + by(dr)

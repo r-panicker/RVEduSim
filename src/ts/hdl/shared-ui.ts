@@ -218,20 +218,20 @@ export function onSharedUiLoad() {
     getSimEngineMode: () => ui.engine,
     getHdlTrace: () => hdlRec.trace,
     getHdlIndex: () => hdlRec.idx,
-    hdlLoadTrace: (stdout: any, budget: number) => {
+    hdlLoadTrace: (stdout: string, budget: number) => {
       hdlRec.trace = hdlParseTrace(stdout);
       hdlRec.trace.budget = budget || hdlConfig.cycleBudget;
       hdlRec.trace.regBank = hdlRegBankPath();
       hdlRec.idx = 0;
       return hdlRec.trace;
     },
-    hdlSetBase: (b: any) => { hdlRec.base = Object.assign({}, hdlRec.base, b); },
+    hdlSetBase: (b: Partial<typeof hdlRec.base>) => { hdlRec.base = Object.assign({}, hdlRec.base, b); },
     hdlSetStim: (list: TimedInput[]) => { hdlRec.stim = list.slice(); },
     hdlSetRx: (list: TimedByte[]) => { hdlRec.rx = list.slice(); },
     getUartPending: () => uart.pending.slice(),
     getUartRxState: () => ({ byte: uart.rxByte, full: uart.rxFull, dropped: uart.rxDroppedTotal }),
-    hdlSetSources: (list: any[]) => {
-      hdlSources.files = list.map((f) => ({ name: f.name, src: f.src }));
+    hdlSetSources: (list: { name: string; src: string }[]) => {
+      hdlSources.files = list.map(f => ({ name: f.name, src: f.src }));
       renderHdlFileList();
     },
   });

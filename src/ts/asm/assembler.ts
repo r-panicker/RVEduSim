@@ -128,7 +128,7 @@ function buildNativeInstruction(mnemonic: string, args: string[]): { text: strin
   const instr = INSTRUCTIONS[mnemonic];
   if (!ops.length || !instr || !IMM_TYPES.has(instr.type)) return none;
 
-  const starts = [];
+  const starts: number[] = [];
   let at = mnemonic.length + 1;
   for (const op of ops) { starts.push(at); at += op.length + 2; }
 
@@ -455,7 +455,7 @@ export function assemble(source: string, startAddr?: number, options: AssembleOp
     checkPseudoArity(mn, args);
     if (mn === 'la' || mn === 'lla' || mn === 'lga' || mn === 'call' || mn === 'tail') {
       // figure registers & second instruction depending on pseudo
-      let target, rdA, rdJ, rsJ, second;
+      let target: string, rdA: number, rdJ: number, rsJ: number, second: string;
       if (mn === 'la' || mn === 'lla' || mn === 'lga') {
         // la/lla/lga rd, symbol => auipc rd, %pcrel_hi ; addi rd, rd, %pcrel_lo
         const rd = parseReg(args[0]);
@@ -498,7 +498,7 @@ export function assemble(source: string, startAddr?: number, options: AssembleOp
     const args = parseArgs(main);
     const padTo = (target: number) => {
       const pad = target - getAddr();
-      if (pad > 0) { push({ address: getAddr(), bytes: new Array(pad).fill(0), text: asmText, line: lineNo, asmLine: main }); bump(pad); }
+      if (pad > 0) { push({ address: getAddr(), bytes: new Array<number>(pad).fill(0), text: asmText, line: lineNo, asmLine: main }); bump(pad); }
     };
     try {
       if (INSTRUCTIONS[mn]) {
@@ -597,7 +597,7 @@ export function assemble(source: string, startAddr?: number, options: AssembleOp
             // padding bytes so the two passes' addresses agree.
             if (sz > 1) padTo(alignedAddr(sz));
             const vals = toks.slice(1).join('').split(',').filter(Boolean);
-            const bytesArr = [];
+            const bytesArr: number[] = [];
             for (const v of vals) {
               const val = parseImm(v);
               if (isNaN(val)) throw new Error(`Bad numeric value '${v}' in ${mn}`);
@@ -619,10 +619,10 @@ export function assemble(source: string, startAddr?: number, options: AssembleOp
           case '.dword': case '.8byte': case '.quad': {
             padTo(alignedAddr(8));
             const vals = toks.slice(1).join('').split(',').filter(Boolean);
-            const bytesArr = [];
+            const bytesArr: number[] = [];
             for (const v of vals) {
               // BigInt keeps all 64 bits of a literal; a symbol is at most 32.
-              let big;
+              let big: bigint;
               try { big = BigInt(v.replace(/_/g, '')); } catch (e) {
                 const n = parseImm(v);
                 if (isNaN(n)) throw new Error(`Bad numeric value '${v}' in ${mn}`);
@@ -658,7 +658,7 @@ export function assemble(source: string, startAddr?: number, options: AssembleOp
     }
   }
 
-  let activeDataDirPass2 = null;
+  let activeDataDirPass2: string | null = null;
   for (let i = 0; i < lines.length; i++) {
     let { main, comment } = splitLine(lines[i]);
     const lineNo = i + 1;
@@ -714,7 +714,7 @@ export function assemble(source: string, startAddr?: number, options: AssembleOp
   }
 
   if (misalignedAccesses.length) {
-    const seen = new Map();
+    const seen = new Map<string, number>();
     for (const a of misalignedAccesses) {
       const k = a.mnemonic + ':' + a.offset;
       seen.set(k, (seen.get(k) || 0) + 1);
@@ -919,7 +919,7 @@ function encodeInstruction(mnemonic: string, args: string[], address: number): n
 
   // An FP instruction with an rm field takes an optional rounding mode as
   // its last operand; without one it gets GNU as's default.
-  let fpRm = null;
+  let fpRm: number | null = null;
   if (FP_RM_DEFAULT[mnemonic] !== undefined) {
     fpRm = FP_RM_DEFAULT[mnemonic];
     const normal = allowedArity(mnemonic, instr);
@@ -1122,7 +1122,7 @@ function encodeInstruction(mnemonic: string, args: string[], address: number): n
       rs2 = parseReg(args[1]);
 
       const targetStr = args[2];
-      let targetAddr;
+      let targetAddr: number;
       if (program.labels[targetStr] !== undefined) {
         targetAddr = program.labels[targetStr];
       } else if (program.symbolTable[targetStr] !== undefined) {
@@ -1178,7 +1178,7 @@ function encodeInstruction(mnemonic: string, args: string[], address: number): n
       // 'jal <label>' is shorthand for 'jal ra, <label>'
       let rd = args.length >= 2 ? parseReg(args[0]) : 1;
       let targetStr = args.length >= 2 ? args[1] : args[0];
-      let targetAddr;
+      let targetAddr: number;
 
       if (program.labels[targetStr] !== undefined) {
         targetAddr = program.labels[targetStr];

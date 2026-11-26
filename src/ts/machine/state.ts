@@ -4,6 +4,8 @@
 // variables.
 
 import type { ImmInfo } from '../asm/assembler';
+import type { PeriphSnapshot } from './peripherals';
+import type { PipeRegs } from './pipeline';
 import { DEFAULT_BASE, DEFAULT_DATA_BASE } from './memory-map';
 
 export interface MemWrite { addr: number; size: number }
@@ -48,6 +50,9 @@ export const layout = {
 
 // One assembled line: its address and encoding, and the source line it came
 // from. Data directives and pseudo-instructions add their own fields.
+// A line that assembled to bytes.
+export type PlacedLine = MachineLine & { bytes: number[] };
+
 export interface MachineLine {
   address: number;
   bytes?: number[] | null;     // null for a line that failed to assemble
@@ -106,11 +111,20 @@ export interface OledPixelLogEntry {
 
 // Back-stepping. Each entry undoes one instruction: the processor state
 // before it and the memory and pixel writes it made.
+// A byte a step overwrote, and what it held before.
+export interface MemUndo { addr: number; old: number }
+// What Back needs to undo one step: the machine before it, and what it wrote.
+export interface StepRecord {
+  pc: number; regs: Int32Array; fp: Uint32Array; reservation: number | null;
+  writes: MemUndo[]; pixels: OledPixelLogEntry[]; periph: PeriphSnapshot;
+  cycles: number; instr: number; line: number; pipe: PipeRegs | null;
+}
+
 export const stepHistory = {
-  entries: [] as any[],
+  entries: [] as StepRecord[],
   cap: 5000,
   // Memory writes of the step being executed, journalled while enabled.
-  writeLog: [] as any[],
+  writeLog: [] as MemUndo[],
   journalEnabled: false,
   // Peripheral writes never reach the byte journal. The scalars are
   // snapshotted whole once per step; the OLED pages are too big for that,

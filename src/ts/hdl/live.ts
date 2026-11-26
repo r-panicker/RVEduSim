@@ -11,7 +11,7 @@
 import { HDL_CK_VERIFY, HDL_VL_CK_EVERY, type HdlCheckpoint, hdlCheckFrom, hdlJoinCheck, hdlJoinSplit, hdlRecordList, hdlShiftVcd, hdlVcdFromBytes, hdlVlCkFailed, hdlVlCkMerge, hdlVlCkPick } from './checkpoints';
 import { hdlCompareWithJs } from './compare';
 import { hdlRxFile, hdlStimFile, hdlSyncRx } from './compile';
-import { HDL_LIVE_PRE_KEEP, HDL_LIVE_VCD_MAX, HDL_RUN_KEEP, HDL_VCD_WINDOW, type HdlToolFiles, hdlClearConsole, hdlDecodeCk, hdlDecodeRun, hdlLog, hdlNativeJobs, hdlRunModel, hdlStatus } from './engine';
+import { HDL_LIVE_PRE_KEEP, HDL_LIVE_VCD_MAX, HDL_RUN_KEEP, HDL_VCD_WINDOW, type HdlToolFiles, hdlClearConsole, hdlDecodeCk, hdlDecodeRun, hdlLog, hdlNativeJobs, hdlRunModel, hdlStatus, hdlBridge } from './engine';
 import { hdlBreakAt, hdlCaptureBaseInputs, hdlWithBusy } from './run';
 import { hdlApplyPer, hdlCaptureBase, hdlCutTrace, hdlSeek, hdlTrimTrace } from './seek';
 import { hdlReadFolder } from './sources';
@@ -44,7 +44,7 @@ export function hdlLiveCapable() {
   return hdlConfig.simulator === 'verilator' && !!(window.rvNative && window.rvNative.vlLive);
 }
 export function hdlLiveHz() { return clock.pace === 'real' ? cpuHz() : 0; }
-export function hdlLiveSend(line: string) { if (hdlActivity.live) window.rvNative.vlLiveSend(hdlActivity.live.id, line); }
+export function hdlLiveSend(line: string) { if (hdlActivity.live) hdlBridge().vlLiveSend(hdlActivity.live.id, line); }
 export function hdlLiveStop() {
   if (!hdlActivity.live || hdlActivity.live.stopSent) return;
   hdlActivity.live.stopSent = true;
@@ -140,7 +140,7 @@ export async function hdlRunLive() {
       live.split = c ? hdlJoinSplit(from) : null;
       live.over = [];
       live.held = [];
-      const run = window.rvNative.vlLive(id, compiled.model, f, p, { keep: HDL_RUN_KEEP.source });
+      const run = hdlBridge().vlLive(id, compiled.model, f, p, { keep: HDL_RUN_KEEP.source });
       if (live.stopSent) hdlLiveSend('stop');
       return run.finally(() => hdlNativeJobs.delete(id));
     };
@@ -155,7 +155,7 @@ export async function hdlRunLive() {
         const dead = live.id;
         live.ckFailed = true;
         live.id = 0;
-        window.rvNative.hdlKill(dead);
+        hdlBridge().hdlKill(dead);
       }
     };
 
@@ -218,7 +218,7 @@ export async function hdlRunLive() {
       if (liveWave && !waveStopped && !waveBusy && performance.now() - lastWave > 500) {
         waveBusy = true;
         lastWave = performance.now();
-        window.rvNative.vlLiveRead(live.id, 'dump.vcd', HDL_LIVE_VCD_MAX).then((b: { data: Uint8Array | null } | null) => {
+        hdlBridge().vlLiveRead(live.id, 'dump.vcd', HDL_LIVE_VCD_MAX).then(b => {
           waveBusy = false;
           if (!b || hdlActivity.live !== live) return;
           // Running faster than a waveform can be followed: the model

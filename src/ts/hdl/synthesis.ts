@@ -52,10 +52,10 @@ export async function loadYosysEngine() {
     for (const url of HDL_YOSYS_SOURCES) {
       try {
         hdlLog('Loading Yosys ' + HDL_YOSYS_VERSION + ' from ' + url, 'sys');
-        const mod = await import(/* webpackIgnore: true */ url);
+        const mod: { runYosys?: RunYosys } = await import(/* webpackIgnore: true */ url);
         if (typeof mod.runYosys !== 'function')
           throw new Error('The Yosys bundle did not export runYosys.');
-        const run: RunYosys = mod.runYosys;
+        const run = mod.runYosys;
         hdlYosys = run;
         hdlLog('Synthesiser ready.', 'sys');
         return run;
@@ -183,7 +183,7 @@ export async function hdlNetlistBinary() {
 // The observable behaviour of a run: the instruction stream, memory
 // writes and peripheral activity. Register writes are excluded - the
 // netlist has no register file to report them from.
-export function hdlObservable(stdout: any) {
+export function hdlObservable(stdout: string | null) {
   return String(stdout || '').split('\n')
     .filter(l => /^@@[IMLSTO] /.test(l))
     .map(l => l.trim());
@@ -195,7 +195,7 @@ export function hdlModeLabel() {
 }
 
 // Index of the first event where two runs disagree, or -1 if identical.
-export function hdlFirstDifference(a: string | any[], b: string | any[]) {
+export function hdlFirstDifference(a: string[], b: string[]) {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     if (a[i] !== b[i]) return i;
   }
@@ -203,7 +203,7 @@ export function hdlFirstDifference(a: string | any[], b: string | any[]) {
 }
 
 // Run the netlist with the same environment as the RTL run and compare.
-export async function hdlPostSynthCheck(rtlOut: string | null, budget: any, traceLvl: number, memFiles: { 'AA_IROM.mem': string; 'AA_DMEM.mem': string; }) {
+export async function hdlPostSynthCheck(rtlOut: string | null, budget: number, traceLvl: number, memFiles: Record<string, string>) {
   const vvp = await hdlNetlistBinary();
   hdlStatus('simulating the netlist …', 'busy');
   const t0 = performance.now();

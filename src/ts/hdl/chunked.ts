@@ -319,7 +319,7 @@ export function hdlPlayTo(to: number, done?: () => void) {
 // Continue from where we are to the next breakpoint, or to the end of
 // what has been recorded, recording another Cycles-worth first when there
 // is nothing left ahead to stop at.
-export async function hdlResumeRun(done: { (r: any): void; (arg0: { stop: string; ran: number; }): any; }) {
+export async function hdlResumeRun(done?: (r: { stop: string; ran: number }) => void) {
   const steps = () => hdlRecording().steps;
   let hit = hdlBreakAt(hdlRec.idx + 1);
   if (hit < 0 && ((run.breakpoints && run.breakpoints.size) || hdlRec.idx >= steps().length)) {

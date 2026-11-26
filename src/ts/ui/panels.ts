@@ -85,10 +85,10 @@ export function panelDockDefaults(): PanelDock {
 
 export function loadPanelDock() {
   const def = panelDockDefaults();
-  let saved = null;
+  let saved: Record<string, unknown> | null = null;
   try { saved = JSON.parse(localStorage.getItem(PANEL_DOCK_KEY) || 'null'); } catch (e) { saved = null; }
   if (!saved || typeof saved !== 'object') return def;
-  dockRowHeights = Array.isArray(saved.rowHeights) && saved.rowHeights.every((h: unknown) => typeof h === 'number') ? saved.rowHeights : null;
+  dockRowHeights = Array.isArray(saved.rowHeights) && saved.rowHeights.every((h: unknown) => typeof h === 'number') ? saved.rowHeights as number[] : null;
   PANEL_DEFS.forEach(({ name }) => {
     if (saved[name] && typeof saved[name] === 'object') def[name] = Object.assign(def[name], saved[name]);
   });
@@ -96,7 +96,7 @@ export function loadPanelDock() {
     // Keep the user's ordering for the panels it names, then append any
     // panel it does not know about (a layout saved before that panel
     // existed).
-    const known = saved.order.filter((n: unknown) => PANEL_DEFS.some(p => p.name === n));
+    const known = (saved.order as unknown[]).filter((n): n is string => PANEL_DEFS.some(p => p.name === n));
     const missing = PANEL_DEFS.map(p => p.name).filter(n => !known.includes(n));
     if (known.length) def.order = known.concat(missing);
   }
@@ -289,14 +289,14 @@ export function panelColWidths(panel: string) {
     let out = {};
     try {
       const raw = localStorage.getItem(panelColWidthKey(panel));
-      const o = raw ? JSON.parse(raw) : null;
-      if (o && typeof o === 'object') out = o;
+      const o: unknown = raw ? JSON.parse(raw) : null;
+      if (o && typeof o === 'object') out = o as Record<string, number>;
     } catch (e) { /* corrupt storage → automatic layout */ }
     panelColWidthCache[panel] = out;
   }
   return panelColWidthCache[panel];
 }
-export function savePanelColWidths(panel: any) {
+export function savePanelColWidths(panel: string) {
   try { localStorage.setItem(panelColWidthKey(panel), JSON.stringify(panelColWidths(panel))); }
   catch (e) { /* storage unavailable */ }
 }
@@ -307,7 +307,7 @@ export function panelBodyEl(panel: string) {
 }
 // Usable width inside the panel: clientWidth includes padding (and
 // already excludes any vertical scrollbar), so take the padding off.
-export function panelContentWidth(panel: any) {
+export function panelContentWidth(panel: string) {
   const body = panelBodyEl(panel);
   if (!body || !body.clientWidth) return 0;
   let padL = 0, padR = 0;
@@ -353,7 +353,7 @@ export function computedColWidths(panel: string) {
   const w = cols.map((c) => isPinned(c)
     ? Math.max(columnFloor(panel, c.key), Number(pinned[c.key]))
     : c.fit);
-  const total = w.reduce((a: any, b: any) => a + b, 0);
+  const total = w.reduce((a, b) => a + b, 0);
   const avail = panelContentWidth(panel);
   // Surplus goes only to the unpinned grow columns; a pinned column
   // keeps exactly the width it was dragged to.
@@ -371,7 +371,7 @@ export function computedColWidths(panel: string) {
 // panel too narrow to hold them scrolls instead of crushing a column.
 export function applyPanelColLayout(panel: string) {
   const w = computedColWidths(panel);
-  const total = w.reduce((a: any, b: any) => a + b, 0);
+  const total = w.reduce((a, b) => a + b, 0);
   if (panel === 'memory') {
     [byId('memView'), byId('memColHeader')].forEach(el => {
       if (!el) return;
@@ -408,7 +408,7 @@ export let panelColResizersAttached = false;
 export function initPanelColResizers() {
   if (!panelColResizersAttached) {
     panelColResizersAttached = true;
-    let drag: { pinnedAll: any; panel: any; key: any; startW: any; startX: any; handle: any; idx?: any; } | null = null;
+    let drag: { pinnedAll: boolean; panel: string; key: string; startW: number; startX: number; handle: HTMLElement; idx: number } | null = null;
     document.addEventListener('pointerdown', (e) => {
       const handle = targetEl(e)?.closest<HTMLElement>('.col-resizer');
       if (!handle) return;
@@ -546,7 +546,7 @@ export function buildPanelFindBar(name: string) {
 
 export function panelFindBar(name: string) { return document.getElementById('panelFind-' + name); }
 
-export function panelFindBtn(name: any) {
+export function panelFindBtn(name: string) {
   const el = panelEl(name);
   return el && el.querySelector<HTMLElement>(':scope > .panel-hdr [data-panel-act="find"]');
 }
@@ -1504,7 +1504,7 @@ export function updateRegisters() {
   dpOnStateChange();
 }
 
-export function setRegDecSigned(signed: any) {
+export function setRegDecSigned(signed: boolean) {
   ui.regDecSigned = !!signed;
   updateRegisters();
 }

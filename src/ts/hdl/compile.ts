@@ -56,7 +56,7 @@ export function hdlSyncRx() {
 // ================================================================
 // Nothing program-specific reaches the Verilog, so the compiled
 // binary only has to be rebuilt when the sources themselves change. Runs, steps and input edits all reuse it.
-export async function hdlEnsureCompiled(quiet: any) {
+export async function hdlEnsureCompiled(quiet: boolean) {
   const gen = (byId<HTMLSelectElement>('hdlGeneration') || {}).value || '2005';
   let rb = hdlRegBankPath();
   const dbuf = hdlHasDoubleBuffer();

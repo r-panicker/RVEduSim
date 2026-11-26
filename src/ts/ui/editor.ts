@@ -64,7 +64,7 @@ export const RISCV_CSRS_SET = new Set([
 
 // RISC-V Custom Stream Parser for CodeMirror 6
 export const riscvStreamParser = {
-  token(stream: { eatSpace: () => any; match: (arg0: RegExp) => any; eat: (arg0: RegExp) => any; next: () => void; }, state: any) {
+  token(stream: CmStringStream, _state: unknown) {
     if (stream.eatSpace()) return null;
 
     // Comments, as splitLine() in the assembler recognises them
@@ -104,7 +104,7 @@ export const riscvStreamParser = {
     }
 
     // Words: Instructions, Registers, CSRs, Identifiers
-    const wordMatch = stream.match(/^[a-zA-Z_.$][\w.$]*/);
+    const wordMatch: RegExpMatchArray | null = stream.match(/^[a-zA-Z_.$][\w.$]*/);
     if (wordMatch) {
       const word = wordMatch[0].toLowerCase();
       if (RISCV_INSTRUCTIONS_SET.has(word)) {
@@ -136,11 +136,11 @@ export const riscvStreamParser = {
 // and the window-exposed helpers reference them.
 // CodeMirror's objects are typed any: the bundle is loaded at run time and
 // ships no declarations.
-export let riscvLanguage: any = null, cLanguage: any = null, riscvHighlightStyle: any = null, riscvEditorTheme: any = null,
-    setBreakpointsEffect: any = null, setExecLineEffect: any = null, breakpointGutterMarker: any = null,
-    breakpointLineNumberMarker: any = null, breakpointStateField: any = null, breakpointGutter: any = null,
-    execLineField: any = null, signatureHelpField: any = null, riscvHoverTooltip: any = null,
-    setPipeStagesEffect: any = null, pipeStagesField: any = null;
+export let riscvLanguage: CmExtension = null, cLanguage: CmExtension = null, riscvHighlightStyle: CmExtension = null, riscvEditorTheme: CmExtension = null,
+    setBreakpointsEffect: CmStateEffectType = null, setExecLineEffect: CmStateEffectType = null, breakpointGutterMarker: CmGutterMarker = null,
+    breakpointLineNumberMarker: CmGutterMarker = null, breakpointStateField: CmStateField = null, breakpointGutter: CmExtension = null,
+    execLineField: CmStateField = null, signatureHelpField: CmStateField = null, riscvHoverTooltip: CmExtension = null,
+    setPipeStagesEffect: CmStateEffectType = null, pipeStagesField: CmStateField = null;
 
 // Helper: format instruction signature with active operand parameter highlighted
 export function formatActiveInstructionSignature(formatStr: string, operandIndex: number) {
@@ -153,7 +153,7 @@ export function formatActiveInstructionSignature(formatStr: string, operandIndex
   const operandPart = formatStr.slice(spaceIdx + 1);
   
   const operands = operandPart.split(',');
-  const formattedOperands = operands.map((op: string, idx: any) => {
+  const formattedOperands = operands.map((op, idx) => {
     const trimmed = op.trim();
     if (idx === operandIndex) {
       return `<span style="color:#fab387;font-weight:bold;text-decoration:underline;background:rgba(250,179,135,0.2);padding:1px 4px;border-radius:3px;">${escapeHtml(trimmed)}</span>`;
@@ -184,7 +184,7 @@ const cStreamParser = {
   startState() {
     return { inBlockComment: false };
   },
-  token(stream: { match: (arg0: RegExp) => any; skipToEnd: () => void; eatSpace: () => any; eat: (arg0: RegExp) => any; next: () => void; }, state: { inBlockComment: boolean; }) {
+  token(stream: CmStringStream, state: { inBlockComment: boolean }) {
     if (state.inBlockComment) {
       if (stream.match(/^.*?\*\//)) {
         state.inBlockComment = false;
@@ -238,7 +238,7 @@ const cStreamParser = {
     }
 
     // Identifiers, Keywords, Types
-    const wordMatch = stream.match(/^[a-zA-Z_]\w*/);
+    const wordMatch: RegExpMatchArray | null = stream.match(/^[a-zA-Z_]\w*/);
     if (wordMatch) {
       const word = wordMatch[0];
       if (C_KEYWORDS_SET.has(word)) {
@@ -429,19 +429,19 @@ breakpointStateField = CM6.StateField.define({
       lineNumbers: CM6.RangeSet.empty
     };
   },
-  update(value: { gutter: any[]; lineNumbers: any[]; }, tr: { changes: any; effects: any; state: { doc: { lines: number; line: (arg0: any) => any; }; }; }) {
+  update(value: { gutter: CmRangeSet; lineNumbers: CmRangeSet }, tr: CmTransaction) {
     let gutter = value.gutter.map(tr.changes);
     let lineNumbers = value.lineNumbers.map(tr.changes);
 
-    for (const e of tr.effects) {
+    for (const e of tr.effects as CmStateEffect[]) {
       if (e.is(setBreakpointsEffect)) {
         const gutterBuilder = new CM6.RangeSetBuilder();
         const lnBuilder = new CM6.RangeSetBuilder();
 
-        const sortedLines = [...e.value].sort((a,b) => a - b);
+        const sortedLines = [...(e.value as Set<number>)].sort((a, b) => a - b);
         for (const lineNo of sortedLines) {
           if (lineNo >= 1 && lineNo <= tr.state.doc.lines) {
-            const line = tr.state.doc.line(lineNo);
+            const line: CmLine = tr.state.doc.line(lineNo);
             gutterBuilder.add(line.from, line.from, breakpointGutterMarker);
             lnBuilder.add(line.from, line.from, breakpointLineNumberMarker);
           }
@@ -452,8 +452,8 @@ breakpointStateField = CM6.StateField.define({
     }
     return { gutter, lineNumbers };
   },
-  provide: (f: any) => [
-    CM6.lineNumberMarkers.from(f, (v: { lineNumbers: { lineNumbers: any; }; }) => v.lineNumbers)
+  provide: (f: CmStateField) => [
+    CM6.lineNumberMarkers.from(f, (v: { lineNumbers: CmRangeSet }) => v.lineNumbers)
   ]
 });
 
@@ -461,11 +461,11 @@ breakpointGutter = [
   breakpointStateField,
   CM6.gutter({
     class: 'cm-breakpoint-gutter',
-    markers: (v: { state: { field: (arg0: null) => { (): any; new(): any; gutter: { state: { field: (arg0: null) => { (): any; new(): any; gutter: any; }; }; }; }; }; }) => v.state.field(breakpointStateField).gutter,
+    markers: (v: CmView) => v.state.field(breakpointStateField).gutter,
     initialSpacer: () => breakpointGutterMarker,
     domEventHandlers: {
-      mousedown(view: { state: { doc: { lineAt: (arg0: any) => { (): any; new(): any; number: any; }; }; }; }, line: { from: any; }, event: any) {
-        const lineNo = view.state.doc.lineAt(line.from).number;
+      mousedown(view: CmView, line: CmBlockInfo, _event: MouseEvent) {
+        const lineNo: number = view.state.doc.lineAt(line.from).number;
         toggleBreakpoint(lineNo);
         return true;
       }
@@ -475,15 +475,15 @@ breakpointGutter = [
 
 execLineField = CM6.StateField.define({
   create() { return CM6.Decoration.none; },
-  update(execLines: any[], tr: { changes: any; effects: any; state: { doc: { lines: number; line: (arg0: any) => any; }; }; }) {
+  update(execLines: CmDecorationSet, tr: CmTransaction) {
     execLines = execLines.map(tr.changes);
-    for (const e of tr.effects) {
+    for (const e of tr.effects as CmStateEffect[]) {
       if (e.is(setExecLineEffect)) {
-        const lineNo = e.value;
+        const lineNo: number = e.value;
         if (lineNo < 1 || lineNo > tr.state.doc.lines) {
           execLines = CM6.Decoration.none;
         } else {
-          const line = tr.state.doc.line(lineNo);
+          const line: CmLine = tr.state.doc.line(lineNo);
           const dec = CM6.Decoration.line({
             attributes: { class: 'cm-execLine' }
           });
@@ -493,14 +493,15 @@ execLineField = CM6.StateField.define({
     }
     return execLines;
   },
-  provide: (f: any) => CM6.EditorView.decorations.from(f)
+  provide: (f: CmStateField) => CM6.EditorView.decorations.from(f)
 });
 
 // Which pipeline stage holds each line's instruction, as letters in a
 // gutter of their own. Effect value: [[lineNo, 'F D'], ...].
 class PipeStageMarker extends CM6.GutterMarker {
-  constructor(text: any) { super(); this.text = text; }
-  eq(other: { text: any; }) { return other.text === this.text; }
+  text: string;
+  constructor(text: string) { super(); this.text = text; }
+  eq(other: PipeStageMarker) { return other.text === this.text; }
   toDOM() {
     const el = document.createElement('span');
     el.className = 'cm-pipe-stage';
@@ -516,14 +517,14 @@ class PipeStageMarker extends CM6.GutterMarker {
 setPipeStagesEffect = CM6.StateEffect.define();
 pipeStagesField = CM6.StateField.define({
   create() { return CM6.RangeSet.empty; },
-  update(marks: any[], tr: { changes: any; effects: any; state: { doc: { lines: number; line: (arg0: any) => any; }; }; }) {
+  update(marks: CmRangeSet, tr: CmTransaction) {
     marks = marks.map(tr.changes);
-    for (const e of tr.effects) {
+    for (const e of tr.effects as CmStateEffect[]) {
       if (!e.is(setPipeStagesEffect)) continue;
       const b = new CM6.RangeSetBuilder();
-      for (const [lineNo, text] of e.value) {
+      for (const [lineNo, text] of e.value as [number, string][]) {
         if (lineNo < 1 || lineNo > tr.state.doc.lines) continue;
-        const line = tr.state.doc.line(lineNo);
+        const line: CmLine = tr.state.doc.line(lineNo);
         b.add(line.from, line.from, new PipeStageMarker(text));
       }
       marks = b.finish();
@@ -533,11 +534,11 @@ pipeStagesField = CM6.StateField.define({
 });
 
 // Live Signature Helper Tooltip (shows active instruction format while typing operands)
-function getSignatureTooltip(state: { selection: { main: any; }; doc: { lineAt: (arg0: any) => any; }; }) {
-  const sel = state.selection.main;
+function getSignatureTooltip(state: CmState) {
+  const sel: CmSelectionRange = state.selection.main;
   if (!sel.empty) return null;
   
-  const line = state.doc.lineAt(sel.head);
+  const line: CmLine = state.doc.lineAt(sel.head);
   const textBefore = line.text.slice(0, sel.head - line.from);
   
   if (textBefore.includes('#') || textBefore.includes(';')) return null;
@@ -573,24 +574,24 @@ function getSignatureTooltip(state: { selection: { main: any; }; doc: { lineAt: 
 }
 
 signatureHelpField = CM6.StateField.define({
-  create(state: any) {
+  create(state: CmState) {
     return getSignatureTooltip(state);
   },
-  update(tooltip: any, tr: { docChanged: any; selection: any; state: any; }) {
+  update(tooltip: CmTooltip | null, tr: CmTransaction) {
     if (tr.docChanged || tr.selection) {
       return getSignatureTooltip(tr.state);
     }
     return tooltip;
   },
-  provide: (f: any) => CM6.showTooltip.computeN([f], (state: { field: (arg0: any) => any; }) => {
-    const val = state.field(f);
+  provide: (f: CmStateField) => CM6.showTooltip.computeN([f], (state: CmState) => {
+    const val: CmTooltip | null = state.field(f);
     return val ? [val] : [];
   })
 });
 
 // Hover Tooltip for Instructions, Registers, Directives, and Symbols
-riscvHoverTooltip = CM6.hoverTooltip((view: { state: { doc: { lineAt: (arg0: any) => any; toString: () => any; }; }; }, pos: number, side: any) => {
-  const line = view.state.doc.lineAt(pos);
+riscvHoverTooltip = CM6.hoverTooltip((view: CmView, pos: number, _side: number) => {
+  const line: CmLine = view.state.doc.lineAt(pos);
   const lineText = line.text;
   const col = pos - line.from;
 
@@ -652,7 +653,7 @@ riscvHoverTooltip = CM6.hoverTooltip((view: { state: { doc: { lineAt: (arg0: any
   const word = lineText.slice(wordStart, wordEnd);
   const wordLower = word.toLowerCase();
   
-  const userSymbols = extractEditorSymbols(view.state.doc.toString());
+  const userSymbols = extractEditorSymbols(String(view.state.doc.toString()));
   const allCandidates = [...userSymbols, ...(typeof RISCV_AUTOCOMPLETE_DOCS !== 'undefined' ? RISCV_AUTOCOMPLETE_DOCS : [])];
   const docItem = allCandidates.find(d => d.name.toLowerCase() === wordLower);
   if (!docItem) return null;
@@ -661,7 +662,7 @@ riscvHoverTooltip = CM6.hoverTooltip((view: { state: { doc: { lineAt: (arg0: any
     pos: line.from + wordStart,
     end: line.from + wordEnd,
     above: true,
-    create(view: any) {
+    create(_view: CmView) {
       const dom = document.createElement('div');
       dom.className = 'cm-hover-tooltip';
       dom.style.cssText = 'padding:6px 10px;font-size:12px;max-width:360px;background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.4);line-height:1.45;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
@@ -684,19 +685,19 @@ riscvHoverTooltip = CM6.hoverTooltip((view: { state: { doc: { lineAt: (arg0: any
 } // end buildEditorExtensions()
 
 // Autocomplete Source for C Language in CodeMirror 6
-export function cAutocomplete(context: { state: { doc: { lineAt: (arg0: any) => any; }; }; pos: number; matchBefore: (arg0: RegExp) => any; explicit: any; }) {
-  const line = context.state.doc.lineAt(context.pos);
+export function cAutocomplete(context: CmCompletionContext) {
+  const line: CmLine = context.state.doc.lineAt(context.pos);
   const textBefore = line.text.slice(0, context.pos - line.from);
 
   if (textBefore.includes('//')) return null;
   const quoteCount = (textBefore.match(/"/g) || []).length;
   if (quoteCount % 2 !== 0) return null;
 
-  const word = context.matchBefore(/[\w#]+/);
+  const word: CmWordMatch | null = context.matchBefore(/[\w#]+/);
   if (!word && !context.explicit) return null;
 
   const wordStr = word ? word.text.toLowerCase() : '';
-  const options = [];
+  const options: CmCompletion[] = [];
 
   const types = [
     { name: 'int', desc: '32-bit signed integer' },
@@ -766,41 +767,41 @@ export function cAutocomplete(context: { state: { doc: { lineAt: (arg0: any) => 
   }
 
   return {
-    from: word ? word.from : context.pos,
+    from: word ? word.from : context.pos as number,
     options: options,
     validFor: /^[\w#]*$/
   };
 }
 
 // Autocomplete Source for CodeMirror 6 with Active Instruction Format Info
-export function riscvAutocomplete(context: { state: { doc: { lineAt: (arg0: any) => any; toString: () => any; }; }; pos: number; matchBefore: (arg0: RegExp) => any; explicit: any; }) {
+export function riscvAutocomplete(context: CmCompletionContext) {
   if (editorState.language === 'c') {
     return cAutocomplete(context);
   }
 
-  const line = context.state.doc.lineAt(context.pos);
+  const line: CmLine = context.state.doc.lineAt(context.pos);
   const textBefore = line.text.slice(0, context.pos - line.from);
 
   if (textBefore.includes('#') || textBefore.includes(';')) return null;
   const quoteCount = (textBefore.match(/"/g) || []).length;
   if (quoteCount % 2 !== 0) return null;
 
-  const word = context.matchBefore(/[.\w]+/);
+  const word: CmWordMatch | null = context.matchBefore(/[.\w]+/);
   const lineCtx = getAssemblyLineContext(textBefore);
 
   if (!word && !context.explicit) {
     return null;
   }
 
-  const userSymbols = extractEditorSymbols(context.state.doc.toString());
+  const userSymbols = extractEditorSymbols(String(context.state.doc.toString()));
   const allCandidates = [...userSymbols, ...(typeof RISCV_AUTOCOMPLETE_DOCS !== 'undefined' ? RISCV_AUTOCOMPLETE_DOCS : [])];
 
   const activeInstDoc = (lineCtx.context === 'OPERAND' && lineCtx.activeMnemonic && typeof RISCV_AUTOCOMPLETE_DOCS !== 'undefined') ? 
     RISCV_AUTOCOMPLETE_DOCS.find(d => (d.type === 'inst' || d.type === 'pseudo' || d.type === 'directive') && d.name.toLowerCase() === lineCtx.activeMnemonic) : null;
 
   const wordStr = word ? word.text.toLowerCase() : '';
-  const options = [];
-  const seen = new Set();
+  const options: CmCompletion[] = [];
+  const seen = new Set<string>();
 
   for (const item of allCandidates) {
     const nameLower = item.name.toLowerCase();
@@ -876,7 +877,7 @@ export function riscvAutocomplete(context: { state: { doc: { lineAt: (arg0: any)
   }
 
   return {
-    from: word ? word.from : context.pos,
+    from: word ? word.from : context.pos as number,
     options: options,
     validFor: /^[.\w]*$/
   };
@@ -884,52 +885,52 @@ export function riscvAutocomplete(context: { state: { doc: { lineAt: (arg0: any)
 
 // CodeMirror 6 Compatibility Proxy
 export const editor = {
-  get value() {
+  get value(): string {
     return editorState.cm ? editorState.cm.state.doc.toString() : '';
   },
-  set value(newVal) {
+  set value(newVal: string) {
     if (!editorState.cm) return;
-    const currentVal = editorState.cm.state.doc.toString();
+    const currentVal: string = editorState.cm.state.doc.toString();
     if (currentVal !== newVal) {
       editorState.cm.dispatch({
         changes: { from: 0, to: currentVal.length, insert: newVal }
       });
     }
   },
-  get selectionStart() {
+  get selectionStart(): number {
     return editorState.cm ? editorState.cm.state.selection.main.from : 0;
   },
-  set selectionStart(pos) {
+  set selectionStart(pos: number) {
     if (!editorState.cm) return;
-    const to = editorState.cm.state.selection.main.to;
-    const maxPos = editorState.cm.state.doc.length;
+    const to: number = editorState.cm.state.selection.main.to;
+    const maxPos: number = editorState.cm.state.doc.length;
     const clampedPos = Math.max(0, Math.min(pos, maxPos));
     editorState.cm.dispatch({
       selection: CM6.EditorSelection.single(clampedPos, Math.max(clampedPos, to))
     });
   },
-  get selectionEnd() {
+  get selectionEnd(): number {
     return editorState.cm ? editorState.cm.state.selection.main.to : 0;
   },
-  set selectionEnd(pos) {
+  set selectionEnd(pos: number) {
     if (!editorState.cm) return;
-    const from = editorState.cm.state.selection.main.from;
-    const maxPos = editorState.cm.state.doc.length;
+    const from: number = editorState.cm.state.selection.main.from;
+    const maxPos: number = editorState.cm.state.doc.length;
     const clampedPos = Math.max(0, Math.min(pos, maxPos));
     editorState.cm.dispatch({
       selection: CM6.EditorSelection.single(Math.min(from, clampedPos), clampedPos)
     });
   },
-  get scrollTop() {
+  get scrollTop(): number {
     return editorState.cm ? editorState.cm.scrollDOM.scrollTop : 0;
   },
-  set scrollTop(v) {
+  set scrollTop(v: number) {
     if (editorState.cm) editorState.cm.scrollDOM.scrollTop = v;
   },
-  get scrollLeft() {
+  get scrollLeft(): number {
     return editorState.cm ? editorState.cm.scrollDOM.scrollLeft : 0;
   },
-  set scrollLeft(v) {
+  set scrollLeft(v: number) {
     if (editorState.cm) editorState.cm.scrollDOM.scrollLeft = v;
   },
   focus() {
@@ -937,7 +938,7 @@ export const editor = {
   },
   setSelectionRange(start: number, end: number) {
     if (!editorState.cm) return;
-    const maxPos = editorState.cm.state.doc.length;
+    const maxPos: number = editorState.cm.state.doc.length;
     const s = Math.max(0, Math.min(start, maxPos));
     const e = Math.max(0, Math.min(end, maxPos));
     editorState.cm.dispatch({
@@ -950,8 +951,8 @@ export const editor = {
 // Editor History using CodeMirror 6 History
 export const editorHistory = {
   get history() {
-    const u = editorState.cm ? CM6.undoDepth(editorState.cm.state) : 0;
-    const r = editorState.cm ? CM6.redoDepth(editorState.cm.state) : 0;
+    const u: number = editorState.cm ? CM6.undoDepth(editorState.cm.state) : 0;
+    const r: number = editorState.cm ? CM6.redoDepth(editorState.cm.state) : 0;
     return new Array(u + r + 1);
   },
   get currentIndex() {

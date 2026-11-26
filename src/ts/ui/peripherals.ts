@@ -78,7 +78,7 @@ export function initPeripherals() {
   if (ledRow) {
     let ledHtml = '';
     for (let i = 15; i >= 0; i--) {
-      let typeClass, title, labelText;
+      let typeClass: string, title: string, labelText: string;
       if (i >= 9) {
         typeClass = 'led-pc';
         title = `LED[${i}] — PC[${i - 7}]`;
@@ -478,7 +478,7 @@ export function queueUartInput() {
   const raw = textEl.value;
   if (!raw.trim()) return;
 
-  let bytes = [];
+  let bytes: number[] = [];
   if (modeEl.value === 'ascii') {
     bytes = parseAsciiEscapes(raw);
   } else if (modeEl.value === 'hex') {
@@ -534,7 +534,7 @@ export function renderUartTerminal() {
   if (!termEl) return;
   const modeEl = byId<HTMLSelectElement>('uartInputMode');
   const isHex = modeEl && modeEl.value === 'hex';
-  let text;
+  let text: string;
   if (uart.txBytes.length === 0) {
     text = '(Terminal output will appear here...)';
   } else if (isHex) {

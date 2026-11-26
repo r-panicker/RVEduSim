@@ -73,7 +73,7 @@ export function hdlApplyPer(kind: string, f: string[]) {
 // snapshot of the state they leave, which a seek starts from instead of
 // reset; offset counts them, so the instruction count stays true.
 export const HDL_VL_KEEP = 2000000;
-export function hdlRestoreBase(b: { regs: ArrayLike<number>; regKnown: ArrayLike<number>; mem: string | any[]; periph: { ledState: number; sevsegState: string; oledCol: number; oledRow: number; oledCtrl: number; oledDataVal: number; oledAdvCol: boolean; oledAdvRow: boolean; oledFrontPage: number; oledBackPage: number; oledSwapUnpolled: boolean; oledRaceWarned: boolean; uartPending: number[]; uartRxByte: number; uartRxFull: boolean; uartRxDropped: number; uartRxDroppedTotal: number; uartNextDeliveryInstr: number; uartTxBuffer: string; uartTxLen: number; }; tx: number[]; txBuf: string; oled: ArrayLike<number>[]; }) {
+export function hdlRestoreBase(b: HdlBase) {
   loadProgram(program.machineCode);
   cpu.regs.set(b.regs);
   hdlRec.regKnown.set(b.regKnown);
@@ -87,7 +87,10 @@ export function hdlRestoreBase(b: { regs: ArrayLike<number>; regKnown: ArrayLike
   oled.buffer = oled.pages[oled.back];
 }
 // The state the page holds now, as a starting point for seeks.
-export function hdlCaptureBase(cyc: any, acks: any) {
+// The machine at a cycle, to seek from: registers, data memory, peripherals, OLED pages.
+export type HdlBase = ReturnType<typeof hdlCaptureBase>;
+
+export function hdlCaptureBase(cyc: number, acks: number) {
   const mem = new Uint8Array(hdlBuild.dmemBytes);
   for (let i = 0; i < mem.length; i++) mem[i] = getMemByte(layout.dataBase + i);
   return { cyc, regs: cpu.regs.slice(), regKnown: hdlRec.regKnown.slice(), mem,
@@ -106,7 +109,7 @@ export function hdlTrimTrace(t: HdlTrace) {
   while (lo < hi) { const mid = (lo + hi) >> 1; if (steps[mid].cyc < want) lo = mid + 1; else hi = mid; }
   const cut = lo, was = hdlRec.idx;
   hdlSeek(cut);
-  t.base = hdlCaptureBase(steps[cut].cyc, hdlRec.seekMark.acks);
+  t.base = hdlCaptureBase(steps[cut].cyc, hdlRec.seekMark?.acks ?? 0);
   t.offset = (t.offset || 0) + cut;
   t.steps = steps.slice(cut);
   t.pre = [];
@@ -180,19 +183,20 @@ export function hdlSeek(idx: number, forward?: boolean | undefined, light?: bool
   const steps = hdlRec.trace.steps;
   idx = Math.max(0, Math.min(idx, steps.length));
 
-  let k0 = 0, acks;
+  let k0 = 0, acks: number;
   const mark = hdlRec.seekMark;
   if (forward && mark && mark.trace === hdlRec.trace && mark.idx === hdlRec.idx && idx >= hdlRec.idx) {
     k0 = hdlRec.idx;
     acks = mark.acks;
     // The last step shown can have gained what the run joined on added
     // to it.
-    const ls = mark.tail && steps[k0 - 1];
-    if (ls) {
-      for (const w of ls.regw.slice(mark.tail[0])) { cpu.regs[w[0]] = w[1] | 0; hdlRec.regKnown[w[0]] = 1; }
-      for (const w of ls.memw.slice(mark.tail[1])) hdlApplyMemWrite(w[0], w[1], w[2]);
-      for (const e of ls.per.slice(mark.tail[2])) hdlApplyPer(e[0], e[1]);
-      acks += (ls.acks || 0) - mark.tail[3];
+    const tail = mark.tail;
+    const ls = tail && steps[k0 - 1];
+    if (tail && ls) {
+      for (const w of ls.regw.slice(tail[0])) { cpu.regs[w[0]] = w[1] | 0; hdlRec.regKnown[w[0]] = 1; }
+      for (const w of ls.memw.slice(tail[1])) hdlApplyMemWrite(w[0], w[1], w[2]);
+      for (const e of ls.per.slice(tail[2])) hdlApplyPer(e[0], e[1]);
+      acks += (ls.acks || 0) - tail[3];
     }
   } else if (hdlRec.trace.base) {
     // Without the architectural trace, the events after the snapshot

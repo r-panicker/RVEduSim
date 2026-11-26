@@ -404,7 +404,7 @@ export function executeAtomic(instr32: number, rd: number, funct3: number, rs1: 
     return;
   }
   const src = cpu.regs[rs2];
-  let result;
+  let result: number;
   switch (funct5) {
     case 0b00001: result = src; break;                                        // AMOSWAP.W
     case 0b00000: result = memVal + src; break;                               // AMOADD.W
