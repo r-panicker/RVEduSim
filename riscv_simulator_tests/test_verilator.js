@@ -484,13 +484,23 @@ if (process.argv[2] === '--checkpoints') {
     win.setDipSwitches(0x0011);
     const noTrace = win.runHdlSimulation();
     await until(() => /running live/.test(doc.getElementById('statusBar').textContent), 120000);
-    await sleep(800);
+    // LED[15:9] show PC[8:2], which the live helper reports every 30 ms (@@C).
+    const pcLedsV = () => [15, 14, 13, 12, 11, 10, 9].map(b => doc.getElementById('led' + b).classList.contains('on') ? 1 : 0).join('');
+    const pcsLive = new Set(), pcLedsOk = [];
+    for (let i = 0; i < 26; i++) {
+      await sleep(30);
+      const v = win.eval('pc') >>> 0;
+      pcsLive.add(v);
+      pcLedsOk.push(pcLedsV() === ((v >>> 2) & 0x7F).toString(2).padStart(7, '0'));
+    }
     win.setDipSwitches(0x0022);
     const ledLive = await until(() => win.getLedState() === 0x22, 5000);
     const statsNt = doc.getElementById('statsBar').textContent;
     win.toggleRunPause();
     await noTrace;
     check('With Detail Fastest (no trace) a live run still shows a switch change while it runs', ledLive);
+    check('…and the PC LEDs follow the run (' + [...pcsLive].map(x => x.toString(16)).join(' ') + ')',
+      pcsLive.size >= 2 && pcLedsOk.every(Boolean));
     check('…and its fraction of real time is not stuck at 0 (' + (/×[\d.]+ real time/.exec(statsNt) || ['none'])[0] + ')',
       !/×0\.00 real time/.test(statsNt) && /Cycles: [1-9]/.test(statsNt));
     const ntEnd = win.getHdlTrace().budget;

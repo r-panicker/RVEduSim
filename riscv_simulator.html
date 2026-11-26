@@ -2470,6 +2470,13 @@
 
     body.wave-in-panel #tab-waveform .wave-hdr .wave-fold-btn { display: none; }
 
+    /* 16px, or a phone zooms the page in on focus. */
+    body.wave-in-panel #tab-waveform .wave-cycle input {
+      width: 10ch;
+      min-height: 36px;
+      font-size: 16px;
+    }
+
     .wave-hdr {
       display: flex;
       align-items: center;
@@ -2525,8 +2532,29 @@
     .wave-hdr-actions {
       margin-left: auto;
       display: inline-flex;
+      align-items: center;
       gap: 2px;
       flex-shrink: 0;
+    }
+
+    .wave-cycle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-right: 6px;
+      font-size: 11px;
+      color: #9399b2;
+      white-space: nowrap;
+    }
+
+    .wave-cycle input {
+      width: 9ch;
+      padding: 2px 4px;
+      font: 11px 'Consolas', 'Courier New', monospace;
+      color: #cdd6f4;
+      background: #11111b;
+      border: 1px solid #45475a;
+      border-radius: 3px;
     }
 
     .wave-notice {
@@ -4816,6 +4844,8 @@
         <span class="wave-hdr-info" id="waveInfo"></span>
         <span class="wave-hdr-hint">ctrl+scroll zooms · shift+scroll pans · click a wave to go there</span>
         <span class="wave-hdr-actions">
+          <label class="wave-cycle" title="The cycle the simulator is at. Type another and press Enter to go there.">Cycle
+            <input type="text" id="waveCycleInput" inputmode="numeric" spellcheck="false" autocomplete="off"></label>
           <button class="panel-hdr-btn" type="button" onclick="wavePan(-1)" title="Pan to earlier cycles">‹</button>
           <button class="panel-hdr-btn" type="button" onclick="wavePan(1)" title="Pan to later cycles">›</button>
           <button class="panel-hdr-btn" type="button" onclick="waveZoom(2)" title="Zoom out (show more cycles)">−</button>
@@ -16534,6 +16564,7 @@ module cg3207_hdl_tb;
   integer trace_from = 0;
   integer vcd_from   = 0;
   integer trace_lvl  = ${run ? 1 : 2};
+  integer pc_log     = 0;
   integer nstim      = ${stim.length};
   integer nrx        = ${rx.length};
 
@@ -16584,6 +16615,7 @@ ${dbufPorts}    .ACCEL_Data(ACCEL_Data), .ACCEL_DReady(ACCEL_DReady),
   initial begin
     if ($value\$plusargs("CYCLES=%d", max_cycles)) begin end
     if ($value\$plusargs("TRACE=%d",  trace_lvl))  begin end
+    if ($test\$plusargs("PCLOG")) pc_log = 1;
     if ($value\$plusargs("TRACEFROM=%d", trace_from)) begin end
     if ($value\$plusargs("NSTIM=%d", nstim) && nstim > 0) $readmemh("stim.mem", stim_mem);
     if ($value\$plusargs("NRX=%d",   nrx)   && nrx   > 0) $readmemh("uart_rx.mem", rx_mem);
@@ -16670,6 +16702,7 @@ ${dbufPorts}    .ACCEL_Data(ACCEL_Data), .ACCEL_DReady(ACCEL_DReady),
           6: max_cycles = cyc + 1;
           7: cg3207_vcd(1);
           8: cg3207_vcd(0);
+          9: $display("@@C %0d %0h", cyc, dut.PC);
           default: ;
         endcase
         if (live_code >= 1 && live_code <= 4) $display("@@V %0d %0d %0h", cyc + 1, live_code, live_value);
@@ -16723,6 +16756,16 @@ ${dbufPorts}    .ACCEL_Data(ACCEL_Data), .ACCEL_DReady(ACCEL_DReady),
       end
       if (|dut.MemWrite_out && cyc >= trace_from)
         $display("@@M %0d %0h %0h %0h", cyc, dut.ALUResult, dut.MemWrite_out, dut.WriteData_out);
+    end
+  end
+
+  // Without the trace, +PCLOG reports each change of PC (@@C), so that Real
+  // time at a slow clock shows LED[15:9] counting.
+  reg [31:0] pc_logged = 32'hxxxxxxxx;
+  always @(posedge CLK) begin
+    if (!RESET && trace_lvl == 1 && pc_log && dut.PC !== pc_logged) begin
+      if (cyc >= trace_from) $display("@@C %0d %0h", cyc, dut.PC);
+      pc_logged <= dut.PC;
     end
   end
 
@@ -16882,7 +16925,9 @@ endmodule
     function hdlRecordList(t, lo, hi) {
       const out = [];
       const add = r => { if (r[1] >= lo && r[1] < hi) out.push(JSON.stringify(r)); };
-      const per = list => { for (const [k, f] of list) add([k, parseInt(f[0], 10)].concat(f.slice(1))); };
+      // @@C is printed by the wall clock (Verilator) or on request (+PCLOG),
+      // so a replay need not repeat it.
+      const per = list => { for (const [k, f] of list) if (k !== 'C') add([k, parseInt(f[0], 10)].concat(f.slice(1))); };
       per(t.pre);
       const steps = t.steps;
       let a = 0, b = steps.length;
@@ -17782,7 +17827,9 @@ endmodule
           const c = parseInt(f[0], 10);
           if (c > (t.lastCyc || 0)) t.lastCyc = c;
         }
-        if (k === 'C') return;
+        // @@C <cycle> <PC>: how far a live run has got, and without the trace
+        // the PC, which the page shows as the run goes.
+        if (k === 'C') { if (!cur && f.length > 1) t.pre.push([k, f]); return; }
         if (k === 'I') {
           cur = { cyc: parseInt(f[0], 10), pc: parseInt(f[1], 16) >>> 0,
                   instr: parseInt(f[2], 16) >>> 0, regw: HDL_NONE, memw: HDL_NONE, per: HDL_NONE, acks: 0 };
@@ -17860,6 +17907,8 @@ endmodule
       ];
       if (hdlDumpVcd) plus.push('+VCD');
       if (hdlDumpVcd && hdlWaveTop) plus.push('+VCDTOP');
+      if (traceLvl === 1 && hdlSimulator !== 'verilator' && runPace === 'real' && cpuHz() <= RT_FOLLOW_HZ)
+        plus.push('+PCLOG');
       if (hdlDumpVcd && hdlSimulator === 'verilator' && budget > HDL_VCD_WINDOW)
         plus.push('+VCDFROM=' + (budget - HDL_VCD_WINDOW));
       return plus;
@@ -18107,7 +18156,9 @@ endmodule
     }
 
     function hdlApplyPer(kind, f) {
-      if (kind === 'L') {
+      if (kind === 'C') {
+        pc = parseInt(f[1], 16) >>> 0;
+      } else if (kind === 'L') {
         ledState = parseInt(f[1], 16) & 0xFF;
       } else if (kind === 'S') {
         sevsegState = (parseInt(f[1], 16) >>> 0).toString(16).padStart(8, '0');
@@ -18227,6 +18278,7 @@ endmodule
       if (!hdlTrace) return 0;
       const s = hdlTrace.steps;
       if (hdlIdx < s.length) return s[hdlIdx].cyc;
+      if (hdlPaced && !s.length) return Math.floor(hdlPaced.cyc);
       return hdlTrace.final ? hdlTrace.final.cyc : (s.length ? s[s.length - 1].cyc : 0);
     }
 
@@ -18238,6 +18290,16 @@ endmodule
     let hdlSeekMark = null;   // { trace, idx, acks } as the last seek left them
     // light: only what a running simulation shows (peripherals, stats, the
     // waveform), not the line, registers and memory, which catch up when it stops.
+    // How many of the events of a recording without the trace are shown: all,
+    // or, while a run is held to the paced clock, those the clock has reached.
+    function hdlPreShown() {
+      const pre = hdlTrace.pre;
+      if (!hdlPaced || hdlTrace.steps.length) return pre.length;
+      let n = 0;
+      while (n < pre.length && parseInt(pre[n][1][0], 10) <= hdlPaced.cyc) n++;
+      return hdlPaced.applied = n;
+    }
+
     function hdlSeek(idx, forward, light) {
       if (!hdlTrace) return;
       const steps = hdlTrace.steps;
@@ -18261,13 +18323,15 @@ endmodule
         // Without the architectural trace, the events after the snapshot
         // are all in pre.
         hdlRestoreBase(hdlTrace.base);
-        for (const e of hdlTrace.pre) hdlApplyPer(e[0], e[1]);
+        const n = hdlPreShown();
+        for (let i = 0; i < n; i++) hdlApplyPer(hdlTrace.pre[i][0], hdlTrace.pre[i][1]);
         acks = hdlTrace.base.acks + (hdlTrace.preAcks || 0);
       } else {
         loadProgram(machineCode);
         hdlRegKnown.fill(0);
         hdlResetPeripheralState();
-        for (const e of hdlTrace.pre) hdlApplyPer(e[0], e[1]);
+        const n = hdlPreShown();
+        for (let i = 0; i < n; i++) hdlApplyPer(hdlTrace.pre[i][0], hdlTrace.pre[i][1]);
         acks = hdlTrace.preAcks || 0;
       }
 
@@ -18287,6 +18351,7 @@ endmodule
                       tail: ls ? [ls.regw.length, ls.memw.length, ls.per.length, ls.acks || 0] : null };
       lastChangedReg = changed;
       pc = idx < steps.length ? steps[idx].pc
+         : hdlPaced && !steps.length ? pc
          : (hdlTrace.next !== null && hdlTrace.next !== undefined ? hdlTrace.next
          : (steps.length ? steps[steps.length - 1].pc : baseAddress));
       instructionCount = (hdlTrace.offset || 0) + idx;
@@ -18766,6 +18831,7 @@ endmodule
     // Run is recorded in one go.
     const HDL_CHUNK_MS = 300;
     let hdlChunked = null;            // { stop } during a chunked run
+    let hdlPaced = null;              // { cyc, applied }: a run without the trace, shown at the paced clock
 
     function hdlChunkedStop() {
       if (!hdlChunked) return false;
@@ -18814,6 +18880,31 @@ endmodule
         };
         let size = 1000, first = !resume, stop = 'end', preApplied = resume ? hdlTrace.pre.length : 0;
         const wall0 = performance.now(), cyc0 = resume ? hdlCurrentCycle() : 0;
+        // Without the trace, Real time holds what is shown to the paced clock:
+        // each event, and the PC, is applied as the clock reaches it, and a
+        // chunk is about HDL_CHUNK_MS of the clock, so the recording stays
+        // close ahead.
+        const paced = runPace === 'real' && !hdlTraceEnabled;
+        const cap = n => paced ? Math.min(n, Math.max(1, Math.round(cpuHz() * HDL_CHUNK_MS / 1000))) : n;
+        size = cap(size);
+        const showPaced = () => {
+          const t = hdlTrace;
+          if (!hdlPaced || !t || t.steps.length) return;
+          hdlPaced.cyc = Math.min(t.budget, cyc0 + (performance.now() - wall0) / 1000 * cpuHz());
+          const from = preApplied, n = hdlPreShown();
+          for (let i = from; i < n; i++) hdlApplyPer(t.pre[i][0], t.pre[i][1]);
+          preApplied = n;
+          totalCycles = hdlCurrentCycle();
+          if (n > from) {
+            renderUartTerminal();
+            updatePeripherals();
+            if (typeof updateOledCanvas === 'function') updateOledCanvas();
+            updateWaveView();
+          }
+          updateStats();
+        };
+        if (paced) hdlPaced = { cyc: cyc0, applied: preApplied };
+        const pacer = paced ? setInterval(showPaced, 50) : null;
         // What the page shows follows the recording: the instructions, or
         // without the trace the peripheral events as they come.
         const follow = (t, replayed) => {
@@ -18822,12 +18913,18 @@ endmodule
             else hdlSeek(t.steps.length, true, true);
             return;
           }
-          if (replayed) { hdlSeek(0); preApplied = t.pre.length; return; }
+          // Unless +PCLOG reports it as it changes, the PC is known only
+          // where each chunk ends (@@N).
+          if (t.next !== null && t.next !== undefined) t.pre.push(['C', [String(t.budget - 1), t.next.toString(16)]]);
+          if (replayed) {
+            hdlSeek(0, false, !!hdlPaced);
+            preApplied = hdlPaced ? hdlPaced.applied : t.pre.length;
+          }
+          if (hdlPaced) { showPaced(); return; }
+          if (replayed) return;
           for (let i = preApplied; i < t.pre.length; i++) hdlApplyPer(t.pre[i][0], t.pre[i][1]);
           preApplied = t.pre.length;
           totalCycles = t.budget;
-          // The PC is known only where each chunk ends (@@N).
-          if (t.next !== null && t.next !== undefined) pc = t.next;
           renderUartTerminal();
           updatePeripherals();
           if (typeof updateOledCanvas === 'function') updateOledCanvas();
@@ -18863,16 +18960,26 @@ endmodule
             const t = first ? await hdlStartTrace(target, { chunk: true })
                             : await hdlBuildTrace(target, { quiet: true, chunk: true });
             if (!t) return null;
-            size = Math.max(200, Math.min(200000, Math.round((target - at) * HDL_CHUNK_MS / Math.max(1, performance.now() - t0))));
-            if (first) { first = false; if (runPace === 'real') hdlSeek(0); }
+            size = cap(Math.max(200, Math.min(200000, Math.round((target - at) * HDL_CHUNK_MS / Math.max(1, performance.now() - t0)))));
+            if (first) {
+              first = false;
+              if (runPace === 'real') { hdlSeek(0); if (hdlPaced) preApplied = hdlPaced.applied; }
+            }
             else said(t);
             hit = hdlBreakAt(Math.max(from, hdlIdx + 1));
             if (hit >= 0) { stop = 'breakpoint'; break; }
             follow(t, false);
-            hdlStatus('running - cycle ' + t.budget.toLocaleString() + ' of ' + end.toLocaleString() +
+            hdlStatus('running - cycle ' + (hdlPaced ? hdlCurrentCycle() : t.budget).toLocaleString() + ' of ' + end.toLocaleString() +
               (runPace === 'real' ? ', paced to ' + fmtHz(cpuHz()) : ''), 'busy');
           }
+          // The last chunk is recorded before the clock shown reaches it.
+          if (stop === 'end' && hdlPaced) {
+            while (!run.stop && hdlTrace && hdlPaced.cyc < hdlTrace.budget) await new Promise(r => setTimeout(r, 50));
+            if (run.stop) stop = 'paused';
+          }
         } finally {
+          if (pacer) clearInterval(pacer);
+          if (paced) hdlPaced = null;
           if (hdlChunked === run) hdlChunked = null;
         }
         const t = hdlTrace;
@@ -19701,6 +19808,8 @@ endmodule
         dock.classList.add('wave-empty');
         if (notice) notice.innerHTML = html;
         if (info) info.textContent = '';
+        const box = document.getElementById('waveCycleInput');
+        if (box) box.value = '';
       };
 
       if (!hdlDumpVcd) {
@@ -19883,13 +19992,17 @@ endmodule
       const p = waveParsed;
       if (!p) return;
       const info = document.getElementById('waveInfo');
+      const box = document.getElementById('waveCycleInput');
+      if (box && document.activeElement !== box) box.value = String(hdlCurrentCycle());
       if (info) {
         const last = waveActiveEndCycle();
         const cyc = hdlCurrentCycle();
+        const first = waveFirstCycle(p);
         // Once the PC stops, the hardware keeps counting cycles while the
         // waveform stops; saying only "cycle 200 ... of 7" would look wrong.
         const notes = [];
         if (cyc > last) notes.push(`PC last advanced at cycle ${last - 1}`);
+        if (cyc < first) notes.push(`the waveform starts at cycle ${first}`);
         if (waveDropped) {
           notes.push(`${waveDropped} chosen signal${waveDropped > 1 ? 's' : ''} not in this run`);
         }
@@ -19897,6 +20010,27 @@ endmodule
       }
       drawWaveNames(p);
       drawWaveforms();
+    }
+
+    // A long run's waveform keeps only its last stretch.
+    function waveFirstCycle(p) {
+      let t = Infinity;
+      for (const c of p.changes.values()) if (c.times.length && c.times[0] < t) t = c.times[0];
+      return Number.isFinite(t) ? Math.floor(t / waveTicksPerCycle(p)) : 0;
+    }
+
+    // A cycle typed into the header goes there as a click on the waveform
+    // would, and puts it in the middle of the view.
+    function waveGotoCycle(text) {
+      const c = parseInt(String(text).replace(/[\s,_]/g, ''), 10);
+      if (!waveParsed || !Number.isFinite(c)) { updateWaveHeaderAndDraw(); return false; }
+      const end = Math.max(waveActiveEndCycle(), hdlTrace ? hdlTrace.budget : 0);
+      const cyc = Math.max(0, Math.min(c, end));
+      waveSeekToCycle(cyc);
+      waveStart = Math.max(0, cyc - Math.floor(waveSpan / 2));
+      waveClampStart();
+      updateWaveHeaderAndDraw();
+      return true;
     }
 
     function waveCycleAtX(clientX) {
@@ -19920,6 +20054,14 @@ endmodule
     }
 
     function initWaveCanvas() {
+      const box = document.getElementById('waveCycleInput');
+      if (box) {
+        box.addEventListener('keydown', e => {
+          if (e.key === 'Enter') { e.preventDefault(); waveGotoCycle(box.value); box.blur(); }
+          else if (e.key === 'Escape') box.blur();
+        });
+        box.addEventListener('blur', () => { if (waveParsed) updateWaveHeaderAndDraw(); });
+      }
       const canvas = document.getElementById('waveCanvas');
       if (!canvas) return;
 
@@ -20825,6 +20967,7 @@ endmodule
     window.waveFit = waveFit;
     window.waveSetSpan = waveSetSpan;
     window.waveSeekToCycle = waveSeekToCycle;
+    window.waveGotoCycle = waveGotoCycle;
     window.waveCycleAtX = waveCycleAtX;
     window.waveTicksPerCycle = waveTicksPerCycle;
     window.waveValueAt = waveValueAt;

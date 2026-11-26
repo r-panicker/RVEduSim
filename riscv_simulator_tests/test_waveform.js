@@ -533,6 +533,20 @@ setTimeout(async () => {
         far.start + ' + span ' + far.span + ' vs end ' + end + ')',
         far.start + far.span - 1 >= end && far.start <= end);
       check('and never scrolls past it', far.start === Math.max(0, end - far.span + 1));
+
+      console.log('\n[7] Going to a cycle typed into the header');
+      const box = doc.getElementById('waveCycleInput');
+      check('the header has a cycle box, showing the cycle the simulator is at', !!box && box.value === '0');
+      win.waveSetSpan(10, 0);
+      box.value = '30';
+      box.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      check('Enter puts the cycle typed in the middle of the view (start ' + st().start + ')',
+        st().start === 25 && st().span === 10);
+      check('…and the box shows the simulator\'s cycle again', box.value === '0');
+      win.waveGotoCycle('1,000,000');
+      check('a cycle past the end goes to the end', st().start === Math.max(0, end - st().span + 1));
+      check('something that is not a number changes nothing', win.waveGotoCycle('abc') === false &&
+        st().start === Math.max(0, end - st().span + 1));
     }
 
     console.log('\n===========================================================');

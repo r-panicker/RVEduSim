@@ -409,6 +409,40 @@ setTimeout(async () => {
       check('…and the PC LEDs follow the run (' + [...pcsSeen].map(x => x.toString(16)).join(' ') + ')',
         pcsSeen.size >= 2 && ledsMatch.every(Boolean));
       check('…and the summary leaves out an instruction count it does not have', !/0 instructions/.test(st()) && /100,000 cycles/.test(doc.body.textContent));
+
+      // Real time without the trace: what is shown keeps to the paced clock,
+      // not to the end of the recording.
+      await fresh();
+      win.setHdlTrace(false);
+      win.setClkDivBits(16);                         // 1.53 kHz
+      win.setRunPace('real');
+      const r6 = win.runHdlSimulation();
+      await until(() => /running - cycle/.test(st()), 60000);
+      await sleep(1500);
+      const shownNt = win.eval('hdlCurrentCycle()'), recNt = win.getHdlTrace().budget;
+      win.setDipSwitches(0x66);
+      const ledPaced = await until(() => win.getLedState() === 0x66, 3000);
+      win.toggleRunPause();
+      await r6;
+      const stimNt = win.getHdlTrace().timeline.stim;
+      check('At Real time without the trace it is shown at the clock (cycle ' + shownNt + ', recorded to ' + recNt + ')',
+        shownNt > 1000 && shownNt < 5000 && recNt - shownNt < 2000);
+      check('…and a switch moved then shows within 3 s, at the cycle shown (' + JSON.stringify(stimNt) + ')',
+        ledPaced && stimNt.length === 1 && Math.abs(stimNt[0].cycle - shownNt) < 1000);
+
+      // At 100 Hz or less, the testbench reports every PC change (+PCLOG).
+      await fresh();
+      win.setClkDivBits(20);                         // 95 Hz
+      const r7 = win.runHdlSimulation();
+      const pcsSlow = new Set();
+      await until(() => /running - cycle/.test(st()), 60000);
+      for (let i = 0; i < 30; i++) { await sleep(50); pcsSlow.add(win.eval('pc') >>> 0); }
+      win.toggleRunPause();
+      await r7;
+      check('…and at a clock slow enough to watch, the PC LEDs show every instruction (' + pcsSlow.size + ' PCs in 1.5 s)',
+        pcsSlow.size >= 4 && win.getHdlTrace().pre.some(e => e[0] === 'C' && parseInt(e[1][0], 10) < win.getHdlTrace().budget - 1));
+      win.setRunPace('max');
+      win.setClkDivBits(5);
       win.setHdlTrace(true);
 
       await fresh();
