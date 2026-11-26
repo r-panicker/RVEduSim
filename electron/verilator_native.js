@@ -217,8 +217,12 @@ function createVerilator({ root, cacheDir }) {
     return vars;
   }
 
+  // The runtime is linked into the model statically, so the DPI functions are
+  // not DLL imports on Windows (DPI_DLLISPEC), and the time comes from the
+  // context the generated main advances (VL_TIME_CONTEXT), not from the weak
+  // sc_time_stamp() Windows cannot provide.
   function cxxFlags(cc, vars) {
-    const defs = ['-DVERILATOR=1'].concat(Object.keys(vars).filter(k => /^VM_/.test(k) && /^\d+$/.test(vars[k]))
+    const defs = ['-DVERILATOR=1', '-DVL_TIME_CONTEXT', '-DDPI_DLLISPEC='].concat(Object.keys(vars).filter(k => /^VM_/.test(k) && /^\d+$/.test(vars[k]))
       .map(k => '-D' + k + '=' + vars[k]));
     if (vars.VM_PREFIX_INCLUDE) defs.push('-DVM_PREFIX_INCLUDE=' + vars.VM_PREFIX_INCLUDE);
     return ['-std=c++20'].concat(cc.flags, [OPT, '-I.', '-I' + inc, '-I' + path.join(inc, 'vltstd'),
