@@ -5,9 +5,10 @@
 // The simulation is deterministic, so a change made while paused can be
 // stamped at the current cycle and the run replayed, from the last
 // checkpoint before it where there is one: everything before that point
-// comes out bit-identical and you keep your place. What lay beyond the change was recorded with the old input and is
-// gone either way, so the new recording reaches one Cycles past it
-// rather than all the way back to where the old one ended.
+// comes out bit-identical and you keep your place. What lay beyond the
+// change was recorded with the old input and is gone either way, so the
+// new recording reaches one Cycles past it rather than all the way back
+// to where the old one ended.
 async function hdlResimulate(keepIdx) {
   const budget = Math.min(hdlTrace.budget, hdlCurrentCycle() + hdlCycleBudget);
   const t = await hdlBuildTrace(budget, { quiet: true });

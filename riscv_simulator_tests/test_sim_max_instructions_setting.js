@@ -58,8 +58,8 @@ setTimeout(async () => {
     if (parseInt(maxInstrInput.value, 10) !== 100000000) {
       throw new Error(`Expected default HTML value 100000000, got ${maxInstrInput.value}`);
     }
-    if (win.maxInstructionsPerRun !== 100000000) {
-      throw new Error(`Expected default window.maxInstructionsPerRun 100000000, got ${win.maxInstructionsPerRun}`);
+    if (win.run.maxInstructions !== 100000000) {
+      throw new Error(`Expected default window.run.maxInstructions 100000000, got ${win.run.maxInstructions}`);
     }
     console.log('✅ Default maxInstructionsPerRun is 100,000,000');
 
@@ -76,8 +76,8 @@ setTimeout(async () => {
     // 4. Update the input value and apply settings
     maxInstrInput.value = '50000000';
     win.applyAndCloseSettings();
-    if (win.maxInstructionsPerRun !== 50000000) {
-      throw new Error(`Expected maxInstructionsPerRun to update to 50000000, got ${win.maxInstructionsPerRun}`);
+    if (win.run.maxInstructions !== 50000000) {
+      throw new Error(`Expected maxInstructionsPerRun to update to 50000000, got ${win.run.maxInstructions}`);
     }
     console.log('✅ applyAndCloseSettings() successfully updated maxInstructionsPerRun to 50,000,000');
 
@@ -91,8 +91,8 @@ setTimeout(async () => {
     // 6. Test Reset Defaults
     win.switchSettingsTab('simulator');
     win.resetCurrentSettingsTab();
-    if (win.maxInstructionsPerRun !== 100000000) {
-      throw new Error(`Expected resetCurrentSettingsTab to restore 100000000, got ${win.maxInstructionsPerRun}`);
+    if (win.run.maxInstructions !== 100000000) {
+      throw new Error(`Expected resetCurrentSettingsTab to restore 100000000, got ${win.run.maxInstructions}`);
     }
     if (parseInt(maxInstrInput.value, 10) !== 100000000) {
       throw new Error(`Expected resetCurrentSettingsTab to update input to 100000000, got ${maxInstrInput.value}`);
@@ -100,14 +100,14 @@ setTimeout(async () => {
     console.log('✅ resetCurrentSettingsTab() successfully reverted maxInstructionsPerRun to 100,000,000');
 
     // 7. Test running a program with custom limit
-    win.maxInstructionsPerRun = 25000;
+    win.run.maxInstructions = 25000;
     win.setLanguageMode('asm');
     await win.loadExample('fib');
     win.assembleOnly();
     win.runProgram();
 
     setTimeout(async () => {
-      if (win.programFinished || win.pc > 0) {
+      if (win.programFinished || win.cpu.pc > 0) {
         console.log(`✅ Simulation ran successfully with custom maxInstructionsPerCycle (25,000). Finished: ${win.programFinished}`);
       } else {
         throw new Error('Simulation did not execute properly with custom maxInstructionsPerCycle');

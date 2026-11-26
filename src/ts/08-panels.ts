@@ -162,12 +162,11 @@ function updateDockWidthForGrid() {
 // lone row-2 panel is never affected (it always uses `1 1 0`). Shared by
 // `applyPanelDock()` and the live main-splitter drag, both of which need to
 // re-clamp persisted widths against the current (possibly narrower) dock.
-// The clamp deliberately reads ONLY the rendered clientWidth: in jsdom (and
-// in layouts where getBoundingClientRect is stubbed) clientWidth is 0, so
-// the clamp is skipped and persisted widths are restored verbatim — exactly
-// as the drag-time tests expect. In a real browser clientWidth is the live
-// rendered dock width, so a main-splitter drag that narrows the dock
-// re-clamps the persisted pair to fit (no blank space on the right).
+// The clamp reads only the rendered clientWidth, which is 0 while the dock
+// has no layout (not yet laid out, or under jsdom); the clamp is then
+// skipped and the persisted widths are kept as they are. Once the dock is
+// laid out, a main-splitter drag that narrows it re-clamps the persisted
+// pair to fit, leaving no blank space on the right.
 function clampGridRowWidths() {
   if (!panelDock) return;
   if (!dockUsesTwoColumns()) return;
@@ -1088,7 +1087,7 @@ function initPanelDock() {
 function updateLineNumbers() {
   if (!cmEditor) return;
   cmEditor.dispatch({
-    effects: setBreakpointsEffect.of(new Set(breakpoints))
+    effects: setBreakpointsEffect.of(new Set(run.breakpoints))
   });
 }
 
@@ -1105,8 +1104,8 @@ function updateEditor() {
   const code = editor.value;
   if (code.trim()) {
     try {
-      const mc = assemble(code, baseAddress);
-      machineCode = mc;
+      const mc = assemble(code, layout.baseAddress);
+      program.machineCode = mc;
       updateMachineCode();
       updateDisassembly();
     } catch (e) { }
@@ -1441,13 +1440,13 @@ function updateRegisters() {
   let shown = 0;
   for (let i = 0; i < 32; i++) {
     const name = ABI_NAMES[i];
-    const val = regs[i];
+    const val = cpu.regs[i];
     const uval = val >>> 0;
-    const decVal = regDecSigned ? val : uval;
+    const decVal = ui.regDecSigned ? val : uval;
     if (!panelFindMatch('registers',
       `x${i} ${name} ${uval.toString(16).padStart(8, '0')} ${decVal}`)) continue;
     shown++;
-    const isChanged = i === lastChangedReg;
+    const isChanged = i === cpu.lastChangedReg;
     const valClass = 'reg-val' + (isChanged ? ' reg-changed' : '');
     const hexTxt = uval.toString(16).padStart(8, '0');
     if (stateIsReplayed()) {
@@ -1473,6 +1472,6 @@ function updateRegisters() {
 }
 
 function setRegDecSigned(signed) {
-  regDecSigned = !!signed;
+  ui.regDecSigned = !!signed;
   updateRegisters();
 }

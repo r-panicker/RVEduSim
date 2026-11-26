@@ -4,7 +4,7 @@
 
 | File | What it is |
 |---|---|
-| [`src/`](src/) | The simulator's source: `index.html` (the markup), `styles/*.css` (in the order of `styles/order.json`) and `ts/*.ts` (in the order of `tsconfig.json`'s `files`). Assembling, simulating and the HDL engine run in the browser. The **DIP to LED** example (assembly and C) is built in; every other example, and C compilation, need the page served over `http://`. |
+| [`src/`](src/) | The simulator's source: `index.html` (the markup), `styles/*.css` (in the order of `styles/order.json`) and `ts/` (the modules, entered at `ts/main.ts`, and the classic scripts listed in `ts/classic.json`). Assembling, simulating and the HDL engine run in the browser. The **DIP to LED** example (assembly and C) is built in; every other example, and C compilation, need the page served over `http://`. |
 | [`tools/page.js`](tools/page.js), [`tools/build.js`](tools/build.js) | The build: `npm run build` writes `dist/` (`index.html`, a minified `app.js` and `app.css`). `dist/` is not committed; the Pages workflow and the desktop app build it. |
 | [`examples/`](examples/) | All other examples: `asm/*.asm`, `c/*.c`, fetched when selected. `examples/hdl/` holds `Wrapper.v` and `RV_reference.v`, a prebuilt gate-level netlist of a reference core. |
 | [`examples/index.txt`](examples/index.txt) | The Example menu: one markdown-style table row per example, giving its key, language, label, file, the `IROM`/`DMEM` depth bits it needs, and a description. Adding a row and a file adds an example; the HTML is not edited. The file is `.txt` so static site generators serve it verbatim rather than render it. |
@@ -21,18 +21,30 @@ however the page is served.
 
 ### Source and build
 
-The scripts in `src/ts/` are TypeScript, of two kinds. An ES module (a file with `import` or
-`export`) is strictly typed and names what it uses; esbuild bundles the modules and puts their
-exports on `window`. The rest are classic scripts: they share one global scope, as the parts of
-one script, so a function or variable declared in one is visible in all of them and in the
-modules, and the markup's inline handlers (`onclick="runProgram()"`) call them by name. The build
-(`tools/page.js`) runs the modules first, then the classic scripts joined in the order of
-`tsconfig.json`'s `files`, with types stripped and top-level names kept when minified. A module
-uses a classic script's global only once the page has loaded, and declares it
-(`declare let labels: Record<string, number>`) to type it. `npm run typecheck` runs `tsc` over
-all of them; a classic script that starts with `// @ts-nocheck` is not yet typed. The styles are joined
-in the order of `src/styles/order.json`. `dist/index.html` names `app.js` and `app.css` with a
-hash of their content (`app.js?v=…`), so a browser never runs a cached copy of an older build.
+The scripts in `src/ts/` are TypeScript, of two kinds.
+
+- **Modules**, in folders by layer (`isa/`, `asm/`, `machine/`, `ui/`), are ES modules, strictly
+  typed, that import what they use. `main.ts` is their entry point: esbuild bundles from it, and
+  it puts the modules' exports on `window` for the classic scripts, the markup's inline handlers
+  (`onclick="runProgram()"`) and the tests.
+- **Classic scripts**, the numbered files listed in `src/ts/classic.json`, share one global
+  scope, as the parts of one script, so a function declared in one is visible in all of them.
+  They are joined in that order after the modules, with the types stripped and, when minified,
+  their top-level names kept. Each starts with `// @ts-nocheck` until it is typed. A module that
+  calls one declares it (`declare function updateStats(): void`) and may call it only once the
+  page has loaded.
+
+The simulator's state is in `machine/state.ts`, one object per part: `cpu` (registers, PC,
+counters), `memory`, `layout` (segment bases and sizes), `program` (machine code, labels,
+symbols), `run` (running, breakpoints, the current line, the CPI table), `stepHistory` (what
+Back undoes), `board` (LEDs, 7-segment, switches, buttons), `accel`, `uart`, `oled`, `clock`
+and `ui`. Code reads and writes these objects (`cpu.pc`, `uart.rxFull`), never copies of their
+fields. `machine/memory-map.ts` holds the MMIO addresses and `machine/mmio.ts` the table of what
+each register does.
+
+`npm run typecheck` runs `tsc` over all of `src/ts`. The styles are joined in the order of
+`src/styles/order.json`. `dist/index.html` names `app.js` and `app.css` with a hash of their
+content (`app.js?v=…`), so a browser never runs a cached copy of an older build.
 
 ### Running it locally
 
@@ -56,7 +68,7 @@ DIP to LED.
 | **Editor** | CodeMirror 6 (`window.CM6`). ASM and C modes, each with its own syntax highlighter, autocomplete, signature help and hover documentation. Catppuccin Mocha dark theme. |
 | **Assembler** | Two-pass assembler for RV32I + M + A + F + D and common pseudo-instructions. Produces a disassembly with label header rows, jump/branch target annotations and C source-line tags. |
 | **C support** | Compiles through Godbolt (RV32 GCC or Clang; `-O` level and ABI selectable; default compiler RISC-V Clang 20.1.0, id `rv32-cclang2010`). A baremetal CRT0 shim that sets `sp` is prepended. PC↔C-line maps in both directions support source-level stepping and breakpoints. See [§3](#3-c-language-support). |
-| **Execution** | Non-blocking `requestAnimationFrame` loop; `BATCH_SIZE = min(10000, run limit)` instructions per tick. The run limit (`maxInstructionsPerRun`, default 100,000,000) pauses runaway loops. The functional engine models a single-cycle, multi-cycle (per-category CPI table) or 5-stage pipelined processor. See [§4](#4-execution-engines). |
+| **Execution** | Non-blocking `requestAnimationFrame` loop; `BATCH_SIZE = min(10000, run limit)` instructions per tick. The run limit (`run.maxInstructions`, default 100,000,000) pauses runaway loops. The functional engine models a single-cycle, multi-cycle (per-category CPI table) or 5-stage pipelined processor. See [§4](#4-execution-engines). |
 | **Debugging** | Run / Pause / Resume, Step, Step Back with full register and memory history, and optional Statement Stepping (one C statement or multi-instruction pseudo-instruction per step), in both engines. Breakpoints snap to the next executable line; the executing line is highlighted and scrolled into view. |
 | **Memory view** | Sub-tabs `[ Text \| Data \| Stack \| MMIO ]`. Text is read-only; Data, Stack and MMIO are editable. The stack is shown in decreasing address order. Words are displayed little-endian. Segment overflow is warned about. The program can be saved as Verilog `$readmemh` images `AA_IROM.mem` and `AA_DMEM.mem`. |
 | **Panels** | Registers, Memory, Peripherals, Disassembly and Locals (C mode) are independent panels: any combination can be shown, docked in a stack or a 2×2 grid, or floated. Layout persists in `localStorage`. See [§2.5](#25-panels). |
@@ -194,7 +206,7 @@ The namespace exposes:
 
 ### 2.3 Breakpoints and the execution line
 
-- Clicking the breakpoint gutter (`.cm-breakpoint-gutter`) or the line numbers, or pressing `F9` on the cursor line, toggles a breakpoint. The gutter is kept in sync with the simulator's `breakpoints` Set.
+- Clicking the breakpoint gutter (`.cm-breakpoint-gutter`) or the line numbers, or pressing `F9` on the cursor line, toggles a breakpoint. The gutter is kept in sync with the simulator's `run.breakpoints` Set.
 - A breakpoint shows a red `●` (`#f38ba8`) and highlights its line number (`cm-breakpoint-line-number`). The code line itself is not tinted; full-line highlighting is reserved for the execution line.
 - A breakpoint set on a line with no executable code (comment, directive, blank line, `}`, bare function signature) moves to the next executable line, and the console logs `Breakpoint set at line X (moved from line Y to next valid instruction).`
 - The line about to execute (after a step, a back step, or a stop) gets `cm-execLine`: background `rgba(137, 180, 250, 0.18)` and a 3 px `#89b4fa` left border. It is centred in view with `CM6.EditorView.scrollIntoView`.
@@ -297,7 +309,7 @@ hidden in the saved desktop layout, the tab view still shows one panel (Register
 - **Assemble** (`#btnAssemble`): enabled when the source is new or modified; disabled with the tooltip "Program is already assembled and up to date" once assembled.
 - **Undo / Redo** (`#btnUndo`, `#btnRedo`): follow `CM6.undoDepth` and `CM6.redoDepth`.
 - **Run** (`#runPauseBtn`): disabled until assembled; `▶ Run` when ready, `⏸ Pause` while running, `▶ Resume` when paused.
-- **Step / Back** (`#btnStep`, `#btnBack`): Step is enabled when assembled and paused; Back when there is history (`execHistory.length > 0`).
+- **Step / Back** (`#btnStep`, `#btnBack`): Step is enabled when assembled and paused; Back when there is history (`stepHistory.entries.length > 0`).
 - **Reset** (`#btnReset`): resets registers and peripherals and keeps the program assembled, so it can be stepped or run without re-assembling.
 
 ### 2.7 The console
@@ -337,7 +349,7 @@ __halt:
     j __halt
 ```
 
-- `sp` is set to `stackBase` (default `0x10010200`, that is `dataBase + dataSize`). If the estimated `.data` size exceeds the Data segment, the startup `sp` is raised above the data (end of data plus 8 KiB, rounded up to 4 KiB) and a warning names the Linker setting and the `DMEM_DEPTH_BITS` parameter to change for hardware.
+- `sp` is set to `layout.stackBase` (default `0x10010200`, that is `dataBase + dataSize`). If the estimated `.data` size exceeds the Data segment, the startup `sp` is raised above the data (end of data plus 8 KiB, rounded up to 4 KiB) and a warning names the Linker setting and the `DMEM_DEPTH_BITS` parameter to change for hardware.
 - `main()` is entered with `j main` and is expected not to return. `ra` holds `__halt`, so a `ret` from `main` lands on the trap. The trap follows all compiled code, so a PC that runs off the end of the program also stops there.
 
 ### 3.3 Source-to-assembly line mapping
@@ -381,9 +393,9 @@ Only one engine executes at a time (`setSimEngineMode()`):
 ### 4.1 Functional engine: run loop and timing model
 - **Run loop.** Execution proceeds in batches of `BATCH_SIZE = min(10000, run limit)` instructions per event-loop tick, so the UI stays responsive during long runs.
 - **Run limit.** `simMaxInstrPerRun` (**⚙ Settings → JS Simulation**, *Max Instructions Per Run*): default `100,000,000`, range 1 to 2,000,000,000. A run pauses when it reaches the limit.
-- **Statement Stepping (Fast Mode)** (`statementStepping`, default off, offered on both the JS and HDL settings tabs). Step executes every instruction of the current C statement or multi-instruction pseudo-instruction at once, and Back undoes the same span. In HDL mode a Step seeks the same distance through the recording.
+- **Statement Stepping (Fast Mode)** (`run.statementStepping`, default off, offered on both the JS and HDL settings tabs). Step executes every instruction of the current C statement or multi-instruction pseudo-instruction at once, and Back undoes the same span. In HDL mode a Step seeks the same distance through the recording.
 - **Microarchitecture** (`simMicroarch`): *Single-cycle* (one cycle per instruction), *Multi-cycle* (cycles from the table below) or *5-stage pipeline* (Step and Back move one clock cycle). Switching resets the program.
-- **Multi-cycle cycle table** (`cycleConfig`, each value 1 to 1000):
+- **Multi-cycle cycle table** (`run.cycleConfig`, each value 1 to 1000):
 
 | Key | Class | Default |
 |---|---|---|
@@ -448,7 +460,7 @@ The following are accepted: mnemonics in any case; writes to `x0` (`addi x0, x0,
 ### 4.2 Disassembly viewer
 - **Label rows** (`.disasm-label-row`): a header row such as `main:` or `loop:` precedes each labelled address, in Assembly and C modes. Label names (`.disasm-label-name`) are orange (`#fab387`), the colour used for labels in the code window and the memory view.
 - **Branch and jump targets** (`.disasm-target-label`): numeric targets (e.g. `jal 0x00400040`) carry a badge naming the target label (`<main>`).
-- **Machine-code display**: a `[ Byte | Word ]` pill (`disasmViewMode`, default `word`). Word mode shows each aligned 4-byte group as one 8-digit 32-bit hex word (LSB to the right); Byte mode shows separate bytes (`xx xx xx xx`, LSB to the left). Both group data in 4-byte chunks. The mode persists across assembles.
+- **Machine-code display**: a `[ Byte | Word ]` pill (`ui.disasmView`, default `word`). Word mode shows each aligned 4-byte group as one 8-digit 32-bit hex word (LSB to the right); Byte mode shows separate bytes (`xx xx xx xx`, LSB to the left). Both group data in 4-byte chunks. The mode persists across assembles.
 - **Native instruction column**: registers are named `x0`–`x31`, as encoded (`add x5, x5, x6`). ABI names stay in the *Original source* column. This renaming alone does not mark a row as a pseudo-instruction expansion.
 - **Pseudo-instructions**: in the *Original source* column a pseudo-instruction is blue (`#89b4fa`, `.code-list .pseudo`); its expanded native instructions are green (`.native-expanded`).
 - **C line tags** (`.disasm-cline-tag`): instructions compiled from C show the source line and its text, e.g. `[Line 10: total += arr[i];]`.
@@ -763,8 +775,8 @@ the loaded files are left as they were.
 ### 5.18 The desktop app
 
 [`electron/`](electron/README.md) packages the page with Electron and a native build of
-Icarus Verilog for each platform (Linux AppImage, Windows NSIS installer, macOS dmg for arm64
-and x64). The page is the same file, served from the app's resources over an `app://`
+Icarus Verilog for each platform (Linux AppImage, Windows NSIS installer, macOS dmg for Apple
+silicon; Intel Macs are not supported). The page is the build in `dist/`, served from the app's resources over an `app://`
 scheme, since a `file://` page cannot fetch its own `.wasm` or examples. It behaves as in a
 browser, with these differences:
 
@@ -1059,13 +1071,13 @@ The Memory view's MMIO tab labels each register with its name and access type, w
 | `0xFFFF0064` | RO | `PERIPH_DIP` | 16 DIP switches `SW15`..`SW0`. |
 | `0xFFFF0068` | RO | `PERIPH_PB` | Push buttons: bit 2 = BTNL, bit 1 = BTNC, bit 0 = BTNR. |
 | `0xFFFF0080` | WO | `PERIPH_SEVENSEG` | 32-bit value shown as 8 hex digits; a byte write replaces that byte. |
-| `0xFFFF00A0` | RO | `CYCLECOUNT` | Clock cycles since reset (`totalCycles`). |
+| `0xFFFF00A0` | RO | `CYCLECOUNT` | Clock cycles since reset (`cpu.totalCycles`). |
 
 The OLED, LED and 7-segment registers read back the last value written, so the Memory view has something to show; `UART_TX` reads 0.
 
 ### 7.3 Read-only registers
 
-A write to a read-only register, from a program or from the Memory view, has no effect, as on the hardware. `UART_RX` is the exception: writing it queues a byte for reception, as a way to feed input. `MMIO_REGISTERS` in `src/ts/03-state.ts` is the single definition of each register's address, name, access, read and write behaviour; the Memory view's editability, `handleMMIOWrite()`'s write gate and the Peripherals panel all read from it. `editable` defaults to `access !== 'RO'` and is overridden only for `UART_RX`.
+A write to a read-only register, from a program or from the Memory view, has no effect, as on the hardware. `UART_RX` is the exception: writing it queues a byte for reception, as a way to feed input. `MMIO_REGISTERS` in `src/ts/machine/mmio.ts` is the single definition of each register's address, name, access, read and write behaviour; the Memory view's editability, `handleMMIOWrite()`'s write gate and the Peripherals panel all read from it. `editable` defaults to `access !== 'RO'` and is overridden only for `UART_RX`.
 
 ---
 
@@ -1125,7 +1137,7 @@ Each section title shows the register addresses; status bits (`RX_VALID`, `TX_RE
 
 ### 8.3 UART console (`0xFFFF0000`–`0xFFFF000C`, 115200 8N1)
 
-- **Receive model.** The FPGA side has a single holding register (`uartRxByte`/`uartRxFull`) and no FIFO. Sent bytes wait in the PC-side buffer (`uartPending`, shown as *RX Queue*) and are delivered one at a time. A byte that arrives while the register is still full is dropped and the held byte kept, as on the board, where this is silent; the console reports the number of bytes lost.
+- **Receive model.** The FPGA side has a single holding register (`uart.rxByte`/`uart.rxFull`) and no FIFO. Sent bytes wait in the PC-side buffer (`uart.pending`, shown as *RX Queue*) and are delivered one at a time. A byte that arrives while the register is still full is dropped and the held byte kept, as on the board, where this is silent; the console reports the number of bytes lost.
 - **Arrival** sets the delivery pace:
   - *Paste (baud rate)*, the default: one character per 8640 clocks of the 100 MHz UART clock, converted to CPU cycles at the current clock divider (270 cycles at `CLK_DIV_BITS` 5).
   - *Typed (slow)*: the gap entered in the cycles/char box.

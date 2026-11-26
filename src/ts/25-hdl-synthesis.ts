@@ -82,7 +82,7 @@ function hdlAddParamShim(netlist) {
     break;
   }
   return netlist.replace(/^module RV\(/m, 'module RV_synth(') +
-    '\nmodule RV #(parameter PC_INIT = 32\'h' + (baseAddress >>> 0).toString(16) + ') (' +
+    '\nmodule RV #(parameter PC_INIT = 32\'h' + (layout.baseAddress >>> 0).toString(16) + ') (' +
     ports.join(', ') + ');\n' + decls.join('\n') +
     '\n  RV_synth u_synth(' + ports.join(', ') + ');\nendmodule\n';
 }
@@ -92,7 +92,7 @@ async function hdlSynthesise() {
   const core = hdlCoreFiles();
   if (!core.length) throw new Error('No processor sources to synthesise.');
   const key = hdlHash(core.map(f => f.name + '\x00' + f.src).join('\x01') +
-                      '|' + (baseAddress >>> 0));
+                      '|' + (layout.baseAddress >>> 0));
   if (hdlNetlist && hdlNetlist.key === key) return hdlNetlist.src;
 
   const runYosys = await loadYosysEngine();
@@ -100,7 +100,7 @@ async function hdlSynthesise() {
   for (const f of core) filesIn[f.name] = f.src;
   const script = [
     'read_verilog ' + core.map(f => f.name).join(' '),
-    'chparam -set PC_INIT 32\'h' + (baseAddress >>> 0).toString(16) + ' RV',
+    'chparam -set PC_INIT 32\'h' + (layout.baseAddress >>> 0).toString(16) + ' RV',
     'synth -top RV',
     'write_verilog -noattr netlist.v',
     'stat',

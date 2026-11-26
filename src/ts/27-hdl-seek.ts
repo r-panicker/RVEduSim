@@ -7,25 +7,25 @@
 // through the recording. That makes stepping instant and, unlike a real
 // simulator, makes stepping BACKWARDS possible.
 function hdlResetPeripheralState() {
-  ledState = 0;
-  sevsegState = '00000000';
-  uartTxBuffer = '';
-  uartTxBytes = [];
-  oledPages.forEach(oledBlankPage);
-  oledSwapUnpolled = false;
+  board.leds = 0;
+  board.sevseg = '00000000';
+  uart.txText = '';
+  uart.txBytes = [];
+  oled.pages.forEach(oledBlankPage);
+  oled.swapUnpolled = false;
 }
 
 function hdlApplyPer(kind, f) {
   if (kind === 'C') {
-    pc = parseInt(f[1], 16) >>> 0;
+    cpu.pc = parseInt(f[1], 16) >>> 0;
   } else if (kind === 'L') {
-    ledState = parseInt(f[1], 16) & 0xFF;
+    board.leds = parseInt(f[1], 16) & 0xFF;
   } else if (kind === 'S') {
-    sevsegState = (parseInt(f[1], 16) >>> 0).toString(16).padStart(8, '0');
+    board.sevseg = (parseInt(f[1], 16) >>> 0).toString(16).padStart(8, '0');
   } else if (kind === 'T') {
     const ch = parseInt(f[1], 16) & 0xFF;
-    uartTxBytes.push(ch);
-    uartTxBuffer += String.fromCharCode(ch);
+    uart.txBytes.push(ch);
+    uart.txText += String.fromCharCode(ch);
   } else if (kind === 'B') {
     // The Wrapper asked for a present. The VHDL that would align it to a
     // scanout boundary is not simulated, so apply it now - the same model
@@ -34,7 +34,7 @@ function hdlApplyPer(kind, f) {
   } else if (kind === 'P') {
     // Software read OLED_STATUS, so it is waiting the present out rather
     // than racing it.
-    oledSwapUnpolled = false;
+    oled.swapUnpolled = false;
   } else if (kind === 'O') {
     oledNotePixelWrite();
     // The Wrapper has already resolved the colour mode into a 24-bit
@@ -46,10 +46,10 @@ function hdlApplyPer(kind, f) {
     const rgb = parseInt(f[3], 16) >>> 0;
     if (Number.isFinite(rgb)) {
       const idx = (row * 96 + col) * 4;
-      oledBuffer[idx] = (rgb >>> 16) & 0xFF;
-      oledBuffer[idx + 1] = (rgb >>> 8) & 0xFF;
-      oledBuffer[idx + 2] = rgb & 0xFF;
-      oledBuffer[idx + 3] = 255;
+      oled.buffer[idx] = (rgb >>> 16) & 0xFF;
+      oled.buffer[idx + 1] = (rgb >>> 8) & 0xFF;
+      oled.buffer[idx + 2] = rgb & 0xFF;
+      oled.buffer[idx + 3] = 255;
     }
   }
 }
@@ -60,25 +60,25 @@ function hdlApplyPer(kind, f) {
 // reset; offset counts them, so the instruction count stays true.
 const HDL_VL_KEEP = 2000000;
 function hdlRestoreBase(b) {
-  loadProgram(machineCode);
-  regs.set(b.regs);
+  loadProgram(program.machineCode);
+  cpu.regs.set(b.regs);
   hdlRegKnown.set(b.regKnown);
-  for (let i = 0; i < b.mem.length; i++) setMemByte(dataBase + i, b.mem[i]);
+  for (let i = 0; i < b.mem.length; i++) setMemByte(layout.dataBase + i, b.mem[i]);
   hdlResetPeripheralState();
   restorePeriphState(b.periph);
-  uartTxBytes = b.tx.slice();
-  uartTxBuffer = b.txBuf;
-  oledPages[0].set(b.oled[0]);
-  oledPages[1].set(b.oled[1]);
-  oledBuffer = oledPages[oledBackPage];
+  uart.txBytes = b.tx.slice();
+  uart.txText = b.txBuf;
+  oled.pages[0].set(b.oled[0]);
+  oled.pages[1].set(b.oled[1]);
+  oled.buffer = oled.pages[oled.back];
 }
 // The state the page holds now, as a starting point for seeks.
 function hdlCaptureBase(cyc, acks) {
   const mem = new Uint8Array(hdlDmemBytes);
-  for (let i = 0; i < mem.length; i++) mem[i] = getMemByte(dataBase + i);
-  return { cyc, regs: regs.slice(), regKnown: hdlRegKnown.slice(), mem,
-           periph: capturePeriphState(), tx: uartTxBytes.slice(), txBuf: uartTxBuffer,
-           oled: oledPages.map(p => p.slice()), acks };
+  for (let i = 0; i < mem.length; i++) mem[i] = getMemByte(layout.dataBase + i);
+  return { cyc, regs: cpu.regs.slice(), regKnown: hdlRegKnown.slice(), mem,
+           periph: capturePeriphState(), tx: uart.txBytes.slice(), txBuf: uart.txText,
+           oled: oled.pages.map(p => p.slice()), acks };
 }
 
 // Returns how many steps were folded away, 0 when it was not yet time.
@@ -128,7 +128,7 @@ function hdlCutTrace(t, c) {
 // image; MMIO writes at the same port are peripheral activity and arrive
 // as their own events.
 function hdlApplyMemWrite(addr, be, data) {
-  if (addr < dataBase || addr >= dataBase + hdlDmemBytes) return;
+  if (addr < layout.dataBase || addr >= layout.dataBase + hdlDmemBytes) return;
   const word = addr & ~3;
   for (let i = 0; i < 4; i++)
     if (be & (1 << i)) setMemByte(word + i, (data >>> (i * 8)) & 0xFF);
@@ -174,7 +174,7 @@ function hdlSeek(idx, forward, light) {
     // to it.
     const ls = mark.tail && steps[k0 - 1];
     if (ls) {
-      for (const w of ls.regw.slice(mark.tail[0])) { regs[w[0]] = w[1] | 0; hdlRegKnown[w[0]] = 1; }
+      for (const w of ls.regw.slice(mark.tail[0])) { cpu.regs[w[0]] = w[1] | 0; hdlRegKnown[w[0]] = 1; }
       for (const w of ls.memw.slice(mark.tail[1])) hdlApplyMemWrite(w[0], w[1], w[2]);
       for (const e of ls.per.slice(mark.tail[2])) hdlApplyPer(e[0], e[1]);
       acks += (ls.acks || 0) - mark.tail[3];
@@ -187,7 +187,7 @@ function hdlSeek(idx, forward, light) {
     for (let i = 0; i < n; i++) hdlApplyPer(hdlTrace.pre[i][0], hdlTrace.pre[i][1]);
     acks = hdlTrace.base.acks + (hdlTrace.preAcks || 0);
   } else {
-    loadProgram(machineCode);
+    loadProgram(program.machineCode);
     hdlRegKnown.fill(0);
     hdlResetPeripheralState();
     const n = hdlPreShown();
@@ -198,7 +198,7 @@ function hdlSeek(idx, forward, light) {
   let changed = -1;
   for (let k = k0; k < idx; k++) {
     const s = steps[k];
-    for (const w of s.regw) { regs[w[0]] = w[1] | 0; hdlRegKnown[w[0]] = 1; }
+    for (const w of s.regw) { cpu.regs[w[0]] = w[1] | 0; hdlRegKnown[w[0]] = 1; }
     if (k === idx - 1 && s.regw.length) changed = s.regw[s.regw.length - 1][0];
     for (const w of s.memw) hdlApplyMemWrite(w[0], w[1], w[2]);
     for (const e of s.per) hdlApplyPer(e[0], e[1]);
@@ -209,14 +209,14 @@ function hdlSeek(idx, forward, light) {
   const ls = steps[idx - 1];
   hdlSeekMark = { trace: hdlTrace, idx, acks,
                   tail: ls ? [ls.regw.length, ls.memw.length, ls.per.length, ls.acks || 0] : null };
-  lastChangedReg = changed;
-  pc = idx < steps.length ? steps[idx].pc
-     : hdlPaced && !steps.length ? pc
+  cpu.lastChangedReg = changed;
+  cpu.pc = idx < steps.length ? steps[idx].pc
+     : hdlPaced && !steps.length ? cpu.pc
      : (hdlTrace.next !== null && hdlTrace.next !== undefined ? hdlTrace.next
-     : (steps.length ? steps[steps.length - 1].pc : baseAddress));
-  instructionCount = (hdlTrace.offset || 0) + idx;
-  totalCycles = hdlCurrentCycle();
-  currentExecLine = sourceLineForPc(pc);
+     : (steps.length ? steps[steps.length - 1].pc : layout.baseAddress));
+  cpu.instructionCount = (hdlTrace.offset || 0) + idx;
+  cpu.totalCycles = hdlCurrentCycle();
+  run.currentLine = sourceLineForPc(cpu.pc);
 
   // Rebuild both sides of the receive path from the recording: what has
   // arrived by this cycle, minus what the program has already taken. The
@@ -224,10 +224,10 @@ function hdlSeek(idx, forward, light) {
   // one and the rest are still on the PC's side. This is what makes
   // RX_VALID fall back to 0 once a byte is read, and come back when you
   // step backwards over that read.
-  const arrived = hdlRx.filter(e => e.cycle <= totalCycles).slice(acks);
-  uartRxFull = arrived.length > 0;
-  uartRxByte = uartRxFull ? (arrived[0].byte & 0xFF) : 0;
-  uartPending = arrived.slice(1).map(e => e.byte & 0xFF);
+  const arrived = hdlRx.filter(e => e.cycle <= cpu.totalCycles).slice(acks);
+  uart.rxFull = arrived.length > 0;
+  uart.rxByte = uart.rxFull ? (arrived[0].byte & 0xFF) : 0;
+  uart.pending = arrived.slice(1).map(e => e.byte & 0xFF);
 
   if (!light) {
     highlightCurrentLine();

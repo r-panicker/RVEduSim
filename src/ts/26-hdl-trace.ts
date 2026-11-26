@@ -104,7 +104,7 @@ function hdlPlusargs(budget, traceLvl) {
   ];
   if (hdlDumpVcd) plus.push('+VCD');
   if (hdlDumpVcd && hdlWaveTop) plus.push('+VCDTOP');
-  if (traceLvl === 1 && hdlSimulator !== 'verilator' && runPace === 'real' && cpuHz() <= RT_FOLLOW_HZ)
+  if (traceLvl === 1 && hdlSimulator !== 'verilator' && clock.pace === 'real' && cpuHz() <= RT_FOLLOW_HZ)
     plus.push('+PCLOG');
   if (hdlDumpVcd && hdlSimulator === 'verilator' && budget > HDL_VCD_WINDOW)
     plus.push('+VCDFROM=' + (budget - HDL_VCD_WINDOW));
@@ -147,7 +147,7 @@ async function hdlPrepareRun(opts) {
   opts = opts || {};
   const wrapper = hdlFindWrapper();
   if (!wrapper) throw new Error('No `module Wrapper` found among the loaded sources.');
-  if (!machineCode || !machineCode.length)
+  if (!program.machineCode || !program.machineCode.length)
     throw new Error('Assemble a program first - the Wrapper loads it via $readmemh.');
 
   // Build the memory images from a pristine program image: seeking has
@@ -158,12 +158,12 @@ async function hdlPrepareRun(opts) {
   // what the page shows, so it is done once per program and Wrapper: a
   // run recorded in chunks carries on from what it last showed.
   hdlSyncReferenceWrapperDepths();
-  const memKey = [machineCode, baseAddress, dataBase, wrapper.src];
+  const memKey = [program.machineCode, layout.baseAddress, layout.dataBase, wrapper.src];
   let mem;
   if (hdlMemCache && hdlMemCache.key.every((v, i) => v === memKey[i])) {
     mem = hdlMemCache.mem;
   } else {
-    loadProgram(machineCode);
+    loadProgram(program.machineCode);
     mem = hdlMemFiles(wrapper.src);
     hdlMemCache = { key: memKey, mem };
   }

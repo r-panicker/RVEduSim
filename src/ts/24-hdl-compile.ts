@@ -11,8 +11,8 @@ const HDL_STIM_DIP = 1, HDL_STIM_PB = 2, HDL_STIM_ACCEL = 3, HDL_STIM_ADRDY = 4;
 function hdlHex32(v) { return (v >>> 0).toString(16).padStart(8, '0'); }
 
 function hdlAccelWord() {
-  return ((accelTemp & 0xFF) << 24 | (accelX & 0xFF) << 16 |
-          (accelY & 0xFF) << 8 | (accelZ & 0xFF)) >>> 0;
+  return ((accel.temp & 0xFF) << 24 | (accel.x & 0xFF) << 16 |
+          (accel.y & 0xFF) << 8 | (accel.z & 0xFF)) >>> 0;
 }
 
 // stim.mem: <cycle> <code> <value> triples, in cycle order.
@@ -38,9 +38,9 @@ function hdlRxFile() {
 function hdlSyncRx() {
   const gap = uartGapInstr();
   hdlRx = [];
-  if (uartRxFull) hdlRx.push({ cycle: 0, byte: uartRxByte & 0xFF });
-  uartPending.forEach((b, i) => {
-    hdlRx.push({ cycle: (i + (uartRxFull ? 1 : 0)) * gap, byte: b & 0xFF });
+  if (uart.rxFull) hdlRx.push({ cycle: 0, byte: uart.rxByte & 0xFF });
+  uart.pending.forEach((b, i) => {
+    hdlRx.push({ cycle: (i + (uart.rxFull ? 1 : 0)) * gap, byte: b & 0xFF });
   });
 }
 

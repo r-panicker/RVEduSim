@@ -20,7 +20,7 @@ function updateLocalsView() {
     }
     return;
   }
-  const curPc = (typeof pc !== 'undefined') ? (pc >>> 0) : 0;
+  const curPc = (typeof cpu.pc !== 'undefined') ? (cpu.pc >>> 0) : 0;
   const fn = getCurrentCFunction(curPc);
   if (!fn || !fn.vars.length) {
     body.innerHTML = '';
@@ -41,7 +41,7 @@ function updateLocalsView() {
     return;
   }
   if (notice) notice.style.display = 'none';
-  const s0 = (typeof regs !== 'undefined') ? (regs[8] >>> 0) : 0;
+  const s0 = (typeof cpu.regs !== 'undefined') ? (cpu.regs[8] >>> 0) : 0;
   let html = '';
   let shown = 0;
   fn.vars.forEach(v => {

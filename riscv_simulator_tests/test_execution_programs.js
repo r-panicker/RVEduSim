@@ -49,18 +49,18 @@ setTimeout(async () => {
     console.log('Editor value after loadExample length:', win.editor.value.length);
     const mc = win.assembleOnly();
     console.log('assembleOnly returned mc length:', mc ? mc.length : 'null');
-    console.log('window.machineCode length:', win.machineCode.length);
+    console.log('window.program.machineCode length:', win.program.machineCode.length);
 
     let steps = 0;
     for (let i = 0; i < 60; i++) {
       win.stepOnce();
       steps++;
-      if (win.regs[2] === 55) break;
+      if (win.cpu.regs[2] === 55) break;
     }
 
-    console.log(`Executed ${steps} steps. Fibonacci result in x2 =`, win.regs[2]);
-    if (win.regs[2] !== 55) {
-      throw new Error(`Expected fib(10) = 55, got ${win.regs[2]}`);
+    console.log(`Executed ${steps} steps. Fibonacci result in x2 =`, win.cpu.regs[2]);
+    if (win.cpu.regs[2] !== 55) {
+      throw new Error(`Expected fib(10) = 55, got ${win.cpu.regs[2]}`);
     }
 
     console.log('\n=======================================');

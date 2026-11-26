@@ -102,10 +102,10 @@ function buildCVariableLocations(sourceText, mc) {
 
   // Resolve each function's address range from `labels` (set by assemble()).
   const withAddr = funcs
-    .map(fn => ({ fn, addr: (typeof labels !== 'undefined' && labels[fn.name] !== undefined) ? labels[fn.name] >>> 0 : null }))
+    .map(fn => ({ fn, addr: (typeof program.labels !== 'undefined' && program.labels[fn.name] !== undefined) ? program.labels[fn.name] >>> 0 : null }))
     .filter(x => x.addr !== null)
     .sort((a, b) => a.addr - b.addr);
-  const haltAddr = (typeof labels !== 'undefined' && labels['__halt'] !== undefined) ? labels['__halt'] >>> 0 : null;
+  const haltAddr = (typeof program.labels !== 'undefined' && program.labels['__halt'] !== undefined) ? program.labels['__halt'] >>> 0 : null;
 
   withAddr.forEach((entry, idx) => {
     const { fn, addr } = entry;
@@ -188,8 +188,8 @@ function getCVarAtSourceLine(cLine, varName) {
 
 function highlightFirstCLine(mc) {
   let firstCLine = -1;
-  if (labels && labels['main'] !== undefined) {
-    const mainAddr = labels['main'];
+  if (program.labels && program.labels['main'] !== undefined) {
+    const mainAddr = program.labels['main'];
     if (pcToCLineMap.has(mainAddr)) {
       firstCLine = pcToCLineMap.get(mainAddr);
     }
@@ -202,7 +202,7 @@ function highlightFirstCLine(mc) {
       }
     }
   }
-  currentExecLine = firstCLine;
+  run.currentLine = firstCLine;
   highlightCurrentLine();
 }
 
@@ -313,7 +313,7 @@ async function compileAndAssembleC(cSourceText) {
     const errMsg = 'C compilation needs the network: the Godbolt Compiler Explorer API was not reachable. Check your internet connection and try again, or switch to Assembly mode, which compiles entirely in the browser.';
     log(errMsg, 'error');
     setStatus('C compilation failed — Godbolt unreachable. See the console.', 'error');
-    assembled = false;
+    program.assembled = false;
     if (typeof updateToolbarButtonStates === 'function') updateToolbarButtonStates();
     return null;
   }
@@ -328,7 +328,7 @@ async function compileAndAssembleC(cSourceText) {
     }
     log(`C Compilation Errors:\n${errText || 'Non-zero exit code from compiler'}`, 'error');
     setStatus('C Compilation Failed — see console log', 'error');
-    assembled = false;
+    program.assembled = false;
     if (typeof updateToolbarButtonStates === 'function') updateToolbarButtonStates();
     return null;
   }
@@ -340,7 +340,7 @@ async function compileAndAssembleC(cSourceText) {
   // leaving it to surface as an unresolved symbol during assembly.
   warnAboutLibgccHelpers(godboltData.asm, optLevel);
 
-  // Calculate effective stack pointer: if data symbols or arrays extend beyond stackBase,
+  // Calculate effective stack pointer: if data symbols or arrays extend beyond layout.stackBase,
   // dynamically elevate stack pointer so the stack frame never collides with global/static data.
   let estimatedDataBytes = 0;
   let currentSection = 'text';
@@ -368,11 +368,11 @@ async function compileAndAssembleC(cSourceText) {
     }
   }
 
-  let effectiveStack = stackBase >>> 0;
-  const dataEnd = (dataBase + estimatedDataBytes) >>> 0;
-  if (dataEnd > effectiveStack || estimatedDataBytes > dataSize) {
+  let effectiveStack = layout.stackBase >>> 0;
+  const dataEnd = (layout.dataBase + estimatedDataBytes) >>> 0;
+  if (dataEnd > effectiveStack || estimatedDataBytes > layout.dataSize) {
     effectiveStack = Math.max(effectiveStack, ((dataEnd + 0x2000 + 0xFFF) & ~0xFFF) >>> 0);
-    log(`⚠️ Data is ${estimatedDataBytes} bytes, over the ${dataSize}-byte Data segment. ` +
+    log(`⚠️ Data is ${estimatedDataBytes} bytes, over the ${layout.dataSize}-byte Data segment. ` +
         `The startup stack pointer was moved to 0x${effectiveStack.toString(16)} so the stack ` +
         `clears it. On hardware the segment size is fixed — raise "Data (.data) size" in ` +
         `Settings → Linker, and DMEM_DEPTH_BITS in Wrapper, to match.`, 'warn');
@@ -408,11 +408,11 @@ async function compileAndAssembleC(cSourceText) {
   const asmText = combinedItems.map(item => item.text).join('\n');
   lastGeneratedAsm = asmText;
 
-  const mc = assemble(asmText, baseAddress);
+  const mc = assemble(asmText, layout.baseAddress);
   if (!mc) {
     log('Failed to assemble Godbolt emitted assembly.', 'error');
     setStatus('Assembly Error', 'error');
-    assembled = false;
+    program.assembled = false;
     if (typeof updateToolbarButtonStates === 'function') updateToolbarButtonStates();
     return null;
   }
@@ -426,7 +426,7 @@ async function compileAndAssembleC(cSourceText) {
   }
   if (hasError) {
     setStatus('Assembly error in generated code', 'error');
-    assembled = false;
+    program.assembled = false;
     if (typeof updateToolbarButtonStates === 'function') updateToolbarButtonStates();
     return null;
   }
@@ -435,7 +435,7 @@ async function compileAndAssembleC(cSourceText) {
   pcToCLineMap = new Map();
   cLineToPcsMap = new Map();
   cLineToFirstPcMap = new Map();
-  machineCode = mc;
+  program.machineCode = mc;
 
   for (let k = 0; k < mc.length; k++) {
     const item = mc[k];
@@ -468,7 +468,7 @@ async function compileAndAssembleC(cSourceText) {
   updateStats();
   highlightFirstCLine(mc);
 
-  assembled = true;
+  program.assembled = true;
   programFinished = false;
   resetPeriphFoldState();
   const nInstr = countInstructions(mc);
@@ -482,7 +482,7 @@ async function compileAndAssembleC(cSourceText) {
 // Only the text segment. Counting every assembled item would count the
 // image example's 130 rows of pixel data as instructions too.
 function countInstructions(mc) {
-  return (mc || []).filter(i => !i.error && i.bytes && i.address < dataBase).length;
+  return (mc || []).filter(i => !i.error && i.bytes && i.address < layout.dataBase).length;
 }
 
 function assembleOnly() {
@@ -492,7 +492,7 @@ function assembleOnly() {
   }
   const mc = prepareAssembly();
   if (!mc) {
-    assembled = false;
+    program.assembled = false;
     if (typeof updateToolbarButtonStates === 'function') updateToolbarButtonStates();
     return;
   }
@@ -506,11 +506,11 @@ function assembleOnly() {
   updateMemSubTabs();
   updateStats();
   highlightFirstLine(mc);
-  assembled = true;
+  program.assembled = true;
   programFinished = false;
   resetPeriphFoldState();
-  if (lastCodeOverflowWords > 0) {
-    setStatus(`Assembled ${nInstr} instructions — ${lastCodeOverflowWords} too many ` +
+  if (program.codeOverflowWords > 0) {
+    setStatus(`Assembled ${nInstr} instructions — ${program.codeOverflowWords} too many ` +
       `for the Code segment. See the console.`, 'warn');
   } else {
     setStatus(`Assembled ${nInstr} instructions. Ready to run.`, 'success');
@@ -520,45 +520,45 @@ function assembleOnly() {
 }
 
 function stepOnce() {
-  if (!assembled) {
+  if (!program.assembled) {
     setStatus('Please assemble the program first (⚙ Assemble)', 'warn');
     log('Please assemble the program first.', 'warn');
     updateToolbarButtonStates();
     return;
   }
-  if (running) return;
+  if (run.running) return;
   if (programFinished) {
     setStatus('Program execution finished. Reset (⟲) or Assemble to step again.', 'info');
     updateToolbarButtonStates();
     return;
   }
 
-  journalEnabled = true;
-  stepWriteLog = [];
-  stepPixelLog = [];
+  stepHistory.journalEnabled = true;
+  stepHistory.writeLog = [];
+  stepHistory.pixelLog = [];
   const prePeriph = capturePeriphState();
-  const preRegs = Int32Array.from(regs);
+  const preRegs = Int32Array.from(cpu.regs);
   const preFp = fpBits.slice();
   const preReservation = lrReservation;
-  const prePc = pc;
-  const cycBefore = totalCycles;
-  const instrBefore = instructionCount;
-  const startSourceLine = sourceLineForPc(pc);
+  const prePc = cpu.pc;
+  const cycBefore = cpu.totalCycles;
+  const instrBefore = cpu.instructionCount;
+  const startSourceLine = sourceLineForPc(cpu.pc);
   let line = startSourceLine;   // of the last instruction executed
   let fault = null;
   const prePipe = pipeMode ? pipeSnapshot() : null;
   let pipeSig = null;
   try {
     if (pipeMode) {
-      pipeSig = statementStepping ? pipeStatementStep() : pipeStep();
-    } else if (statementStepping && startSourceLine > 0) {
+      pipeSig = run.statementStepping ? pipeStatementStep() : pipeStep();
+    } else if (run.statementStepping && startSourceLine > 0) {
       let stepsTaken = 0;
       while (!programFinished && stepsTaken < 10000) {
-        line = sourceLineForPc(pc);
+        line = sourceLineForPc(cpu.pc);
         executeOne();
         stepsTaken++;
-        const nextLine = sourceLineForPc(pc);
-        if (nextLine !== startSourceLine || programFinished || breakpoints.has(nextLine)) {
+        const nextLine = sourceLineForPc(cpu.pc);
+        if (nextLine !== startSourceLine || programFinished || run.breakpoints.has(nextLine)) {
           break;
         }
       }
@@ -568,16 +568,16 @@ function stepOnce() {
   } catch (e) {
     fault = e;
   }
-  journalEnabled = false;
-  const instructionsExecuted = instructionCount - instrBefore;
+  stepHistory.journalEnabled = false;
+  const instructionsExecuted = cpu.instructionCount - instrBefore;
   // Recorded for a step that faulted too: whatever it wrote before it
   // threw is still applied, and Back is how to take it out again.
-  execHistory.push({
+  stepHistory.entries.push({
     pc: prePc, regs: preRegs, fp: preFp, reservation: preReservation,
-    writes: stepWriteLog.slice(), pixels: stepPixelLog.slice(), periph: prePeriph,
-    cycles: totalCycles - cycBefore, instr: instructionsExecuted, line: line, pipe: prePipe
+    writes: stepHistory.writeLog.slice(), pixels: stepHistory.pixelLog.slice(), periph: prePeriph,
+    cycles: cpu.totalCycles - cycBefore, instr: instructionsExecuted, line: line, pipe: prePipe
   });
-  if (execHistory.length > historyCap) execHistory.shift();
+  if (stepHistory.entries.length > stepHistory.cap) stepHistory.entries.shift();
   if (fault) {
     log(`Error at PC 0x${prePc.toString(16)}: ${fault.message}`, 'error');
     updateRegisters(); updateMemoryView(); updateMachineCode(); updateDisassembly(); updateStats();
@@ -586,72 +586,72 @@ function stepOnce() {
   }
   // Debugger convention: highlight the instruction that is about to execute (the new PC),
   // not the one that just ran.
-  currentExecLine = sourceLineForPc(pc);
+  run.currentLine = sourceLineForPc(cpu.pc);
   highlightCurrentLine();
   updateRegisters(); updateMemoryView(); updateMachineCode(); updateDisassembly(); updateStats();
   if (pipeMode) {
     const ev = pipeEvents(pipeSig);
     if (pipeDone()) {
       programFinished = true;
-      currentExecLine = -1;
+      run.currentLine = -1;
       highlightCurrentLine();
-      log(`Program completed after ${totalCycles} cycles, ${instructionCount} instructions.`, 'success');
+      log(`Program completed after ${cpu.totalCycles} cycles, ${cpu.instructionCount} instructions.`, 'success');
       setStatus('Program finished', 'success');
-    } else if (statementStepping && totalCycles - cycBefore > 1) {
-      setStatus(`Statement step over line ${pipeStmtLine}: ${totalCycles - cycBefore} cycles, now at cycle ${totalCycles}`);
+    } else if (run.statementStepping && cpu.totalCycles - cycBefore > 1) {
+      setStatus(`Statement step over line ${pipeStmtLine}: ${cpu.totalCycles - cycBefore} cycles, now at cycle ${cpu.totalCycles}`);
     } else {
-      setStatus(`Cycle ${totalCycles}` + (ev ? ': ' + ev : ''));
+      setStatus(`Cycle ${cpu.totalCycles}` + (ev ? ': ' + ev : ''));
     }
-    log(statementStepping && totalCycles - cycBefore > 1
-      ? `Cycles ${cycBefore + 1}-${totalCycles}: statement at line ${pipeStmtLine} retired (${instructionsExecuted} instructions)`
-      : `Cycle ${totalCycles}` + (ev ? ': ' + ev : ''), 'info');
-  } else if (statementStepping && instructionsExecuted > 1) {
+    log(run.statementStepping && cpu.totalCycles - cycBefore > 1
+      ? `Cycles ${cycBefore + 1}-${cpu.totalCycles}: statement at line ${pipeStmtLine} retired (${instructionsExecuted} instructions)`
+      : `Cycle ${cpu.totalCycles}` + (ev ? ': ' + ev : ''), 'info');
+  } else if (run.statementStepping && instructionsExecuted > 1) {
     setStatus(`Statement step over line ${startSourceLine} — ${instructionsExecuted} instruction` +
-      `${instructionsExecuted === 1 ? '' : 's'}, now at line ${currentExecLine > 0 ? currentExecLine : '?'}`);
-    log(`Executed statement at line ${startSourceLine} (${instructionsExecuted} instructions, next PC: 0x${pc.toString(16)}, Line: ${currentExecLine})`, 'info');
+      `${instructionsExecuted === 1 ? '' : 's'}, now at line ${run.currentLine > 0 ? run.currentLine : '?'}`);
+    log(`Executed statement at line ${startSourceLine} (${instructionsExecuted} instructions, next PC: 0x${cpu.pc.toString(16)}, Line: ${run.currentLine})`, 'info');
   } else {
-    setStatus(`Stepped to line ${currentExecLine > 0 ? currentExecLine : '?'}`);
-    log(`0x${prePc.toString(16)}: executed (next: 0x${pc.toString(16)})`, 'info');
+    setStatus(`Stepped to line ${run.currentLine > 0 ? run.currentLine : '?'}`);
+    log(`0x${prePc.toString(16)}: executed (next: 0x${cpu.pc.toString(16)})`, 'info');
   }
   updateToolbarButtonStates();
 }
 
 function stepBack() {
-  if (running) return;
-  if (!assembled) {
+  if (run.running) return;
+  if (!program.assembled) {
     log('Please assemble the program first before stepping.', 'warn');
     updateToolbarButtonStates();
     return;
   }
-  if (execHistory.length === 0) {
+  if (stepHistory.entries.length === 0) {
     log('Nothing to step back to.', 'warn');
     updateToolbarButtonStates();
     return;
   }
-  const st = execHistory.pop();
+  const st = stepHistory.entries.pop();
   for (let i = st.writes.length - 1; i >= 0; i--) {
     const w = st.writes[i];
     setMemByte(w.addr, w.old);
   }
   restoreOledPages(st.pixels);
   restorePeriphState(st.periph);
-  regs.set(st.regs);
+  cpu.regs.set(st.regs);
   fpBits.set(st.fp);
   lrReservation = st.reservation;
-  pc = st.pc;
+  cpu.pc = st.pc;
   if (st.pipe) { pipeRestore(st.pipe); programFinished = false; }
-  currentExecLine = st.line;
-  totalCycles = Math.max(0, totalCycles - st.cycles);
-  instructionCount = Math.max(0, instructionCount - st.instr);
-  lastChangedReg = -1;
+  run.currentLine = st.line;
+  cpu.totalCycles = Math.max(0, cpu.totalCycles - st.cycles);
+  cpu.instructionCount = Math.max(0, cpu.instructionCount - st.instr);
+  cpu.lastChangedReg = -1;
   highlightCurrentLine();
   updateRegisters(); updateMemoryView(); updateMachineCode(); updateDisassembly(); updateStats();
   updatePeripherals(); updateOledCanvas();
   if (st.pipe) {
-    setStatus(`Back to cycle ${totalCycles}`);
-    log(`Back to cycle ${totalCycles}`, 'info');
+    setStatus(`Back to cycle ${cpu.totalCycles}`);
+    log(`Back to cycle ${cpu.totalCycles}`, 'info');
   } else {
-    setStatus(`Stepped back to line ${currentExecLine > 0 ? currentExecLine : '?'}`);
+    setStatus(`Stepped back to line ${run.currentLine > 0 ? run.currentLine : '?'}`);
     log(`Back to 0x${st.pc.toString(16)}`, 'info');
   }
   updateToolbarButtonStates();
@@ -663,7 +663,7 @@ let programFinished = false;
 function updateToolbarButtonStates() {
   refreshDownloadMenu();
   const source = editor.value;   // the whole document, so read it once
-  const isCodeModifiedOrUnassembled = (lastAssembledCode === null || source !== lastAssembledCode || !assembled);
+  const isCodeModifiedOrUnassembled = (lastAssembledCode === null || source !== lastAssembledCode || !program.assembled);
 
   // 1. Assemble button: enabled ONLY when a program is loaded or modified, disabled once assembled
   const assembleBtn = document.getElementById('btnAssemble');
@@ -715,7 +715,7 @@ function updateToolbarButtonStates() {
     runBtn.classList.remove('primary');
     runBtn.classList.remove('danger');
 
-    if (running) {
+    if (run.running) {
       runBtn.innerHTML = '⏸ Pause';
       runBtn.title = 'Pause program execution (F5)';
       runBtn.disabled = false;
@@ -723,7 +723,7 @@ function updateToolbarButtonStates() {
       runBtn.style.opacity = '1';
       runBtn.style.cursor = 'pointer';
     } else {
-      if (!assembled) {
+      if (!program.assembled) {
         runBtn.innerHTML = '▶ Run';
         runBtn.title = 'Please assemble the program first (⚙ Assemble or Ctrl+Enter) before running';
         runBtn.disabled = true;
@@ -737,9 +737,9 @@ function updateToolbarButtonStates() {
         runBtn.classList.remove('inactive');
         runBtn.style.opacity = '1';
         runBtn.style.cursor = 'pointer';
-      } else if (pc !== baseAddress || instructionCount > 0) {
+      } else if (cpu.pc !== layout.baseAddress || cpu.instructionCount > 0) {
         runBtn.innerHTML = '▶ Resume';
-        runBtn.title = `Resume execution from line ${currentExecLine > 0 ? currentExecLine : 'current PC'} (F5)`;
+        runBtn.title = `Resume execution from line ${run.currentLine > 0 ? run.currentLine : 'current PC'} (F5)`;
         runBtn.disabled = false;
         runBtn.classList.remove('inactive');
         runBtn.style.opacity = '1';
@@ -758,12 +758,12 @@ function updateToolbarButtonStates() {
   // 4. Step forward button
   const stepBtn = document.getElementById('btnStep');
   if (stepBtn) {
-    const canStep = (assembled && !running && !programFinished);
+    const canStep = (program.assembled && !run.running && !programFinished);
     stepBtn.disabled = !canStep;
     stepBtn.classList.toggle('inactive', !canStep);
-    if (!assembled) {
+    if (!program.assembled) {
       stepBtn.title = 'Please assemble the program first (⚙ Assemble or Ctrl+Enter) to step (F8)';
-    } else if (running) {
+    } else if (run.running) {
       stepBtn.title = 'Cannot step while program is running (pause first)';
     } else if (programFinished) {
       stepBtn.title = 'Program execution finished. Reset (⟲) or Assemble to step again.';
@@ -775,24 +775,24 @@ function updateToolbarButtonStates() {
   // 5. Step back button
   const backBtn = document.getElementById('btnBack');
   if (backBtn) {
-    const canBack = (assembled && !running && execHistory && execHistory.length > 0);
+    const canBack = (program.assembled && !run.running && stepHistory.entries && stepHistory.entries.length > 0);
     backBtn.disabled = !canBack;
     backBtn.classList.toggle('inactive', !canBack);
-    if (!assembled) {
+    if (!program.assembled) {
       backBtn.title = 'Please assemble the program first before stepping (Shift+F8)';
-    } else if (running) {
+    } else if (run.running) {
       backBtn.title = 'Cannot step back while program is running';
-    } else if (!execHistory || execHistory.length === 0) {
+    } else if (!stepHistory.entries || stepHistory.entries.length === 0) {
       backBtn.title = 'No previous execution history to step back to';
     } else {
-      backBtn.title = `Step back 1 instruction (${execHistory.length} step${execHistory.length > 1 ? 's' : ''} available) (Shift+F8)`;
+      backBtn.title = `Step back 1 instruction (${stepHistory.entries.length} step${stepHistory.entries.length > 1 ? 's' : ''} available) (Shift+F8)`;
     }
   }
 
   // 6. Reset button: active only after starting to Run or Step, or if state is dirty
   const resetBtn = document.getElementById('btnReset');
   if (resetBtn) {
-    const isDirty = (instructionCount > 0 || (execHistory && execHistory.length > 0) || running || programFinished || pc !== baseAddress || (typeof ledState !== 'undefined' && ledState !== 0) || (typeof sevsegState !== 'undefined' && parseInt(sevsegState, 16) !== 0) || (typeof uartTxBuffer !== 'undefined' && uartTxBuffer !== '') || (typeof uartPending !== 'undefined' && (uartPending.length > 0 || uartRxFull)));
+    const isDirty = (cpu.instructionCount > 0 || (stepHistory.entries && stepHistory.entries.length > 0) || run.running || programFinished || cpu.pc !== layout.baseAddress || (typeof board.leds !== 'undefined' && board.leds !== 0) || (typeof board.sevseg !== 'undefined' && parseInt(board.sevseg, 16) !== 0) || (typeof uart.txText !== 'undefined' && uart.txText !== '') || (typeof uart.pending !== 'undefined' && (uart.pending.length > 0 || uart.rxFull)));
     resetBtn.disabled = !isDirty;
     resetBtn.classList.toggle('inactive', !isDirty);
     resetBtn.title = isDirty ? 'Reset CPU state, registers, memory, and peripherals to initial conditions' : 'Reset becomes active once execution begins (Run or Step)';
@@ -812,7 +812,7 @@ function updateToolbarButtonStates() {
   // 8. UART Clear button
   const uartClearBtn = document.getElementById('uartClearBtn');
   if (uartClearBtn) {
-    const hasUartText = !!(typeof uartTxBuffer !== 'undefined' && uartTxBuffer.length > 0);
+    const hasUartText = !!(typeof uart.txText !== 'undefined' && uart.txText.length > 0);
     uartClearBtn.disabled = !hasUartText;
     uartClearBtn.classList.toggle('inactive', !hasUartText);
     uartClearBtn.title = hasUartText ? 'Clear Terminal display output' : 'Terminal output is already empty';
@@ -826,7 +826,7 @@ function updateRunButtonState() {
 }
 
 function runProgram() {
-  if (!assembled) {
+  if (!program.assembled) {
     clearLog();
     const mc = assembleOnly();
     if (!mc) return;
@@ -834,32 +834,32 @@ function runProgram() {
   } else if (programFinished) {
     resetAll();
     programFinished = false;
-    log(`Running program from start (PC 0x${pc.toString(16)})...`, 'info');
+    log(`Running program from start (PC 0x${cpu.pc.toString(16)})...`, 'info');
   } else {
-    log(`Resuming execution from PC 0x${pc.toString(16)} (line ${sourceLineForPc(pc)})...`, 'info');
+    log(`Resuming execution from PC 0x${cpu.pc.toString(16)} (line ${sourceLineForPc(cpu.pc)})...`, 'info');
   }
 
-  running = true;
+  run.running = true;
   updateToolbarButtonStates();
   let count = 0;
   const INFINITE_LOOP_CAP = 100000000;
-  const maxRunLimit = (typeof maxInstructionsPerRun === 'number' && maxInstructionsPerRun > 0) ? maxInstructionsPerRun : 100000000;
+  const maxRunLimit = (typeof run.maxInstructions === 'number' && run.maxInstructions > 0) ? run.maxInstructions : 100000000;
   const BATCH_SIZE = Math.min(10000, maxRunLimit); // per-tick chunk for UI responsiveness
   // Real time: each tick runs the cycles the clock has owed since the run
   // started. More than a quarter second behind, the debt is dropped and
   // the shortfall shows as a fraction of real time.
   let rt = null;
-  rtRatio = 1;
-  const initialLine = sourceLineForPc(pc);
-  let resumeLine = (initialLine >= 1 && breakpoints.has(initialLine)) ? initialLine : -1;
+  clock.rtRatio = 1;
+  const initialLine = sourceLineForPc(cpu.pc);
+  let resumeLine = (initialLine >= 1 && run.breakpoints.has(initialLine)) ? initialLine : -1;
 
   function finishRun(stopReason, cycleCount) {
-    running = false;
+    run.running = false;
     if (runTimerId) { clearTimeout(runTimerId); runTimerId = null; }
-    assembled = true;
+    program.assembled = true;
     // Where the run stopped, for the highlight. The branches below override
     // it only when there is no instruction to point at.
-    currentExecLine = sourceLineForPc(pc);
+    run.currentLine = sourceLineForPc(cpu.pc);
 
     if (cycleCount >= INFINITE_LOOP_CAP) {
       log('Max cycles reached (possible infinite loop).', 'warn');
@@ -870,14 +870,14 @@ function runProgram() {
       log(`Paused after ${maxRunLimit.toLocaleString()} instructions. Click Run to continue.`, 'info');
       setStatus(`Paused after ${maxRunLimit.toLocaleString()} instructions`, 'info');
     } else if (stopReason === 'exit' || stopReason === 'bounds') {
-      currentExecLine = -1;
+      run.currentLine = -1;
       programFinished = true;
-      log(`Program completed after ${totalCycles} cycles, ${instructionCount} instructions.`, 'success');
+      log(`Program completed after ${cpu.totalCycles} cycles, ${cpu.instructionCount} instructions.`, 'success');
       setStatus('Program finished', 'success');
     } else if (stopReason === 'breakpoint') {
       programFinished = false;
       if (pipeMode && pipe.E) setStatus(`Stopped at breakpoint (line ${sourceLineForPc(pipe.E.pc)}, in Execute)`, 'warn');
-      else setStatus(`Stopped at breakpoint (line ${currentExecLine})`, 'warn');
+      else setStatus(`Stopped at breakpoint (line ${run.currentLine})`, 'warn');
     } else if (stopReason === 'paused') {
       programFinished = false;
       setStatus('Paused', 'info');
@@ -894,26 +894,26 @@ function runProgram() {
   }
 
   function runBatch() {
-    if (!running) {
+    if (!run.running) {
       finishRun('paused', count);
       return;
     }
 
     let batchCount = 0;
     let stopReason = null;
-    const hasBreakpoints = breakpoints.size > 0;
-    const paced = runPace === 'real';
+    const hasBreakpoints = run.breakpoints.size > 0;
+    const paced = clock.pace === 'real';
     const tick0 = performance.now(), hz = cpuHz();
     let due = Infinity;
     if (paced) {
-      if (!rt) rt = { wall: tick0, cyc: totalCycles, lastWall: tick0, lastCyc: totalCycles };
+      if (!rt) rt = { wall: tick0, cyc: cpu.totalCycles, lastWall: tick0, lastCyc: cpu.totalCycles };
       due = rt.cyc + (tick0 - rt.wall) / 1000 * hz;
     }
 
-    while (running && count < INFINITE_LOOP_CAP && count < maxRunLimit &&
-           (paced ? totalCycles < due && ((batchCount & 1023) || performance.now() - tick0 < 30)
+    while (run.running && count < INFINITE_LOOP_CAP && count < maxRunLimit &&
+           (paced ? cpu.totalCycles < due && ((batchCount & 1023) || performance.now() - tick0 < 30)
                   : batchCount < BATCH_SIZE)) {
-      const execAddr = pc;
+      const execAddr = cpu.pc;
 
       // Pipelined, a count is a cycle, and a breakpoint stops the run
       // once its instruction has entered Execute: from there on nothing
@@ -922,20 +922,20 @@ function runProgram() {
         try {
           pipeStep();
         } catch (e) {
-          log(`Error in cycle ${totalCycles}: ${e.message}`, 'error');
+          log(`Error in cycle ${cpu.totalCycles}: ${e.message}`, 'error');
           stopReason = 'error';
-          running = false;
+          run.running = false;
           break;
         }
         count++;
         batchCount++;
-        if (!running || pipeDone()) { stopReason = 'exit'; break; }
+        if (!run.running || pipeDone()) { stopReason = 'exit'; break; }
         if (hasBreakpoints && pipe.E) {
           const line = sourceLineForPc(pipe.E.pc);
-          if (line >= 1 && breakpoints.has(line)) {
+          if (line >= 1 && run.breakpoints.has(line)) {
             log(`Breakpoint hit at line ${line}, now in Execute`, 'warn');
             stopReason = 'breakpoint';
-            running = false;
+            run.running = false;
             break;
           }
         }
@@ -944,12 +944,12 @@ function runProgram() {
 
       if (hasBreakpoints) {
         const line = sourceLineForPc(execAddr);
-        if (line >= 1 && breakpoints.has(line)) {
+        if (line >= 1 && run.breakpoints.has(line)) {
           if (line !== resumeLine) {
-            currentExecLine = line;
+            run.currentLine = line;
             log(`Breakpoint hit at line ${line}`, 'warn');
             stopReason = 'breakpoint';
-            running = false;
+            run.running = false;
             break;
           }
         } else {
@@ -962,20 +962,20 @@ function runProgram() {
       } catch (e) {
         log(`Error executing at PC 0x${execAddr.toString(16)}: ${e.message}`, 'error');
         stopReason = 'error';
-        running = false;
+        run.running = false;
         break;
       }
 
-      if (hasBreakpoints && pc !== execAddr + 4) {
+      if (hasBreakpoints && cpu.pc !== execAddr + 4) {
         resumeLine = -1;
       }
 
       count++;
       batchCount++;
 
-      if (!running) { stopReason = 'exit'; break; }
-      if ((pc >>> 0) < (baseAddress >>> 0) || (pc >>> 0) >= (mmioBase >>> 0)) { stopReason = 'bounds'; break; }
-      if (sourceLineForPc(pc) === -1 && fetchInstruction(pc) === 0) { stopReason = 'exit'; break; }
+      if (!run.running) { stopReason = 'exit'; break; }
+      if ((cpu.pc >>> 0) < (layout.baseAddress >>> 0) || (cpu.pc >>> 0) >= (layout.mmioBase >>> 0)) { stopReason = 'bounds'; break; }
+      if (sourceLineForPc(cpu.pc) === -1 && fetchInstruction(cpu.pc) === 0) { stopReason = 'exit'; break; }
     }
 
     updatePeripherals();
@@ -983,20 +983,20 @@ function runProgram() {
     let wait = 0;
     if (paced) {
       const t = performance.now();
-      if (totalCycles < due - hz / 4) { rt.wall = t; rt.cyc = totalCycles; }
+      if (cpu.totalCycles < due - hz / 4) { rt.wall = t; rt.cyc = cpu.totalCycles; }
       // Measured over at least 50 cycles: on a slow clock a shorter window
       // can end between two whole cycles and read as lag.
       if (t - rt.lastWall >= Math.max(500, 50000 / hz)) {
-        rtRatio = Math.min(1, (totalCycles - rt.lastCyc) / ((t - rt.lastWall) / 1000 * hz));
-        rt.lastWall = t; rt.lastCyc = totalCycles;
+        clock.rtRatio = Math.min(1, (cpu.totalCycles - rt.lastCyc) / ((t - rt.lastWall) / 1000 * hz));
+        rt.lastWall = t; rt.lastCyc = cpu.totalCycles;
       }
-      if (totalCycles >= due) wait = Math.max(0, Math.min(100, rt.wall + (totalCycles + 1 - rt.cyc) / hz * 1000 - t));
+      if (cpu.totalCycles >= due) wait = Math.max(0, Math.min(100, rt.wall + (cpu.totalCycles + 1 - rt.cyc) / hz * 1000 - t));
       updateStats();
       // A clock slow enough to watch: show each instruction as it runs.
-      if (hz <= RT_FOLLOW_HZ) { currentExecLine = sourceLineForPc(pc); highlightCurrentLine(); updateRegisters(); }
+      if (hz <= RT_FOLLOW_HZ) { run.currentLine = sourceLineForPc(cpu.pc); highlightCurrentLine(); updateRegisters(); }
     }
 
-    if (running && count < INFINITE_LOOP_CAP && count < maxRunLimit && !stopReason) {
+    if (run.running && count < INFINITE_LOOP_CAP && count < maxRunLimit && !stopReason) {
       runTimerId = setTimeout(runBatch, wait);
     } else {
       finishRun(stopReason || (count >= maxRunLimit ? 'paused' : null), count);
@@ -1014,22 +1014,22 @@ function toggleRunPause() {
     if (hdlLive) { hdlLiveStop(); return; }
     if (hdlChunkedStop()) return;
     if (hdlStopPlay()) {
-      setStatus('HDL playback paused at cycle ' + totalCycles + ' - Run carries on', 'info');
+      setStatus('HDL playback paused at cycle ' + cpu.totalCycles + ' - Run carries on', 'info');
       return;
     }
-    if (!assembled) {
+    if (!program.assembled) {
       setStatus('Please assemble the program first — the Wrapper loads it via $readmemh', 'warn');
       return;
     }
     runHdlSimulation();
     return;
   }
-  if (running) {
-    running = false;
+  if (run.running) {
+    run.running = false;
     if (runTimerId) { clearTimeout(runTimerId); runTimerId = null; }
     // Cancelling the pending batch means the run loop never reaches its own
     // exit path, so the highlight is moved to the paused instruction here.
-    currentExecLine = sourceLineForPc(pc);
+    run.currentLine = sourceLineForPc(cpu.pc);
     setStatus('Paused', 'info');
     log('Execution paused by user.', 'info');
     updateRegisters();
@@ -1040,7 +1040,7 @@ function toggleRunPause() {
     updateDisassembly();
     updateToolbarButtonStates();
   } else {
-    if (!assembled) {
+    if (!program.assembled) {
       setStatus('Please assemble the program first (⚙ Assemble or Ctrl+Enter)', 'warn');
       log('Please assemble the program first before running.', 'warn');
       updateToolbarButtonStates();
@@ -1055,23 +1055,23 @@ function togglePause() {
 }
 
 function resetAll() {
-  running = false;
+  run.running = false;
   if (runTimerId) { clearTimeout(runTimerId); runTimerId = null; }
 
-  const wasAssembled = assembled && machineCode && machineCode.length > 0 && (lastAssembledCode !== null && editor.value === lastAssembledCode);
+  const wasAssembled = program.assembled && program.machineCode && program.machineCode.length > 0 && (lastAssembledCode !== null && editor.value === lastAssembledCode);
   resetState();
   clearLog();
   programFinished = false;
-  currentExecLine = -1;
+  run.currentLine = -1;
 
   if (wasAssembled) {
-    loadProgram(machineCode);
-    highlightFirstLine(machineCode);
-    assembled = true;
+    loadProgram(program.machineCode);
+    highlightFirstLine(program.machineCode);
+    program.assembled = true;
     setStatus('Reset to start of program. Ready to run or step.');
     log('Simulator reset to start of program. Ready to run or step.', 'info');
   } else {
-    assembled = false;
+    program.assembled = false;
     highlightCurrentLine();
     setStatus('Reset');
     let mc = [];
@@ -1087,26 +1087,26 @@ function resetAll() {
 }
 
 function resetState() {
-  running = false;
+  run.running = false;
   if (runTimerId) { clearTimeout(runTimerId); runTimerId = null; }
   initializeState();
-  execHistory = [];
-  stepWriteLog = [];
-  stepPixelLog = [];
+  stepHistory.entries = [];
+  stepHistory.writeLog = [];
+  stepHistory.pixelLog = [];
   // Reset all peripheral state
-  ledState = 0;
+  board.leds = 0;
   clockLedLit = true;
-  sevsegState = '00000000';
-  dipSwitches = 0;
-  pbState = 0;
+  board.sevseg = '00000000';
+  board.dip = 0;
+  board.buttons = 0;
   // Reset UART Terminal display & RX queue
-  uartTxBuffer = '';
-  uartTxBytes = [];
-  uartPending = [];
-  uartRxFull = false;
-  uartRxByte = 0;
-  uartRxDropped = 0;
-  uartRxDroppedTotal = 0;
+  uart.txText = '';
+  uart.txBytes = [];
+  uart.pending = [];
+  uart.rxFull = false;
+  uart.rxByte = 0;
+  uart.rxDropped = 0;
+  uart.rxDroppedTotal = 0;
   const btnEl = document.getElementById('uartSendBtn');
   if (btnEl) {
     btnEl.innerText = 'Send';
@@ -1114,17 +1114,17 @@ function resetState() {
   }
   const statusEl = document.getElementById('uartAutoSendStatus');
   if (statusEl) statusEl.innerText = '';
-  oledCol = 0;
-  oledRow = 0;
-  oledCtrl = 0;
-  oledAdvCol = false;
-  oledAdvRow = false;
+  oled.col = 0;
+  oled.row = 0;
+  oled.ctrl = 0;
+  oled.advCol = false;
+  oled.advRow = false;
   clearOledDisplay();
-  accelX = 0;
-  accelY = 0;
-  accelZ = 64;
-  accelTemp = 25;
-  accelDready = 1;
+  accel.x = 0;
+  accel.y = 0;
+  accel.z = 64;
+  accel.temp = 25;
+  accel.dready = 1;
   const xS = document.getElementById('accelXSlider');
   const yS = document.getElementById('accelYSlider');
   const zS = document.getElementById('accelZSlider');

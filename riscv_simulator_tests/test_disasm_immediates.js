@@ -97,7 +97,7 @@ setTimeout(async () => {
     win.setLanguageMode('asm');
     win.editor.value = SRC;
     win.assembleOnly();
-    const rows = win.machineCode.filter(m => m.bytes && !m.error);
+    const rows = win.program.machineCode.filter(m => m.bytes && !m.error);
     const by = Object.fromEntries(rows.map(m => [m.native, m]));
     const readingsOf = n => win.eval('nativeImmReadings')(by[n] && by[n].imm) || [];
     const tokenOf = n => (by[n] && by[n].immFrom >= 0) ? by[n].native.slice(by[n].immFrom, by[n].immTo) : null;

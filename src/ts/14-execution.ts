@@ -7,15 +7,15 @@ function instrCycles(instr32) {
   const opcode = instr32 & 0x7F;
   const funct7 = (instr32 >>> 25) & 0x7F;
   switch (opcode) {
-    case 0b0000011: return cycleConfig.load;                    // loads
-    case 0b0100011: case 0b0100111: return cycleConfig.store;   // stores
-    case 0b1100011: return cycleConfig.branch;                  // branches
-    case 0b1101111: case 0b1100111: return cycleConfig.jump;     // jumps
-    case 0b0110011: return funct7 === 0b0000001 ? cycleConfig.muldiv : cycleConfig.basic;
-    case 0b1010011: return cycleConfig.fp;                      // FP
-    case 0b0101111: return cycleConfig.load;                    // atomic ≈ load/store
-    case 0b1110011: return cycleConfig.system;                  // system / ecall
-    default: return cycleConfig.basic;
+    case 0b0000011: return run.cycleConfig.load;                    // loads
+    case 0b0100011: case 0b0100111: return run.cycleConfig.store;   // stores
+    case 0b1100011: return run.cycleConfig.branch;                  // branches
+    case 0b1101111: case 0b1100111: return run.cycleConfig.jump;     // jumps
+    case 0b0110011: return funct7 === 0b0000001 ? run.cycleConfig.muldiv : run.cycleConfig.basic;
+    case 0b1010011: return run.cycleConfig.fp;                      // FP
+    case 0b0101111: return run.cycleConfig.load;                    // atomic ≈ load/store
+    case 0b1110011: return run.cycleConfig.system;                  // system / ecall
+    default: return run.cycleConfig.basic;
   }
 }
 
@@ -23,19 +23,19 @@ function instrCycles(instr32) {
 // it lives in the always-on metrics run rather than only in the status
 // message, which any later message overwrites.
 function formatPC() {
-  return '0x' + ((typeof pc === 'number' ? pc : 0) >>> 0).toString(16).padStart(8, '0');
+  return '0x' + ((typeof cpu.pc === 'number' ? cpu.pc : 0) >>> 0).toString(16).padStart(8, '0');
 }
 
 function updateStats() {
   const el = document.getElementById('statsBar');
   if (el) {
-    el.innerHTML = `Cycles: ${totalCycles} &nbsp;|&nbsp; Instr: ${instructionCount}` +
+    el.innerHTML = `Cycles: ${cpu.totalCycles} &nbsp;|&nbsp; Instr: ${cpu.instructionCount}` +
       ` &nbsp;|&nbsp; PC: <span class="stat-pc">${formatPC()}</span>`;
   }
 }
 
 function hideExecMarker() {
-  currentExecLine = -1;
+  run.currentLine = -1;
   if (cmEditor) {
     cmEditor.dispatch({
       effects: [setExecLineEffect.of(-1), setPipeStagesEffect.of([])]
@@ -61,7 +61,7 @@ const STMT_STEP_IDS = ['simStatementStep'];
 function syncStatementStepBoxes() {
   STMT_STEP_IDS.forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.checked = !!statementStepping;
+    if (el) el.checked = !!run.statementStepping;
   });
 }
 
@@ -70,17 +70,17 @@ function buildCyclesPanel() {
   STMT_STEP_IDS.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    el.checked = !!statementStepping;
-    el.onchange = () => { statementStepping = el.checked; syncStatementStepBoxes(); };
+    el.checked = !!run.statementStepping;
+    el.onchange = () => { run.statementStepping = el.checked; syncStatementStepBoxes(); };
   });
 
   const maxInstrEl = document.getElementById('simMaxInstrPerRun');
   if (maxInstrEl) {
-    maxInstrEl.value = (typeof maxInstructionsPerRun === 'number' && maxInstructionsPerRun > 0) ? maxInstructionsPerRun : 100000000;
+    maxInstrEl.value = (typeof run.maxInstructions === 'number' && run.maxInstructions > 0) ? run.maxInstructions : 100000000;
     maxInstrEl.onchange = () => {
       const v = parseInt(maxInstrEl.value, 10);
-      maxInstructionsPerRun = (v > 0) ? v : 100000000;
-      maxInstrEl.value = maxInstructionsPerRun;
+      run.maxInstructions = (v > 0) ? v : 100000000;
+      maxInstrEl.value = run.maxInstructions;
     };
   }
 
@@ -88,29 +88,29 @@ function buildCyclesPanel() {
   let html = '';
   for (const [key, label] of CYCLE_FIELD_DEFS) {
     html += '<div class="cycle-field"><label for="cf-' + key + '">' + label + '</label>' +
-      '<input id="cf-' + key + '" type="number" min="1" max="1000" value="' + cycleConfig[key] + '"></div>';
+      '<input id="cf-' + key + '" type="number" min="1" max="1000" value="' + run.cycleConfig[key] + '"></div>';
   }
   body.innerHTML = html;
   for (const [key] of CYCLE_FIELD_DEFS) {
     document.getElementById('cf-' + key).addEventListener('change', e => {
       const v = parseInt(e.target.value, 10);
-      cycleConfig[key] = (v > 0 && v <= 1000) ? v : 1;
-      e.target.value = cycleConfig[key];
+      run.cycleConfig[key] = (v > 0 && v <= 1000) ? v : 1;
+      e.target.value = run.cycleConfig[key];
     });
   }
 }
 
 function resetCyclesConfig() {
-  cycleConfig.basic = 1;
-  cycleConfig.muldiv = 2;
-  cycleConfig.load = 2;
-  cycleConfig.store = 2;
-  cycleConfig.branch = 1;
-  cycleConfig.jump = 1;
-  cycleConfig.fp = 4;
-  cycleConfig.system = 1;
-  statementStepping = false;
-  maxInstructionsPerRun = 100000000;
+  run.cycleConfig.basic = 1;
+  run.cycleConfig.muldiv = 2;
+  run.cycleConfig.load = 2;
+  run.cycleConfig.store = 2;
+  run.cycleConfig.branch = 1;
+  run.cycleConfig.jump = 1;
+  run.cycleConfig.fp = 4;
+  run.cycleConfig.system = 1;
+  run.statementStepping = false;
+  run.maxInstructions = 100000000;
   pipeHaz = Object.assign({}, PIPE_HAZ_DEFAULT);
   pipeBP = Object.assign({}, PIPE_BP_DEFAULT);
   pipeSetMode(false);
@@ -203,7 +203,7 @@ function closeSettingsModal() {
 }
 
 function switchSettingsTab(tabName) {
-  currentSettingsTab = tabName;
+  ui.settingsTab = tabName;
   document.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
 
@@ -224,8 +224,8 @@ function updateLinkerStackPreview() {
     const el = document.getElementById(id);
     return el ? el.value : '';
   };
-  const dBase = parseHexAddr(g('ms-data'), dataBase);
-  const dSize = parseHexAddr(g('ms-datasize'), dataSize);
+  const dBase = parseHexAddr(g('ms-data'), layout.dataBase);
+  const dSize = parseHexAddr(g('ms-datasize'), layout.dataSize);
   const stackTop = (dBase + dSize) >>> 0;
   const stackInput = document.getElementById('ms-stack');
   if (stackInput) {
@@ -242,16 +242,16 @@ function applyExampleMemoryConfig(key) {
   if (!d) return;
   const newCode = Math.pow(2, d.irom) >>> 0;
   const newData = Math.pow(2, d.dmem) >>> 0;
-  if (codeSize === newCode && dataSize === newData) return;
-  const stackWasDefault = stackBase === ((dataBase + dataSize) >>> 0);
-  codeSize = newCode;
-  dataSize = newData;
-  if (stackWasDefault) stackBase = (dataBase + dataSize) >>> 0;
+  if (layout.codeSize === newCode && layout.dataSize === newData) return;
+  const stackWasDefault = layout.stackBase === ((layout.dataBase + layout.dataSize) >>> 0);
+  layout.codeSize = newCode;
+  layout.dataSize = newData;
+  if (stackWasDefault) layout.stackBase = (layout.dataBase + layout.dataSize) >>> 0;
   buildMemSegmentsPanel();
   hdlSyncReferenceWrapperDepths();
   log('Memory layout for this example: IROM_DEPTH_BITS ' + d.irom + ' (code segment 0x' +
       newCode.toString(16) + '), DMEM_DEPTH_BITS ' + d.dmem + ' (data segment 0x' +
-      newData.toString(16) + '), stack top 0x' + (stackBase >>> 0).toString(16) +
+      newData.toString(16) + '), stack top 0x' + (layout.stackBase >>> 0).toString(16) +
       '. Change these in Settings → Linker, and in Wrapper, if you change the program.', 'info');
 }
 
@@ -263,12 +263,12 @@ function buildMemSegmentsPanel() {
   const stackEl = document.getElementById('ms-stack');
   const mmioEl = document.getElementById('ms-mmio');
 
-  if (codeEl) codeEl.value = '0x' + (baseAddress >>> 0).toString(16);
-  if (codeSizeEl) codeSizeEl.value = '0x' + (codeSize >>> 0).toString(16);
-  if (dataEl) dataEl.value = '0x' + (dataBase >>> 0).toString(16);
-  if (dataSizeEl) dataSizeEl.value = '0x' + (dataSize >>> 0).toString(16);
-  if (stackEl) stackEl.value = '0x' + (stackBase >>> 0).toString(16);
-  if (mmioEl) mmioEl.value = '0x' + (mmioBase >>> 0).toString(16);
+  if (codeEl) codeEl.value = '0x' + (layout.baseAddress >>> 0).toString(16);
+  if (codeSizeEl) codeSizeEl.value = '0x' + (layout.codeSize >>> 0).toString(16);
+  if (dataEl) dataEl.value = '0x' + (layout.dataBase >>> 0).toString(16);
+  if (dataSizeEl) dataSizeEl.value = '0x' + (layout.dataSize >>> 0).toString(16);
+  if (stackEl) stackEl.value = '0x' + (layout.stackBase >>> 0).toString(16);
+  if (mmioEl) mmioEl.value = '0x' + (layout.mmioBase >>> 0).toString(16);
 }
 
 function getCyclesFromPanel() {
@@ -276,7 +276,7 @@ function getCyclesFromPanel() {
     const el = document.getElementById('cf-' + key);
     if (el) {
       const v = parseInt(el.value, 10);
-      cycleConfig[key] = (v > 0 && v <= 1000) ? v : 1;
+      run.cycleConfig[key] = (v > 0 && v <= 1000) ? v : 1;
     }
   }
 }
@@ -291,32 +291,32 @@ function applyAndCloseSettings() {
   // reloading otherwise would discard an HDL recording for nothing.
   // Compared unsigned: the word-align mask turns an address at or above
   // 0x80000000 (the MMIO base) negative.
-  const layoutKey = () => [baseAddress, codeSize, dataBase, dataSize, stackBase, mmioBase]
+  const layoutKey = () => [layout.baseAddress, layout.codeSize, layout.dataBase, layout.dataSize, layout.stackBase, layout.mmioBase]
     .map(v => v >>> 0).join(',');
   const layoutBefore = layoutKey();
-  baseAddress = parseHexAddr(g('ms-code'), baseAddress);
-  codeSize = parseHexAddr(g('ms-codesize'), codeSize);
-  dataBase = parseHexAddr(g('ms-data'), dataBase);
-  dataSize = parseHexAddr(g('ms-datasize'), dataSize);
-  const defaultStack = (dataBase + dataSize) >>> 0;
-  stackBase = parseHexAddr(g('ms-stack'), defaultStack);
-  mmioBase = parseHexAddr(g('ms-mmio'), mmioBase);
+  layout.baseAddress = parseHexAddr(g('ms-code'), layout.baseAddress);
+  layout.codeSize = parseHexAddr(g('ms-codesize'), layout.codeSize);
+  layout.dataBase = parseHexAddr(g('ms-data'), layout.dataBase);
+  layout.dataSize = parseHexAddr(g('ms-datasize'), layout.dataSize);
+  const defaultStack = (layout.dataBase + layout.dataSize) >>> 0;
+  layout.stackBase = parseHexAddr(g('ms-stack'), defaultStack);
+  layout.mmioBase = parseHexAddr(g('ms-mmio'), layout.mmioBase);
 
   const memAddrEl = document.getElementById('memAddr');
-  if (memAddrEl) memAddrEl.value = '0x' + (baseAddress >>> 0).toString(16);
+  if (memAddrEl) memAddrEl.value = '0x' + (layout.baseAddress >>> 0).toString(16);
 
   // 2. Apply Simulator CPI, Statement Stepping & Max Instructions
   getCyclesFromPanel();
   // Either copy is authoritative; they are mirrored on change.
   const stmtEl = document.getElementById('simStatementStep');
-  if (stmtEl) statementStepping = stmtEl.checked;
+  if (stmtEl) run.statementStepping = stmtEl.checked;
   syncStatementStepBoxes();
 
   const maxInstrEl = document.getElementById('simMaxInstrPerRun');
   if (maxInstrEl) {
     const v = parseInt(maxInstrEl.value, 10);
-    maxInstructionsPerRun = (v > 0) ? v : 100000000;
-    maxInstrEl.value = maxInstructionsPerRun;
+    run.maxInstructions = (v > 0) ? v : 100000000;
+    maxInstrEl.value = run.maxInstructions;
   }
 
   closeSettingsModal();
@@ -325,7 +325,7 @@ function applyAndCloseSettings() {
 }
 
 function resetCurrentSettingsTab() {
-  if (currentSettingsTab === 'compiler') {
+  if (ui.settingsTab === 'compiler') {
     const compSelect = document.getElementById('godboltCompilerSelect');
     const optSelect = document.getElementById('godboltOptSelect');
     const archInput = document.getElementById('godboltArchFlags');
@@ -341,7 +341,7 @@ function resetCurrentSettingsTab() {
     // watchers that retire a stale build have to be stood in for.
     if (flags() !== before) invalidateCompiledProgram('Compiler settings');
     setStatus('Compiler settings reset to defaults (Clang 20.1, -O0)', 'info');
-  } else if (currentSettingsTab === 'linker') {
+  } else if (ui.settingsTab === 'linker') {
     // Only the fields: Apply compares them against the live layout to
     // decide whether to reassemble, so it must still see the old one.
     const set = (id, v) => {
@@ -355,9 +355,9 @@ function resetCurrentSettingsTab() {
     set('ms-stack', DEFAULT_DATA_BASE + 0x200);
     set('ms-mmio', 0xFFFF0000);
     setStatus('Linker defaults filled in - Apply to use them', 'info');
-  } else if (currentSettingsTab === 'simulator' && simEngineMode !== 'hdl') {
+  } else if (ui.settingsTab === 'simulator' && simEngineMode !== 'hdl') {
     resetCyclesConfig();
-  } else if (currentSettingsTab === 'simulator') {
+  } else if (ui.settingsTab === 'simulator') {
     // Settings only - the loaded sources are the user's work, and Clear
     // files is right there for them.
     const set = (id, v, prop) => {
@@ -425,8 +425,8 @@ function buildMemFileText(items) {
 }
 
 function segmentItems(isData) {
-  return machineCode
-    .filter(i => !i.error && i.bytes && (i.address >= dataBase) === isData)
+  return program.machineCode
+    .filter(i => !i.error && i.bytes && (i.address >= layout.dataBase) === isData)
     .sort((a, b) => a.address - b.address);
 }
 
@@ -492,8 +492,8 @@ function saveFile() {
 function sourceLineForPc(addr) {
   if (editorLanguageMode === 'c') {
     if (pcToCLineMap && pcToCLineMap.has(addr)) return pcToCLineMap.get(addr);
-    if (labels && labels['main'] !== undefined && addr < labels['main'] && pcToCLineMap) {
-      const mainAddr = labels['main'];
+    if (program.labels && program.labels['main'] !== undefined && addr < program.labels['main'] && pcToCLineMap) {
+      const mainAddr = program.labels['main'];
       if (pcToCLineMap.has(mainAddr)) return pcToCLineMap.get(mainAddr);
     }
     return -1;
@@ -503,14 +503,14 @@ function sourceLineForPc(addr) {
 }
 
 function pipeStageLines() {
-  if (!pipeMode || simEngineMode === 'hdl' || !pipe || !assembled) return [];
+  if (!pipeMode || simEngineMode === 'hdl' || !pipe || !program.assembled) return [];
   const byLine = new Map();
   const add = (addr, letter) => {
     const line = sourceLineForPc(addr >>> 0);
     if (line < 1) return;
     byLine.set(line, (byLine.has(line) ? byLine.get(line) + ' ' : '') + letter);
   };
-  if (!programFinished && readMem(pc >>> 0, 4, true)) add(pc, 'F');
+  if (!programFinished && readMem(cpu.pc >>> 0, 4, true)) add(cpu.pc, 'F');
   ['D', 'E', 'M', 'W'].forEach(k => { if (pipe[k]) add(pipe[k].pc, k); });
   return Array.from(byLine.entries()).sort((a, b) => a[0] - b[0]);
 }
@@ -518,10 +518,10 @@ function pipeStageLines() {
 function highlightCurrentLine() {
   if (!cmEditor) return;
   cmEditor.dispatch({
-    effects: [setExecLineEffect.of(currentExecLine), setPipeStagesEffect.of(pipeStageLines())]
+    effects: [setExecLineEffect.of(run.currentLine), setPipeStagesEffect.of(pipeStageLines())]
   });
-  if (currentExecLine >= 1 && currentExecLine <= cmEditor.state.doc.lines) {
-    centreEditorLine(cmEditor.state.doc.line(currentExecLine).from);
+  if (run.currentLine >= 1 && run.currentLine <= cmEditor.state.doc.lines) {
+    centreEditorLine(cmEditor.state.doc.line(run.currentLine).from);
   }
 }
 
@@ -542,7 +542,7 @@ function findNextValidInstructionLine(targetLine) {
   if (targetLine > totalLines) targetLine = totalLines;
 
   if (editorLanguageMode === 'c') {
-    if (assembled && cLineToFirstPcMap && cLineToFirstPcMap.size > 0 && lastAssembledCode === (editor ? editor.value : null)) {
+    if (program.assembled && cLineToFirstPcMap && cLineToFirstPcMap.size > 0 && lastAssembledCode === (editor ? editor.value : null)) {
       if (cLineToFirstPcMap.has(targetLine)) return targetLine;
       const validCLines = Array.from(cLineToFirstPcMap.keys()).sort((a, b) => a - b);
       const next = validCLines.find(l => l >= targetLine);
@@ -566,10 +566,10 @@ function findNextValidInstructionLine(targetLine) {
     return targetLine;
   }
 
-  // 1. If currently assembled and code is up to date, use machineCode source mapping
-  if (assembled && Array.isArray(machineCode) && machineCode.length > 0 && lastAssembledCode === (editor ? editor.value : null)) {
+  // 1. If currently assembled and code is up to date, use program.machineCode source mapping
+  if (program.assembled && Array.isArray(program.machineCode) && program.machineCode.length > 0 && lastAssembledCode === (editor ? editor.value : null)) {
     const validLines = [];
-    for (const item of machineCode) {
+    for (const item of program.machineCode) {
       if (!item.error && item.line && !validLines.includes(item.line)) {
         validLines.push(item.line);
       }
@@ -646,11 +646,11 @@ function toggleBreakpoint(requestedLine) {
   const effectiveLine = findNextValidInstructionLine(requestedLine);
   const isMoved = (effectiveLine !== requestedLine);
 
-  if (breakpoints.has(effectiveLine)) {
-    breakpoints.delete(effectiveLine);
+  if (run.breakpoints.has(effectiveLine)) {
+    run.breakpoints.delete(effectiveLine);
     log(`Breakpoint removed at line ${effectiveLine}.`, 'info');
   } else {
-    breakpoints.add(effectiveLine);
+    run.breakpoints.add(effectiveLine);
     if (isMoved) {
       log(`Breakpoint set at line ${effectiveLine} (moved from line ${requestedLine} to next valid instruction).`, 'info');
     } else {
@@ -675,8 +675,8 @@ function prepareAssembly() {
   cFunctionLocals = new Map();
   try {
     log('Assembling...', 'info');
-    const mc = assemble(source, baseAddress);
-    machineCode = mc;
+    const mc = assemble(source, layout.baseAddress);
+    program.machineCode = mc;
     let hasError = false;
     for (const item of mc) {
       if (item.error) {
@@ -699,23 +699,23 @@ function prepareAssembly() {
 }
 
 function executeOne() {
-  const addr = pc;
+  const addr = cpu.pc;
   const instr32 = fetchInstruction(addr);
-  if (instr32 === 0) { pc += 4; return; }
-  totalCycles += jsArch === 'multi' ? instrCycles(instr32) : 1;
-  instructionCount++;
-  pc = decodeAndExecute(instr32, addr);
-  lastChangedReg = lastExecutedRd;
+  if (instr32 === 0) { cpu.pc += 4; return; }
+  cpu.totalCycles += jsArch === 'multi' ? instrCycles(instr32) : 1;
+  cpu.instructionCount++;
+  cpu.pc = decodeAndExecute(instr32, addr);
+  cpu.lastChangedReg = cpu.lastExecutedRd;
   uartClockTick();
 }
 
 // Clock pending UART input onto the wire as each character's time comes.
 function uartClockTick() {
-  if (uartPending.length) {
-    const before = uartPending.length;
+  if (uart.pending.length) {
+    const before = uart.pending.length;
     uartTickDelivery();
-    if (uartPending.length !== before) {
-      if (!uartPending.length) {
+    if (uart.pending.length !== before) {
+      if (!uart.pending.length) {
         const btn = document.getElementById('uartSendBtn');
         const statusEl = document.getElementById('uartAutoSendStatus');
         if (btn) {
@@ -725,7 +725,7 @@ function uartClockTick() {
         if (statusEl) statusEl.innerText = 'Send complete';
       }
       // A run refreshes the panels once per batch instead.
-      if (!running) {
+      if (!run.running) {
         updatePeripherals();
         updateMemoryView();
       }
@@ -741,7 +741,7 @@ function firstExecutableLine(mc) {
 }
 
 function highlightFirstLine(mc) {
-  currentExecLine = firstExecutableLine(mc);
+  run.currentLine = firstExecutableLine(mc);
   highlightCurrentLine();
 }
 

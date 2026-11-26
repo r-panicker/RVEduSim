@@ -68,15 +68,15 @@ updateStats = function () {
   const hdl = simEngineMode === 'hdl';
   const piped = !hdl && pipeMode;
   const multi = !hdl && jsArch === 'multi';
-  const pacing = runPace === 'real' && (hdl ? !!(hdlPlay || hdlLive || hdlChunked) : running);
+  const pacing = clock.pace === 'real' && (hdl ? !!(hdlPlay || hdlLive || hdlChunked) : run.running);
   const SEP = '&nbsp;|&nbsp; ';
-  const lead = [fmtSimTime(totalCycles) +
-    (pacing && rtRatio < 0.95 ? ' <span class="stat-lag" title="The browser cannot keep up with this clock">×' +
-      rtRatio.toFixed(2) + ' real time</span>' : ''),
-    'Cycles: ' + totalCycles +
+  const lead = [fmtSimTime(cpu.totalCycles) +
+    (pacing && clock.rtRatio < 0.95 ? ' <span class="stat-lag" title="The browser cannot keep up with this clock">×' +
+      clock.rtRatio.toFixed(2) + ' real time</span>' : ''),
+    'Cycles: ' + cpu.totalCycles +
     ' <span class="stat-tag">' + (hdl ? 'hw' : piped ? 'pipe' : multi ? 'multi' : 'single') + '</span>'];
-  const tail = ['Instr: ' + instructionCount];
-  if ((piped || multi) && instructionCount) tail.push('CPI: ' + (totalCycles / instructionCount).toFixed(2));
+  const tail = ['Instr: ' + cpu.instructionCount];
+  if ((piped || multi) && cpu.instructionCount) tail.push('CPI: ' + (cpu.totalCycles / cpu.instructionCount).toFixed(2));
   if (piped && pipeBP.on && pipe) tail.push('Mispredicts: ' + pipe.mispredicts);
   tail.push('PC: <span class="stat-pc">' + formatPC() + '</span>');
   // Two halves of about equal width, which a phone stacks rather than
@@ -92,7 +92,7 @@ updateStats = function () {
     ? 'Cycles from the per-category table in Settings > Simulation, instructions executed, ' +
       'and cycles per instruction'
     : 'One cycle per instruction, and instructions executed') +
-    '. The time is those cycles at ' + fmtHz(cpuHz()) + ' (CLK_DIV_BITS ' + clkDivBits + ', in Settings)' +
+    '. The time is those cycles at ' + fmtHz(cpuHz()) + ' (CLK_DIV_BITS ' + clock.divBits + ', in Settings)' +
     '. PC is ' + (piped ? 'PCF, the address being fetched.' : 'the address of the instruction about to execute.');
 };
 
@@ -108,7 +108,7 @@ updateToolbarButtonStates = function () {
     b.classList.toggle('inactive', hdlRunning);
   });
   if (simEngineMode !== 'hdl') return;
-  const ready = !!(assembled && hdlFindWrapper() && !hdlRunning);
+  const ready = !!(program.assembled && hdlFindWrapper() && !hdlRunning);
   const set = (id, on, title) => {
     const b = document.getElementById(id);
     if (!b) return;
@@ -144,13 +144,13 @@ updateToolbarButtonStates = function () {
 const hdlBaseToggleDip = toggleDip;
 toggleDip = function (idx) {
   hdlBaseToggleDip(idx);
-  hdlOnInputChanged(HDL_STIM_DIP, dipSwitches & 0xFFFF);
+  hdlOnInputChanged(HDL_STIM_DIP, board.dip & 0xFFFF);
 };
 
 const hdlBasePbToggle = pbToggle;
 pbToggle = function (btn) {
   hdlBasePbToggle(btn);
-  hdlOnInputChanged(HDL_STIM_PB, pbState & 0x7);
+  hdlOnInputChanged(HDL_STIM_PB, board.buttons & 0x7);
 };
 
 const hdlBaseUpdateAccelValues = updateAccelValues;
@@ -176,7 +176,7 @@ let hdlInPeriphRefresh = false;
 const hdlBaseUpdatePeripherals = updatePeripherals;
 updatePeripherals = function () {
   hdlBaseUpdatePeripherals();
-  if (hdlInPeriphRefresh || running) return;
+  if (hdlInPeriphRefresh || run.running) return;
   const addrEl = document.getElementById('memAddr');
   if (!addrEl) return;
   const base = parseInt(addrEl.value, 16);
@@ -193,14 +193,14 @@ updatePeripherals = function () {
 const hdlBaseSendUartInput = sendUartInput;
 sendUartInput = function () {
   if (simEngineMode !== 'hdl' || !hdlTrace) { hdlBaseSendUartInput(); return; }
-  const before = uartPending.length;
+  const before = uart.pending.length;
   hdlBaseSendUartInput();
   // Take everything the base handler queued, plus anything it managed to
   // hand straight to the holding register, and put it on the timeline.
-  const added = uartPending.slice();
-  if (uartRxFull && uartPending.length >= before) added.unshift(uartRxByte & 0xFF);
-  uartPending = [];
-  uartRxFull = false;
+  const added = uart.pending.slice();
+  if (uart.rxFull && uart.pending.length >= before) added.unshift(uart.rxByte & 0xFF);
+  uart.pending = [];
+  uart.rxFull = false;
   const btn = document.getElementById('uartSendBtn');
   if (btn) { btn.innerText = 'Send'; btn.style.background = ''; }
   if (!added.length) { hdlOnUartInput(); return; }
@@ -292,12 +292,12 @@ window.setHdlRegPath = setHdlRegPath;
 window.setSimEngineMode = setSimEngineMode;
 window.getHdlFiles = () => hdlFiles;
 window.setDipSwitches = (v) => {
-  dipSwitches = v & 0xFFFF;
+  board.dip = v & 0xFFFF;
   if (typeof updatePeripherals === 'function') updatePeripherals();
-  hdlOnInputChanged(HDL_STIM_DIP, dipSwitches & 0xFFFF);
+  hdlOnInputChanged(HDL_STIM_DIP, board.dip & 0xFFFF);
 };
-window.getLedState = () => ledState;
-window.getSevsegState = () => sevsegState;
+window.getLedState = () => board.leds;
+window.getSevsegState = () => board.sevseg;
 window.getSimEngineMode = () => simEngineMode;
 window.hdlBuildTestbench = hdlBuildTestbench;
 window.hdlHasDoubleBuffer = hdlHasDoubleBuffer;
@@ -341,8 +341,8 @@ window.setUartSendMode = setUartSendMode;
 window.setUartCharInstr = setUartCharInstr;
 window.setClkDivBits = setClkDivBits;
 window.setRunPace = setRunPace;
-window.getUartPending = () => uartPending.slice();
-window.getUartRxState = () => ({ byte: uartRxByte, full: uartRxFull, dropped: uartRxDroppedTotal });
+window.getUartPending = () => uart.pending.slice();
+window.getUartRxState = () => ({ byte: uart.rxByte, full: uart.rxFull, dropped: uart.rxDroppedTotal });
 window.hdlLoadPrebuiltProcessor = hdlLoadPrebuiltProcessor;
 // Load sources programmatically (the drop zone and file picker route
 // through hdlAddFiles; this is the same thing without a FileList).

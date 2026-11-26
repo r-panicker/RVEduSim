@@ -42,18 +42,18 @@ function hdlBuildMemImage(baseAddr, depthBits, lastUsedAddr) {
 function hdlMemFiles(wrapperSrc) {
   const iromBits = hdlDepthBits(wrapperSrc, 'IROM_DEPTH_BITS', 9);
   const dmemBits = hdlDepthBits(wrapperSrc, 'DMEM_DEPTH_BITS', 14);
-  const codeItems = machineCode.filter(i => !i.error && i.bytes && i.address < dataBase);
-  const dataItems = machineCode.filter(i => !i.error && i.bytes && i.address >= dataBase);
-  const lastCode = codeItems.reduce((m, i) => Math.max(m, i.address + i.bytes.length - 1), baseAddress - 1);
-  const lastData = dataItems.reduce((m, i) => Math.max(m, i.address + i.bytes.length - 1), dataBase - 1);
+  const codeItems = program.machineCode.filter(i => !i.error && i.bytes && i.address < layout.dataBase);
+  const dataItems = program.machineCode.filter(i => !i.error && i.bytes && i.address >= layout.dataBase);
+  const lastCode = codeItems.reduce((m, i) => Math.max(m, i.address + i.bytes.length - 1), layout.baseAddress - 1);
+  const lastData = dataItems.reduce((m, i) => Math.max(m, i.address + i.bytes.length - 1), layout.dataBase - 1);
   return {
     files: {
-      'AA_IROM.mem': hdlBuildMemImage(baseAddress, iromBits, lastCode),
-      'AA_DMEM.mem': hdlBuildMemImage(dataBase, dmemBits, lastData)
+      'AA_IROM.mem': hdlBuildMemImage(layout.baseAddress, iromBits, lastCode),
+      'AA_DMEM.mem': hdlBuildMemImage(layout.dataBase, dmemBits, lastData)
     },
     iromBits, dmemBits,
-    codeWords: Math.max(0, Math.ceil((lastCode - baseAddress + 1) / 4)),
-    dataWords: Math.max(0, Math.ceil((lastData - dataBase + 1) / 4)),
+    codeWords: Math.max(0, Math.ceil((lastCode - layout.baseAddress + 1) / 4)),
+    dataWords: Math.max(0, Math.ceil((lastData - layout.dataBase + 1) / 4)),
     iromCapacity: Math.pow(2, iromBits - 2),
     dmemCapacity: Math.pow(2, dmemBits - 2)
   };
@@ -68,7 +68,7 @@ function hdlRequiredDepths() {
     while (Math.pow(2, b) < bytes) b++;
     return Math.max(b, DEFAULT_DEPTH_BITS);
   };
-  return { irom: bitsFor(codeSize >>> 0), dmem: bitsFor(dataSize >>> 0) };
+  return { irom: bitsFor(layout.codeSize >>> 0), dmem: bitsFor(layout.dataSize >>> 0) };
 }
 
 // The Wrapper that ships with the prebuilt processor is ours, so its two

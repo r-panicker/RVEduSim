@@ -103,60 +103,60 @@ setTimeout(async () => {
     // --- [3] Push buttons are J K L, held ---
     [['j', 0x4], ['k', 0x2], ['l', 0x1]].forEach(([key, bit]) => {
       press('keydown', key);
-      if (win.eval('pbState') !== bit) throw new Error(`${key.toUpperCase()} should press only its button (0x${bit.toString(16)})`);
+      if (win.eval('board.buttons') !== bit) throw new Error(`${key.toUpperCase()} should press only its button (0x${bit.toString(16)})`);
       press('keyup', key);
-      if (win.eval('pbState') !== 0) throw new Error(`${key.toUpperCase()} release should clear its button`);
+      if (win.eval('board.buttons') !== 0) throw new Error(`${key.toUpperCase()} release should clear its button`);
     });
     ['ArrowLeft', 'ArrowDown', 'ArrowRight'].forEach(key => {
       press('keydown', key); press('keyup', key);
     });
-    if (win.eval('pbState') !== 0) throw new Error('The arrow keys should press no push button');
+    if (win.eval('board.buttons') !== 0) throw new Error('The arrow keys should press no push button');
     press('keydown', 'K', true);
-    if (win.eval('pbState') !== 0x2) throw new Error('K in capitals should press BTNC too');
+    if (win.eval('board.buttons') !== 0x2) throw new Error('K in capitals should press BTNC too');
     press('keyup', 'K', true);
-    if (win.eval('pbState') !== 0) throw new Error('K in capitals should release BTNC');
+    if (win.eval('board.buttons') !== 0) throw new Error('K in capitals should release BTNC');
     console.log('✅ J, K and L press BTNL, BTNC and BTNR while held; the arrows press none');
 
     // --- [4] Accelerometer axis shortcut: hold X/Y/Z/T, , and . (5 units per press) ---
-    win.eval('accelX = 0; accelTemp = 25;');
-    const instr0 = win.eval('instructionCount');
+    win.eval('accel.x = 0; accel.temp = 25;');
+    const instr0 = win.eval('cpu.instructionCount');
     press('keydown', 'x');
     press('keydown', '.');
-    if (win.eval('accelX') !== 5) throw new Error(`X + . should increase accelX to 5, got ${win.eval('accelX')}`);
+    if (win.eval('accel.x') !== 5) throw new Error(`X + . should increase accel.x to 5, got ${win.eval('accel.x')}`);
     press('keydown', ',');
     press('keydown', ',');
-    if (win.eval('accelX') !== -5) throw new Error(`X + , x2 should net accelX to -5, got ${win.eval('accelX')}`);
+    if (win.eval('accel.x') !== -5) throw new Error(`X + , x2 should net accel.x to -5, got ${win.eval('accel.x')}`);
     press('keyup', 'x');
     press('keydown', ',');
-    if (win.eval('accelX') !== -5) throw new Error('accelX should not change once X is released');
-    if (win.eval('instructionCount') !== instr0) throw new Error('The accelerometer keys should not step');
-    console.log('✅ Hold X, , and . nudge accelX by 5; releasing X ends it');
+    if (win.eval('accel.x') !== -5) throw new Error('accel.x should not change once X is released');
+    if (win.eval('cpu.instructionCount') !== instr0) throw new Error('The accelerometer keys should not step');
+    console.log('✅ Hold X, , and . nudge accel.x by 5; releasing X ends it');
 
     press('keydown', 't');
     press('keydown', '.');
-    if (win.eval('accelTemp') !== 30) throw new Error(`T + . should increase accelTemp to 30, got ${win.eval('accelTemp')}`);
+    if (win.eval('accel.temp') !== 30) throw new Error(`T + . should increase accel.temp to 30, got ${win.eval('accel.temp')}`);
     press('keyup', 't');
     press('keydown', 'T', true);
     press('keydown', '>', true);
-    if (win.eval('accelTemp') !== 35) throw new Error(`Shift+T with Shift+. should increase accelTemp to 35, got ${win.eval('accelTemp')}`);
+    if (win.eval('accel.temp') !== 35) throw new Error(`Shift+T with Shift+. should increase accel.temp to 35, got ${win.eval('accel.temp')}`);
     press('keyup', 'T', true);
-    console.log('✅ Hold T, , and . nudge accelTemp by 5');
+    console.log('✅ Hold T, , and . nudge accel.temp by 5');
 
-    win.eval('accelZ = 127;');
+    win.eval('accel.z = 127;');
     press('keydown', 'z');
     press('keydown', '.');
-    if (win.eval('accelZ') !== 127) throw new Error(`accelZ should clamp at 127, got ${win.eval('accelZ')}`);
+    if (win.eval('accel.z') !== 127) throw new Error(`accel.z should clamp at 127, got ${win.eval('accel.z')}`);
     press('keyup', 'z');
     console.log('✅ Accelerometer axis shortcut clamps to the slider range');
 
     // --- [5] → and ← are Step and Back ---
     win.eval('resetAll()');
-    const pc0 = win.eval('pc');
+    const pc0 = win.eval('cpu.pc');
     press('keydown', 'ArrowRight'); press('keyup', 'ArrowRight');
-    if (win.eval('pc') === pc0 || win.eval('instructionCount') !== 1)
+    if (win.eval('cpu.pc') === pc0 || win.eval('cpu.instructionCount') !== 1)
       throw new Error('→ should step one instruction');
     press('keydown', 'ArrowLeft'); press('keyup', 'ArrowLeft');
-    if (win.eval('pc') !== pc0 || win.eval('instructionCount') !== 0)
+    if (win.eval('cpu.pc') !== pc0 || win.eval('cpu.instructionCount') !== 0)
       throw new Error('← should step back');
     console.log('✅ → steps and ← steps back');
 

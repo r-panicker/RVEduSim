@@ -101,10 +101,10 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   // Execute 1 full frame (~50,000 instructions)
   for (let s = 0; s < 60000; s++) {
     win.executeOne();
-    if (win.oledCol === 0 && win.oledRow === 0 && s > 40000) break;
+    if (win.oled.col === 0 && win.oled.row === 0 && s > 40000) break;
   }
 
-  const asmBuffer = new Uint8Array(win.oledBuffer);
+  const asmBuffer = new Uint8Array(win.oled.frontBuffer);
   let asmNonZero = 0;
   for (let i = 0; i < asmBuffer.length; i += 4) {
     if (asmBuffer[i] > 0 || asmBuffer[i+1] > 0 || asmBuffer[i+2] > 0) asmNonZero++;
@@ -134,10 +134,10 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
 
   for (let s = 0; s < 400000; s++) {
     win.executeOne();
-    if (win.oledCol === 0 && win.oledRow === 0 && s > 150000) break;
+    if (win.oled.col === 0 && win.oled.row === 0 && s > 150000) break;
   }
 
-  const cBuffer = new Uint8Array(win.oledBuffer);
+  const cBuffer = new Uint8Array(win.oled.frontBuffer);
   let cNonZero = 0;
   for (let i = 0; i < cBuffer.length; i += 4) {
     if (cBuffer[i] > 0 || cBuffer[i+1] > 0 || cBuffer[i+2] > 0) cNonZero++;
@@ -166,8 +166,8 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   win.runProgram();
   await new Promise(r => setTimeout(r, 20));
 
-  console.log(`  - Simulator running state: ${win.running}`);
-  if (!win.running) {
+  console.log(`  - Simulator running state: ${win.run.running}`);
+  if (!win.run.running) {
     throw new Error('Expected simulator to be actively running');
   }
 
@@ -176,7 +176,7 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   win.resetAll();
 
   // Verify simulator is stopped and waiting for user
-  const isRunningAfterReset = win.running;
+  const isRunningAfterReset = win.run.running;
   console.log(`  - Is running after reset: ${isRunningAfterReset} (expected false)`);
   if (isRunningAfterReset) {
     throw new Error('Reset failed to stop running execution!');
@@ -190,7 +190,7 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
 
   // Wait 100ms to ensure no pending setTimeout resumed execution
   await new Promise(r => setTimeout(r, 100));
-  if (win.running) {
+  if (win.run.running) {
     throw new Error('Execution unexpectedly resumed in background after reset!');
   }
   console.log('✅ Reset button cleanly halts execution and waits for user to run again!');

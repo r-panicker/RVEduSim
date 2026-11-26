@@ -115,11 +115,11 @@ function dpPcSrc(pcs, f3, flags) {
 // Every value on every wire for the instruction at the PC, from the
 // current state. Reads are peeks, so looking never consumes a UART byte.
 function dpEvaluate() {
-  const pcv = pc >>> 0;
+  const pcv = cpu.pc >>> 0;
   const instr = readMem(pcv, 4, true) >>> 0;
   const op = instr & 0x7F, f3 = (instr >>> 12) & 7, f7 = instr >>> 25;
   const rs1 = (instr >>> 15) & 31, rs2 = (instr >>> 20) & 31, rd = (instr >>> 7) & 31;
-  const item = machineCode.find(it => it.address === pcv && it.bytes);
+  const item = program.machineCode.find(it => it.address === pcv && it.bytes);
   const m = {
     pc: pcv, instr, op, f3, f7, rs1, rs2, rd,
     text: item ? (item.native || item.text || '').trim() : '',
@@ -132,8 +132,8 @@ function dpEvaluate() {
   else if (op === 0x63) c.ALUControl = 0b0001;
   else c.ALUControl = 0b0000;
   m.ctrl = c;
-  m.rd1 = regs[rs1] >>> 0;
-  m.rd2 = regs[rs2] >>> 0;
+  m.rd1 = cpu.regs[rs1] >>> 0;
+  m.rd2 = cpu.regs[rs2] >>> 0;
   m.extImm = dpExtend(instr, c.ImmSrc);
   const selA = dpBit(c.ALUSrcA, 0) === '1' ? (dpBit(c.ALUSrcA, 1) === '1' ? pcv : 0) : m.rd1;
   const selB = dpBit(c.ALUSrcB, 0) === '1' ? (dpBit(c.ALUSrcB, 1) === '1' ? m.extImm : 4) : m.rd2;
@@ -436,8 +436,8 @@ function dpActive() {
 // What makes the current instruction a different one: a Step, a Back, a
 // reset or a reassemble.
 function dpCurrentStamp() {
-  return [pc >>> 0, instructionCount, execHistory.length, assembled ? 1 : 0,
-          machineCode.length, pipeMode ? totalCycles + JSON.stringify(pipeHaz) + JSON.stringify(pipeBP) : ''].join(':');
+  return [cpu.pc >>> 0, cpu.instructionCount, stepHistory.entries.length, program.assembled ? 1 : 0,
+          program.machineCode.length, pipeMode ? cpu.totalCycles + JSON.stringify(pipeHaz) + JSON.stringify(pipeBP) : ''].join(':');
 }
 
 // What changes the values without changing the instruction: an edit in
@@ -445,8 +445,8 @@ function dpCurrentStamp() {
 let dpValueStamp = '';
 function dpCurrentValueStamp() {
   let h = 0;
-  for (let i = 0; i < 32; i++) h = Math.imul(h ^ regs[i], 0x01000193);
-  return h + ':' + (lastChangedMem.length ? lastChangedMem[0].addr + '/' + lastChangedMem[0].size : '');
+  for (let i = 0; i < 32; i++) h = Math.imul(h ^ cpu.regs[i], 0x01000193);
+  return h + ':' + (cpu.lastChangedMem.length ? cpu.lastChangedMem[0].addr + '/' + cpu.lastChangedMem[0].size : '');
 }
 
 // A new instruction starts from phase 0. The same instruction keeps its
@@ -454,7 +454,7 @@ function dpCurrentValueStamp() {
 // Nothing is drawn while the strip is hidden: showing it syncs with force.
 function dpSync(force) {
   if (!dpSvg() || !dpActive()) return;
-  if (running) return;
+  if (run.running) return;
   const stamp = dpCurrentStamp();
   const values = dpCurrentValueStamp();
   if (!force && stamp === dpStamp && values === dpValueStamp) return;
@@ -470,7 +470,7 @@ function dpSync(force) {
   dpStamp = stamp;
   dpAnimToken++;
   dpBusy = false;
-  dpModel = !assembled ? null : pipeMode ? (programFinished ? null : pdpEvaluate()) : dpEvaluate();
+  dpModel = !program.assembled ? null : pipeMode ? (programFinished ? null : pdpEvaluate()) : dpEvaluate();
   dpPhaseList = !dpModel || dpModel.pipe ? [] : dpPhases(dpModel);
   dpPhase = 0;
   dpRender(false);
@@ -827,7 +827,7 @@ function dpRender(animate) {
     dpClear();
     if (instrEl) instrEl.textContent = '';
     if (phaseEl) phaseEl.textContent = '';
-    if (capEl) capEl.innerHTML = assembled
+    if (capEl) capEl.innerHTML = program.assembled
       ? 'The program has finished.'
       : 'Assemble a program to follow its instructions through the datapath.';
     dpUpdateButtons();
@@ -873,14 +873,14 @@ function dpUpdateOwnButtons() {
   tip('dpNextBtn', pipeMode ? 'Next clock cycle' : 'Next phase; at the clock edge, execute the instruction');
   tip('dpPlayBtn', pipeMode ? 'Clock one cycle after another; press again to pause' : 'Play every phase of this instruction, then execute it');
   if (pipeMode) {
-    const ok = assembled && !running && simEngineMode !== 'hdl';
-    set('dpPrevBtn', ok && !pdpPlaying && execHistory.length > 0);
+    const ok = program.assembled && !run.running && simEngineMode !== 'hdl';
+    set('dpPrevBtn', ok && !pdpPlaying && stepHistory.entries.length > 0);
     set('dpNextBtn', ok && !programFinished);
     set('dpPlayBtn', ok && (pdpPlaying || !programFinished));
     return;
   }
-  const ok = !!dpModel && !running && simEngineMode !== 'hdl';
-  set('dpPrevBtn', ok && (dpPhase > 0 || execHistory.length > 0));
+  const ok = !!dpModel && !run.running && simEngineMode !== 'hdl';
+  set('dpPrevBtn', ok && (dpPhase > 0 || stepHistory.entries.length > 0));
   set('dpNextBtn', ok && !programFinished);
   set('dpPlayBtn', ok && !programFinished);
 }
@@ -940,15 +940,15 @@ function dpAnimatePhase(k) {
 // Past the last phase is the clock edge: the instruction executes, one
 // instruction exactly, whatever Statement Stepping is set to.
 function dpCommit() {
-  const saved = statementStepping;
-  statementStepping = false;
-  try { stepOnce(); } finally { statementStepping = saved; }
+  const saved = run.statementStepping;
+  run.statementStepping = false;
+  try { stepOnce(); } finally { run.statementStepping = saved; }
   dpSync(true);
 }
 
 function dpNext() {
-  if (pipeMode) { pdpPlaying = false; if (!running && !programFinished && assembled) dpCommit(); return; }
-  if (!dpModel || running || simEngineMode === 'hdl') return;
+  if (pipeMode) { pdpPlaying = false; if (!run.running && !programFinished && program.assembled) dpCommit(); return; }
+  if (!dpModel || run.running || simEngineMode === 'hdl') return;
   if (dpBusy) { dpAnimToken++; dpBusy = false; dpDrawStatic(dpPhase); dpUpdateButtons(); return; }
   if (dpPhase >= dpPhaseList.length) { dpCommit(); return; }
   dpPhase++;
@@ -956,8 +956,8 @@ function dpNext() {
 }
 
 function dpPrev() {
-  if (pipeMode) { pdpPlaying = false; if (!running && execHistory.length) { stepBack(); dpSync(true); } return; }
-  if (!dpModel || running) return;
+  if (pipeMode) { pdpPlaying = false; if (!run.running && stepHistory.entries.length) { stepBack(); dpSync(true); } return; }
+  if (!dpModel || run.running) return;
   dpAnimToken++;
   dpBusy = false;
   if (dpPhase > 0) {
@@ -966,7 +966,7 @@ function dpPrev() {
     return;
   }
   // Back past the first phase: the instruction before, at its last.
-  if (!execHistory.length) return;
+  if (!stepHistory.entries.length) return;
   stepBack();
   dpSync(true);
   dpPhase = dpPhaseList.length;
@@ -976,7 +976,7 @@ function dpPrev() {
 // Plays the rest of this instruction's phases, then lets the edge happen.
 async function dpPlay() {
   if (pipeMode) { pdpPlay(); return; }
-  if (!dpModel || running || simEngineMode === 'hdl') return;
+  if (!dpModel || run.running || simEngineMode === 'hdl') return;
   const stamp = dpStamp;
   while (dpPhase < dpPhaseList.length) {
     dpPhase++;
@@ -1009,14 +1009,14 @@ const PDP_FWD_FROM = { '00': 'E', '01': 'W', '10': 'M' };
 function pdpTable() { return PDP_DRAW[pipeBP.on ? 'bp' : 'full']; }
 
 function pdpText(addr) {
-  const item = machineCode.find(it => it.address === (addr >>> 0) && it.bytes);
+  const item = program.machineCode.find(it => it.address === (addr >>> 0) && it.bytes);
   return item ? (item.native || item.text || '').trim() : dpHex(readMem(addr >>> 0, 4, true));
 }
 
 function pdpEvaluate() {
   const s = pipeEvaluate();
   return {
-    pipe: true, s, cycle: totalCycles,
+    pipe: true, s, cycle: cpu.totalCycles,
     st: { F: s.instrF ? { pc: s.pcF, instr: s.instrF } : null, D: pipe.D, E: pipe.E, M: pipe.M, W: pipe.W },
   };
 }
@@ -1391,7 +1391,7 @@ async function pdpPlay() {
   if (pdpPlaying) { pdpPlaying = false; dpUpdateButtons(); return; }
   pdpPlaying = true;
   dpUpdateButtons();
-  while (pdpPlaying && pipeMode && assembled && !programFinished && !running && simEngineMode !== 'hdl') {
+  while (pdpPlaying && pipeMode && program.assembled && !programFinished && !run.running && simEngineMode !== 'hdl') {
     dpCommit();
     await new Promise(r => setTimeout(r, 900 / dpSpeed));
   }
@@ -1421,7 +1421,7 @@ function dpToggleView() { dpSetView(dpView === 'timeline' ? 'diagram' : 'timelin
 function pdpRenderTimeline() {
   const host = document.getElementById('dpTimeline');
   if (!host || dpView !== 'timeline') return;
-  if (!assembled || !pipe) { host.innerHTML = '<p class="pdp-tl-empty">Assemble a program to chart it.</p>'; return; }
+  if (!program.assembled || !pipe) { host.innerHTML = '<p class="pdp-tl-empty">Assemble a program to chart it.</p>'; return; }
   // A few columns before the window, so bubbles already in flight at its
   // left edge are known.
   const all = [];
@@ -1430,7 +1430,7 @@ function pdpRenderTimeline() {
     const s = pipeEvaluate();
     const rec = r => r ? { seq: r.seq, pc: r.pc } : null;
     all.push({
-      cyc: totalCycles, live: true,
+      cyc: cpu.totalCycles, live: true,
       st: [s.instrF ? { seq: pipe.seqF, pc: s.pcF } : null, rec(pipe.D), rec(pipe.E), rec(pipe.M), rec(pipe.W)],
       stall: s.stallD, flushD: s.flushD, flushE: s.flushE && !s.stallD, miss: !!s.mispredict,
       serial: !!s.serialExec,
@@ -1590,13 +1590,13 @@ let dpBlockKey = null, dpBlockVal = null;
 const DP_MULTI_BLOCK = { msg: 'The datapath is not available in Multi-cycle mode.' };
 function dpBlocker() {
   if (jsArch === 'multi') return DP_MULTI_BLOCK;
-  const key = assembled + ':' + machineCode.length + ':' + (lastAssembledCode || '').length + ':' + editorLanguageMode;
+  const key = program.assembled + ':' + program.machineCode.length + ':' + (lastAssembledCode || '').length + ':' + editorLanguageMode;
   if (key === dpBlockKey) return dpBlockVal;
   dpBlockKey = key;
   dpBlockVal = null;
-  if (!assembled) return null;
-  for (const item of machineCode) {
-    if (item.error || !item.bytes || (item.address >>> 0) >= (dataBase >>> 0)) continue;
+  if (!program.assembled) return null;
+  for (const item of program.machineCode) {
+    if (item.error || !item.bytes || (item.address >>> 0) >= (layout.dataBase >>> 0)) continue;
     for (let k = 0; k + 3 < item.bytes.length; k += 4) {
       const w = (item.bytes[k] | (item.bytes[k + 1] << 8) | (item.bytes[k + 2] << 16) | (item.bytes[k + 3] << 24)) >>> 0;
       if (!w) continue;
@@ -1657,8 +1657,8 @@ function floatStepsMode() {
 function updateFloatSteps() {
   const bar = document.getElementById('floatSteps');
   if (!bar) return;
-  const onDp = mobileMode() && assembled && floatOnDpTab();
-  const show = onDp || (floatStepsWanted && mobileMode() && assembled);
+  const onDp = mobileMode() && program.assembled && floatOnDpTab();
+  const show = onDp || (floatStepsWanted && mobileMode() && program.assembled);
   document.body.classList.toggle('float-dp', onDp);
   bar.hidden = !show;
   if (!show) return;
@@ -1837,7 +1837,7 @@ function bootSimulator() {
   // first visit) but updatePeripherals() is called from many other
   // places (memory edits, stepping) long before a user might open that
   // tab. Build its DOM now so those calls have somewhere to write to,
-  // instead of silently no-op'ing against elements that don't exist yet.
+  // instead of writing to elements that do not exist yet.
   initPeripherals();
   initCodeMirrorEditor();
   // Auto-assemble the initial example so Run / Step are active on first load
@@ -1875,36 +1875,16 @@ window.toggleBreakpoint = toggleBreakpoint;
 window.findNextValidInstructionLine = findNextValidInstructionLine;
 window.formatActiveInstructionSignature = formatActiveInstructionSignature;
 window.riscvAutocomplete = riscvAutocomplete;
-window.getRegs = () => regs;
-window.getPc = () => pc;
-window.getMachineCode = () => machineCode;
-window.getBreakpoints = () => breakpoints;
-window.getCurrentExecLine = () => currentExecLine;
-try {
-  Object.defineProperty(window, 'regs', { get: () => regs, configurable: true });
-  Object.defineProperty(window, 'pc', { get: () => pc, configurable: true });
-  Object.defineProperty(window, 'machineCode', { get: () => machineCode, configurable: true });
-  Object.defineProperty(window, 'breakpoints', { get: () => breakpoints, configurable: true });
-  Object.defineProperty(window, 'currentExecLine', { get: () => currentExecLine, configurable: true });
-  Object.defineProperty(window, 'running', { get: () => running, configurable: true });
-  Object.defineProperty(window, 'runTimerId', { get: () => runTimerId, configurable: true });
-  Object.defineProperty(window, 'oledBuffer', { get: () => oledPages[oledFrontPage], configurable: true });
-  Object.defineProperty(window, 'oledCol', { get: () => oledCol, configurable: true });
-  Object.defineProperty(window, 'oledRow', { get: () => oledRow, configurable: true });
-  Object.defineProperty(window, 'oledCtrl', { get: () => oledCtrl, configurable: true });
-  Object.defineProperty(window, 'sevsegState', { get: () => sevsegState, configurable: true });
-  Object.defineProperty(window, 'accelX', { get: () => accelX, set: v => { accelX = v; }, configurable: true });
-  Object.defineProperty(window, 'accelY', { get: () => accelY, set: v => { accelY = v; }, configurable: true });
-  Object.defineProperty(window, 'accelZ', { get: () => accelZ, set: v => { accelZ = v; }, configurable: true });
-  Object.defineProperty(window, 'accelTemp', { get: () => accelTemp, set: v => { accelTemp = v; }, configurable: true });
-  Object.defineProperty(window, 'statementStepping', { get: () => statementStepping, set: v => { statementStepping = !!v; }, configurable: true });
-  Object.defineProperty(window, 'maxInstructionsPerRun', { get: () => maxInstructionsPerRun, set: v => { maxInstructionsPerRun = (typeof v === 'number' && v > 0) ? v : 100000; }, configurable: true });
-  Object.defineProperty(window, 'execHistory', { get: () => execHistory, configurable: true });
-} catch (e) {}
+window.getRegs = () => cpu.regs;
+window.getPc = () => cpu.pc;
+window.getMachineCode = () => program.machineCode;
+window.getBreakpoints = () => run.breakpoints;
+window.getCurrentExecLine = () => run.currentLine;
+Object.defineProperty(window, 'runTimerId', { get: () => runTimerId, configurable: true });
 
-window.getExecHistory = () => execHistory;
+window.getExecHistory = () => stepHistory.entries;
 
-window.getOledBuffer = () => oledPages[oledFrontPage];
+window.getOledBuffer = () => oled.pages[oled.front];
 window.readMem = readMem;
 window.writeMem = writeMem;
 window.getMemByte = getMemByte;
@@ -1925,7 +1905,7 @@ window.setLocalsDecSigned = setLocalsDecSigned;
 window.getCFunctionLocals = () => cFunctionLocals;
 window.getMemViewMode = () => memViewMode;
 window.setDisasmViewMode = setDisasmViewMode;
-window.getDisasmViewMode = () => disasmViewMode;
+window.getDisasmViewMode = () => ui.disasmView;
 window.syncGodboltArchFlags = syncGodboltArchFlags;
 window.openMemWordOverlay = openMemWordOverlay;
 window.startMemWordCellEdit = startMemWordCellEdit;

@@ -252,25 +252,25 @@ setTimeout(() => {
       win.editor.value = src;
       win.assembleOnly();
 
-      const mc = win.eval('machineCode') || [];
+      const mc = win.eval('program.machineCode') || [];
       const errs = mc.filter(m => m.error);
       if (errs.length) {
         failures.push(`${name}: did not assemble — ${errs[0].error}`);
         continue;
       }
-      if (!win.eval('assembled')) {
+      if (!win.eval('program.assembled')) {
         failures.push(`${name}: assembleOnly() left the program unassembled`);
         continue;
       }
 
       // Run to the halt loop, or until the step budget is spent.
-      const haltAddr = win.eval('labels')['__halt'];
-      const bodyAddr = win.eval('labels')['__body'];
+      const haltAddr = win.eval('program.labels')['__halt'];
+      const bodyAddr = win.eval('program.labels')['__body'];
       let steps = 0;
       while (steps < 400) {
         win.stepOnce();
         steps++;
-        if ((win.eval('pc') >>> 0) === (haltAddr >>> 0)) break;
+        if ((win.eval('cpu.pc') >>> 0) === (haltAddr >>> 0)) break;
       }
       if (steps >= 400) {
         failures.push(`${name}: never reached the halt loop in 400 steps`);
@@ -280,7 +280,7 @@ setTimeout(() => {
       let ok = true;
       for (const [where, want] of Object.entries(checks)) {
         const expected = want === 'PC_OF_BODY' ? (bodyAddr | 0) : (want | 0);
-        const got = win.regs[REG_INDEX[where]] | 0;
+        const got = win.cpu.regs[REG_INDEX[where]] | 0;
         if (got !== expected) {
           failures.push(`${name}: ${where} = ${got} (0x${(got >>> 0).toString(16)}), ` +
                         `expected ${expected} (0x${(expected >>> 0).toString(16)})`);

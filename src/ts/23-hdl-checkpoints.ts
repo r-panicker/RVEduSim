@@ -25,8 +25,9 @@ let hdlEpoch = 0;             // bumped whenever the recording is discarded
 // near the end of the recording: Resume starts there, an input change
 // while paused is usually made there, and the waveform built on Pause
 // covers the last HDL_VCD_WINDOW cycles. A recording keeps the two
-// newest (t.vlCks, newest first); one checked the same way as above that
-// does not reproduce the recording turns them off for those sources.
+// newest (t.vlCks, newest first). A replay from one is checked against the
+// recording as an Icarus replay is, and one that does not reproduce it
+// turns Verilator's checkpoints off for those sources.
 const HDL_VL_CK_EVERY = 200000;
 let hdlVlCkOff = null;        // the compiled design whose checkpoints are off
 

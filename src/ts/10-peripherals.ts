@@ -141,9 +141,9 @@ let clockLedTimer = null;
 let clockLedLit = true;
 function updateClockLed() {
   const led = document.getElementById('led8');
-  const busy = running || !!(hdlLive || hdlChunked || hdlPlay);
+  const busy = run.running || !!(hdlLive || hdlChunked || hdlPlay);
   if (busy) {
-    const hz = runPace === 'real' ? cpuHz() : Infinity;
+    const hz = clock.pace === 'real' ? cpuHz() : Infinity;
     clockLedLit = hz <= 8 ? Math.floor(performance.now() / 1000 * hz * 2) % 2 === 0
                           : Math.floor(performance.now() / 125) % 2 === 0;
   }
@@ -156,7 +156,7 @@ function updatePeripherals() {
   for (let i = 15; i >= 9; i--) {
     const pcBit = i - 7;
     const led = document.getElementById('led' + i);
-    if (led) led.classList.toggle('on', !!(pc & (1 << pcBit)));
+    if (led) led.classList.toggle('on', !!(cpu.pc & (1 << pcBit)));
   }
 
   // 2. Divided Clock LED (LED[8]) -> Amber/Orange
@@ -165,22 +165,22 @@ function updatePeripherals() {
   // 3. User Output LEDs (LED[7:0]) -> Green (driven by PERIPH_LED 0xFFFF0060)
   for (let i = 7; i >= 0; i--) {
     const led = document.getElementById('led' + i);
-    if (led) led.classList.toggle('on', !!(ledState & (1 << i)));
+    if (led) led.classList.toggle('on', !!(board.leds & (1 << i)));
   }
 
   // Update DIP switches (16 switches)
   for (let i = 15; i >= 0; i--) {
     const dip = document.getElementById('dip' + i);
-    if (dip) dip.classList.toggle('on', !!(dipSwitches & (1 << i)));
+    if (dip) dip.classList.toggle('on', !!(board.dip & (1 << i)));
   }
 
   // Update push buttons: bit 2 = BTNL, bit 1 = BTNC, bit 0 = BTNR
   const pbL = document.getElementById('pbBtnL');
   const pbC = document.getElementById('pbBtnC');
   const pbR = document.getElementById('pbBtnR');
-  if (pbL) pbL.classList.toggle('pressed', !!(pbState & (1 << 2)));
-  if (pbC) pbC.classList.toggle('pressed', !!(pbState & (1 << 1)));
-  if (pbR) pbR.classList.toggle('pressed', !!(pbState & (1 << 0)));
+  if (pbL) pbL.classList.toggle('pressed', !!(board.buttons & (1 << 2)));
+  if (pbC) pbC.classList.toggle('pressed', !!(board.buttons & (1 << 1)));
+  if (pbR) pbR.classList.toggle('pressed', !!(board.buttons & (1 << 0)));
 
   // Update 7-segment display
   sevsegUpdate();
@@ -196,8 +196,8 @@ function updatePeripherals() {
     ? `'${String.fromCharCode(b)}'` : '0x' + b.toString(16).padStart(2, '0');
 
   if (rxValidEl) {
-    rxValidEl.innerText = uartRxFull ? '1' : '0';
-    rxValidEl.style.color = uartRxFull ? '#a6e3a1' : '#f9e2af';
+    rxValidEl.innerText = uart.rxFull ? '1' : '0';
+    rxValidEl.style.color = uart.rxFull ? '#a6e3a1' : '#f9e2af';
   }
   if (txReadyEl) {
     txReadyEl.innerText = '1';
@@ -205,16 +205,16 @@ function updatePeripherals() {
   // The count is what the PC still has to send, not a receive FIFO - the
   // hardware holds one byte, and that is shown separately below.
   if (countEl) {
-    countEl.innerText = uartPending.length +
-      (uartPending.length === 1 ? ' byte to send' : ' bytes to send');
+    countEl.innerText = uart.pending.length +
+      (uart.pending.length === 1 ? ' byte to send' : ' bytes to send');
   }
   if (previewEl) {
-    const held = uartRxFull ? `UART_RX holds ${asChar(uartRxByte)}` : 'UART_RX empty';
-    const queued = uartPending.length
-      ? ' · queued [' + uartPending.slice(0, 10).map(asChar).join(', ') +
-        (uartPending.length > 10 ? '...' : '') + ']'
+    const held = uart.rxFull ? `UART_RX holds ${asChar(uart.rxByte)}` : 'UART_RX empty';
+    const queued = uart.pending.length
+      ? ' · queued [' + uart.pending.slice(0, 10).map(asChar).join(', ') +
+        (uart.pending.length > 10 ? '...' : '') + ']'
       : '';
-    const lost = uartRxDroppedTotal ? ` · ${uartRxDroppedTotal} lost to overrun` : '';
+    const lost = uart.rxDroppedTotal ? ` · ${uart.rxDroppedTotal} lost to overrun` : '';
     previewEl.innerText = held + queued + lost;
   }
   if (termEl) {
@@ -224,11 +224,11 @@ function updatePeripherals() {
   const autoStatusEl = document.getElementById('uartAutoSendStatus');
   const btnEl = document.getElementById('uartSendBtn');
   if (autoStatusEl) {
-    if (uartPending.length) {
-      const sentCount = Math.max(0, uartSendTotal - uartPending.length);
-      autoStatusEl.innerText = uartSendMode === 'forgiving'
-        ? `Sending: ${sentCount}/${uartSendTotal} (waiting for the program)`
-        : `Sending: ${sentCount}/${uartSendTotal} (${uartGapInstr()} cycles apart)`;
+    if (uart.pending.length) {
+      const sentCount = Math.max(0, uart.sendTotal - uart.pending.length);
+      autoStatusEl.innerText = uart.sendMode === 'forgiving'
+        ? `Sending: ${sentCount}/${uart.sendTotal} (waiting for the program)`
+        : `Sending: ${sentCount}/${uart.sendTotal} (${uartGapInstr()} cycles apart)`;
     } else {
       if (btnEl && btnEl.innerText === 'Cancel') {
         btnEl.innerText = 'Send';
@@ -243,9 +243,9 @@ function updatePeripherals() {
   const oledCtrlEl = document.getElementById('oledCtrlVal');
   const oledDescEl = document.getElementById('oledModeDesc');
 
-  if (oledColEl) oledColEl.innerText = oledCol;
-  if (oledRowEl) oledRowEl.innerText = oledRow;
-  if (oledCtrlEl) oledCtrlEl.innerText = '0x' + (oledCtrl & 0xFF).toString(16).padStart(2, '0').toUpperCase();
+  if (oledColEl) oledColEl.innerText = oled.col;
+  if (oledRowEl) oledRowEl.innerText = oled.row;
+  if (oledCtrlEl) oledCtrlEl.innerText = '0x' + (oled.ctrl & 0xFF).toString(16).padStart(2, '0').toUpperCase();
 
   // Bit 0 of OLED_STATUS, shown the way DREADY and RX VALID are. Always 0
   // here: with no scanout to wait for, a present has landed by the time
@@ -255,14 +255,14 @@ function updatePeripherals() {
   if (oledSwapEl) oledSwapEl.innerText = '0';
   const oledBufEl = document.getElementById('oledBufDesc');
   if (oledBufEl) {
-    oledBufEl.innerText = (oledFrontPage === oledBackPage)
+    oledBufEl.innerText = (oled.front === oled.back)
       ? 'Single buffered · writes appear at once'
-      : `Double buffered · showing page ${oledFrontPage}, drawing into page ${oledBackPage}`;
+      : `Double buffered · showing page ${oled.front}, drawing into page ${oled.back}`;
   }
 
   if (oledDescEl) {
-    const triggerMode = oledCtrl & 0x0F;
-    const colorMode = (oledCtrl >> 4) & 0x0F;
+    const triggerMode = oled.ctrl & 0x0F;
+    const colorMode = (oled.ctrl >> 4) & 0x0F;
     const triggerNames = {
       0x0: 'vary_pixel_data_mode',
       0x1: 'vary_col_mode (x)',
@@ -291,12 +291,12 @@ function updatePeripherals() {
   const fmtHexByte = (v) => '0x' + (v & 0xFF).toString(16).padStart(2, '0').toUpperCase();
   const fmtG = (v) => (v / 64 >= 0 ? '+' : '') + (v / 64).toFixed(2) + 'g';
 
-  if (xEl) xEl.innerText = `${accelX} (${fmtHexByte(accelX)}, ${fmtG(accelX)})`;
-  if (yEl) yEl.innerText = `${accelY} (${fmtHexByte(accelY)}, ${fmtG(accelY)})`;
-  if (zEl) zEl.innerText = `${accelZ} (${fmtHexByte(accelZ)}, ${fmtG(accelZ)})`;
-  if (tEl) tEl.innerText = `${accelTemp}°C (${fmtHexByte(accelTemp)})`;
-  if (dreadyEl) dreadyEl.innerText = accelDready ? '1' : '0';
-  if (cycleEl) cycleEl.innerText = totalCycles;
+  if (xEl) xEl.innerText = `${accel.x} (${fmtHexByte(accel.x)}, ${fmtG(accel.x)})`;
+  if (yEl) yEl.innerText = `${accel.y} (${fmtHexByte(accel.y)}, ${fmtG(accel.y)})`;
+  if (zEl) zEl.innerText = `${accel.z} (${fmtHexByte(accel.z)}, ${fmtG(accel.z)})`;
+  if (tEl) tEl.innerText = `${accel.temp}°C (${fmtHexByte(accel.temp)})`;
+  if (dreadyEl) dreadyEl.innerText = accel.dready ? '1' : '0';
+  if (cycleEl) cycleEl.innerText = cpu.totalCycles;
   updateOledCanvas();
 }
 
@@ -306,37 +306,37 @@ function updateAccelValues() {
   const zS = document.getElementById('accelZSlider');
   const tS = document.getElementById('accelTempSlider');
 
-  if (xS) accelX = parseInt(xS.value, 10);
-  if (yS) accelY = parseInt(yS.value, 10);
-  if (zS) accelZ = parseInt(zS.value, 10);
-  if (tS) accelTemp = parseInt(tS.value, 10);
+  if (xS) accel.x = parseInt(xS.value, 10);
+  if (yS) accel.y = parseInt(yS.value, 10);
+  if (zS) accel.z = parseInt(zS.value, 10);
+  if (tS) accel.temp = parseInt(tS.value, 10);
 
   updatePeripherals();
 }
 
 function setAccelPreset(preset) {
   if (preset === 'flat') {
-    accelX = 0; accelY = 0; accelZ = 64;
+    accel.x = 0; accel.y = 0; accel.z = 64;
   } else if (preset === 'tiltX') {
-    accelX = (accelX === -64) ? 64 : -64;
-    accelY = 0;
-    accelZ = 0;
+    accel.x = (accel.x === -64) ? 64 : -64;
+    accel.y = 0;
+    accel.z = 0;
   } else if (preset === 'tiltY') {
-    accelY = (accelY === -64) ? 64 : -64;
-    accelX = 0;
-    accelZ = 0;
+    accel.y = (accel.y === -64) ? 64 : -64;
+    accel.x = 0;
+    accel.z = 0;
   } else if (preset === 'shake') {
-    accelX = 127; accelY = -128; accelZ = 127;
+    accel.x = 127; accel.y = -128; accel.z = 127;
   } else if (preset === 'zero') {
-    accelX = 0; accelY = 0; accelZ = 0;
+    accel.x = 0; accel.y = 0; accel.z = 0;
   }
 
   const xS = document.getElementById('accelXSlider');
   const yS = document.getElementById('accelYSlider');
   const zS = document.getElementById('accelZSlider');
-  if (xS) xS.value = accelX;
-  if (yS) yS.value = accelY;
-  if (zS) zS.value = accelZ;
+  if (xS) xS.value = accel.x;
+  if (yS) yS.value = accel.y;
+  if (zS) zS.value = accel.z;
 
   updatePeripherals();
 }
@@ -346,20 +346,20 @@ function setAccelPreset(preset) {
 // handler (heldAxisKeys, in 17-find-replace.ts) for where `axis`/`delta`
 // come from.
 function bumpAccelAxis(axis, delta) {
-  if (axis === 'x') accelX = Math.max(-128, Math.min(127, accelX + delta));
-  else if (axis === 'y') accelY = Math.max(-128, Math.min(127, accelY + delta));
-  else if (axis === 'z') accelZ = Math.max(-128, Math.min(127, accelZ + delta));
-  else if (axis === 't') accelTemp = Math.max(-40, Math.min(85, accelTemp + delta));
+  if (axis === 'x') accel.x = Math.max(-128, Math.min(127, accel.x + delta));
+  else if (axis === 'y') accel.y = Math.max(-128, Math.min(127, accel.y + delta));
+  else if (axis === 'z') accel.z = Math.max(-128, Math.min(127, accel.z + delta));
+  else if (axis === 't') accel.temp = Math.max(-40, Math.min(85, accel.temp + delta));
   else return;
 
   const xS = document.getElementById('accelXSlider');
   const yS = document.getElementById('accelYSlider');
   const zS = document.getElementById('accelZSlider');
   const tS = document.getElementById('accelTempSlider');
-  if (xS) xS.value = accelX;
-  if (yS) yS.value = accelY;
-  if (zS) zS.value = accelZ;
-  if (tS) tS.value = accelTemp;
+  if (xS) xS.value = accel.x;
+  if (yS) yS.value = accel.y;
+  if (zS) zS.value = accel.z;
+  if (tS) tS.value = accel.temp;
 
   updatePeripherals();
 }
@@ -374,12 +374,12 @@ function updateOledCanvas() {
   if (!oledImageData || oledImageData.width !== 96 || oledImageData.height !== 64) {
     oledImageData = ctx.createImageData(96, 64);
   }
-  oledImageData.data.set(oledPages[oledFrontPage].subarray(0, 96 * 64 * 4));
+  oledImageData.data.set(oled.pages[oled.front].subarray(0, 96 * 64 * 4));
   ctx.putImageData(oledImageData, 0, 0);
 }
 
 function clearOledDisplay() {
-  oledPages.forEach(oledBlankPage);
+  oled.pages.forEach(oledBlankPage);
   updateOledCanvas();
   updatePeripherals();
 }
@@ -449,8 +449,8 @@ function sendUartInput() {
   const statusEl = document.getElementById('uartAutoSendStatus');
   if (!modeEl || !textEl) return;
 
-  if (uartPending.length) {
-    uartPending = [];
+  if (uart.pending.length) {
+    uart.pending = [];
     if (btnEl) {
       btnEl.innerText = 'Send';
       btnEl.style.background = '';
@@ -488,18 +488,18 @@ function sendUartInput() {
 
   // The bytes join the PC's buffer; delivery clocks them onto the wire one
   // character time apart, the way a serial port does.
-  for (const b of bytes) uartPending.push(b);
-  uartSendTotal = uartPending.length;
-  uartNextDeliveryInstr = uartNow();
+  for (const b of bytes) uart.pending.push(b);
+  uart.sendTotal = uart.pending.length;
+  uart.nextDeliveryInstr = uartNow();
   uartTickDelivery();
   textEl.value = '';
-  if (btnEl && uartPending.length) {
+  if (btnEl && uart.pending.length) {
     btnEl.innerText = 'Cancel';
     btnEl.style.background = '#f38ba8';
   }
   if (statusEl) {
-    statusEl.innerText = uartPending.length
-      ? `Sending: ${uartSendTotal - uartPending.length}/${uartSendTotal}` : '';
+    statusEl.innerText = uart.pending.length
+      ? `Sending: ${uart.sendTotal - uart.pending.length}/${uart.sendTotal}` : '';
   }
 
   updatePeripherals();
@@ -514,12 +514,12 @@ function renderUartTerminal() {
   const modeEl = document.getElementById('uartInputMode');
   const isHex = modeEl && modeEl.value === 'hex';
   let text;
-  if (uartTxBytes.length === 0) {
+  if (uart.txBytes.length === 0) {
     text = '(Terminal output will appear here...)';
   } else if (isHex) {
-    text = uartTxBytes.map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+    text = uart.txBytes.map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
   } else {
-    text = uartTxBuffer;
+    text = uart.txText;
   }
   // Only touch the DOM when the rendered text actually changes — avoids
   // needless reflow/scroll churn (which on mobile can disrupt an in-progress
@@ -534,13 +534,13 @@ function renderUartTerminal() {
 }
 
 function clearUartTx() {
-  uartTxBuffer = '';
-  uartTxBytes = [];
-  uartPending = [];
-  uartRxFull = false;
-  uartRxByte = 0;
-  uartRxDropped = 0;
-  uartRxDroppedTotal = 0;
+  uart.txText = '';
+  uart.txBytes = [];
+  uart.pending = [];
+  uart.rxFull = false;
+  uart.rxByte = 0;
+  uart.rxDropped = 0;
+  uart.rxDroppedTotal = 0;
   const btnEl = document.getElementById('uartSendBtn');
   if (btnEl) {
     btnEl.innerText = 'Send';
@@ -554,18 +554,18 @@ function clearUartTx() {
 }
 
 function toggleDip(idx) {
-  dipSwitches ^= (1 << idx);
-  dipSwitches &= 0xFFFF;
+  board.dip ^= (1 << idx);
+  board.dip &= 0xFFFF;
   updatePeripherals();
 }
 
 // Push button: click to toggle press/release
 function pbToggle(btn) {
   if (btn >= 0 && btn <= 2) {
-    if (pbState & (1 << btn)) {
-      pbState &= ~(1 << btn);
+    if (board.buttons & (1 << btn)) {
+      board.buttons &= ~(1 << btn);
     } else {
-      pbState |= (1 << btn);
+      board.buttons |= (1 << btn);
     }
   }
   updatePeripherals();
@@ -576,9 +576,9 @@ function pbToggle(btn) {
 function pbSetState(btn, down) {
   if (btn < 0 || btn > 2) return;
   const bit = 1 << btn;
-  const next = down ? (pbState | bit) : (pbState & ~bit);
-  if (next === pbState) return; // key-repeat while already held: no-op
-  pbState = next;
+  const next = down ? (board.buttons | bit) : (board.buttons & ~bit);
+  if (next === board.buttons) return; // key-repeat while already held: no-op
+  board.buttons = next;
   updatePeripherals();
 }
 
@@ -640,7 +640,7 @@ function sevsegUpdate() {
   const container = document.getElementById('sevsegContainer');
   if (!container) return;
 
-  const val = sevsegState.padStart(8, '0').toLowerCase();
+  const val = board.sevseg.padStart(8, '0').toLowerCase();
   container.innerHTML = '';
 
   for (let i = 0; i < 8; i++) {

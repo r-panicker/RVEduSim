@@ -29,10 +29,10 @@ function loadFile(event) {
     currentFileName = file.name;
     editor.value = e.target.result;
     lastAssembledCode = null;
-    assembled = false;
+    program.assembled = false;
     editor.scrollTop = 0;
     editor.scrollLeft = 0;
-    breakpoints.clear();
+    run.breakpoints.clear();
     resetAll();
     editorHistory.initialState();
     updateEditor();
@@ -42,7 +42,7 @@ function loadFile(event) {
       assembleOnly(); // Auto-assemble on load so Run / Step are active immediately
     }
     log(`Loaded file: ${file.name}`, 'success');
-    setStatus('File loaded: ' + file.name + (editorLanguageMode === 'asm' && assembled ? ' (auto-assembled — ready to Run/Step)' : ''));
+    setStatus('File loaded: ' + file.name + (editorLanguageMode === 'asm' && program.assembled ? ' (auto-assembled — ready to Run/Step)' : ''));
     updateToolbarButtonStates();
 
     // Display loaded filename in example dropdown

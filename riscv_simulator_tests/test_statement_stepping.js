@@ -64,38 +64,38 @@ setTimeout(async () => {
     await win.loadExample('fibonacci_c');
     await win.assembleOnly();
 
-    console.log(`\n[C Mode] Assembled Fibonacci example: ${win.machineCode.length} instructions`);
+    console.log(`\n[C Mode] Assembled Fibonacci example: ${win.program.machineCode.length} instructions`);
     
     // With Statement Stepping disabled:
-    win.statementStepping = false;
-    const initialPc = win.pc;
+    win.run.statementStepping = false;
+    const initialPc = win.cpu.pc;
     win.stepOnce();
     const history = win.getExecHistory();
     const instrsStep1 = history[history.length - 1].instr;
-    console.log(`Single Instruction Stepping: Executed ${instrsStep1} instruction (PC: 0x${win.pc.toString(16)})`);
+    console.log(`Single Instruction Stepping: Executed ${instrsStep1} instruction (PC: 0x${win.cpu.pc.toString(16)})`);
     if (instrsStep1 !== 1) throw new Error(`Expected 1 instruction per step when disabled, got ${instrsStep1}`);
 
     // Reset and enable Statement Stepping:
     win.resetAll();
-    win.statementStepping = true;
+    win.run.statementStepping = true;
     const initialLine = win.getCurrentExecLine();
-    console.log(`Starting Statement Stepping at Source Line: ${initialLine}, PC: 0x${win.pc.toString(16)}`);
+    console.log(`Starting Statement Stepping at Source Line: ${initialLine}, PC: 0x${win.cpu.pc.toString(16)}`);
     
     win.stepOnce();
     const lastHistory = history[history.length - 1];
     const newExecLine = win.getCurrentExecLine();
-    console.log(`Statement Step executed ${lastHistory.instr} instructions in 1 step! New Line: ${newExecLine}, PC: 0x${win.pc.toString(16)}`);
+    console.log(`Statement Step executed ${lastHistory.instr} instructions in 1 step! New Line: ${newExecLine}, PC: 0x${win.cpu.pc.toString(16)}`);
     
     if (lastHistory.instr < 1) {
       throw new Error(`Statement step executed 0 instructions!`);
     }
 
     // Step Back
-    const pcBeforeStepBack = win.pc;
+    const pcBeforeStepBack = win.cpu.pc;
     win.stepBack();
-    console.log(`After Step Back: Reverted to PC: 0x${win.pc.toString(16)}`);
-    if (win.pc !== 0x400000) {
-      throw new Error(`Expected PC to revert to 0x400000, got 0x${win.pc.toString(16)}`);
+    console.log(`After Step Back: Reverted to PC: 0x${win.cpu.pc.toString(16)}`);
+    if (win.cpu.pc !== 0x400000) {
+      throw new Error(`Expected PC to revert to 0x400000, got 0x${win.cpu.pc.toString(16)}`);
     }
     console.log('✅ Step Back flawlessly reversed the multi-instruction statement step!');
 
@@ -103,9 +103,9 @@ setTimeout(async () => {
     win.setLanguageMode('asm');
     await win.loadExample('fib');
     win.assembleOnly();
-    console.log(`\n[ASM Mode] Assembled Fibonacci example: ${win.machineCode.length} instructions`);
+    console.log(`\n[ASM Mode] Assembled Fibonacci example: ${win.program.machineCode.length} instructions`);
 
-    win.statementStepping = true;
+    win.run.statementStepping = true;
     win.stepOnce();
     const asmHistory = win.getExecHistory();
     console.log(`ASM Mode with Statement Stepping: Step executed ${asmHistory[asmHistory.length - 1].instr} instructions`);

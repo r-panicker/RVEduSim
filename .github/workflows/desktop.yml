@@ -32,7 +32,6 @@ jobs:
           - { os: ubuntu-22.04,    target: linux-x64, builder: --linux --x64 }
           - { os: windows-2022,    target: win-x64,   builder: --win --x64 }
           - { os: macos-15,        target: mac-arm64, builder: --mac --arm64 }
-          - { os: macos-15-intel,  target: mac-x64,   builder: --mac --x64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7

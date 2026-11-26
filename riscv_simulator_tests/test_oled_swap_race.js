@@ -93,7 +93,7 @@ wait:
 // The absence checks below are only worth anything if the draws after the
 // present actually ran, so every case confirms the pixel landed.
 function painted() {
-  return win.eval('(() => { const b = oledPages[oledBackPage], i = (0 * 96 + 10) * 4; ' +
+  return win.eval('(() => { const b = oled.pages[oled.back], i = (0 * 96 + 10) * 4; ' +
                   'return b[i] !== 0 || b[i + 1] !== 0 || b[i + 2] !== 0; })()');
 }
 

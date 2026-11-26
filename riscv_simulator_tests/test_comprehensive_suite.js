@@ -98,20 +98,20 @@ setTimeout(async () => {
     const fibLines = win.editor.value.split('\n');
     const firstInstr = fibLines.findIndex(l => /^\s*(li|add|mv|addi|j|bgt|la|sw|ecall)\b/.test(l)) + 1;
     win.toggleBreakpoint(1); // line 1 is a comment, so it snaps forward
-    if (!win.breakpoints.has(firstInstr) || win.breakpoints.has(1)) {
+    if (!win.run.breakpoints.has(firstInstr) || win.run.breakpoints.has(1)) {
       throw new Error(`Breakpoint snapping failed: expected ${firstInstr}, got ` +
-        JSON.stringify(Array.from(win.breakpoints)));
+        JSON.stringify(Array.from(win.run.breakpoints)));
     }
-    console.log('Breakpoints set:', Array.from(win.breakpoints));
+    console.log('Breakpoints set:', Array.from(win.run.breakpoints));
     console.log(`✅ Breakpoint snapping to line ${firstInstr} verified!`);
 
     // 4. Two-Pass Assembler & Instruction Verification
     console.log('\n[4] Testing Assembler Execution on Fibonacci Example...');
     win.assembleOnly();
-    if (!win.machineCode || win.machineCode.length === 0) {
+    if (!win.program.machineCode || win.program.machineCode.length === 0) {
       throw new Error('Assembly produced zero machine code items');
     }
-    console.log(`Assembled ${win.machineCode.length} instructions successfully.`);
+    console.log(`Assembled ${win.program.machineCode.length} instructions successfully.`);
     console.log('✅ Fibonacci assembly verified!');
 
     // 5. Stepping, Breakpoint Pause, and Back-Stepping
@@ -289,14 +289,14 @@ setTimeout(async () => {
 
     // 11. Operands that must be rejected rather than accepted silently
     console.log('\n[11] Testing assembler strictness and disassembly register naming...');
-    const asmErrors = () => (win.eval('machineCode') || [])
+    const asmErrors = () => (win.eval('program.machineCode') || [])
       .filter(m => m.error).map(m => String(m.error));
     const assembleText = (src) => { win.editor.value = src; win.assembleOnly(); };
 
     // A bare number is not a register: `add t0, t0, 1` must not assemble as
     // `add t0, t0, x1`, which would be silently wrong.
     assembleText('.text\nmain:\nadd t0, t0, 1\n');
-    if (win.eval('assembled')) throw new Error('`add t0, t0, 1` still assembles');
+    if (win.eval('program.assembled')) throw new Error('`add t0, t0, 1` still assembles');
     const numErr = doc.getElementById('console').textContent;
     if (!/is a number, not a register/.test(numErr)) {
       throw new Error('No "number, not a register" diagnostic for `add t0, t0, 1`');
@@ -319,28 +319,28 @@ setTimeout(async () => {
       const lo = parseInt(rows[i + 1].native.match(/, (-?\d+)\(/)[1], 10);
       return ((rows[i].address + (hi20 << 12) + lo) >>> 0);
     };
-    if (win.eval('assembled')) throw new Error('`sw t0, var1` still assembles without a scratch register');
+    if (win.eval('program.assembled')) throw new Error('`sw t0, var1` still assembles without a scratch register');
     if (!/scratch register/.test(doc.getElementById('console').textContent)) {
       throw new Error('No scratch-register diagnostic for a 2-operand store to a symbol');
     }
     // Naming it works, and the named register is the one that gets used.
     assembleText('.text\nmain:\nsw t0, var1, t2\n.data\nvar1: .word 1\n');
-    if (!win.eval('assembled')) throw new Error('`sw t0, var1, t2` failed to assemble');
-    const storeRows = win.eval('machineCode').filter(m => m.native);
+    if (!win.eval('program.assembled')) throw new Error('`sw t0, var1, t2` failed to assemble');
+    const storeRows = win.eval('program.machineCode').filter(m => m.native);
     const storeNatives = storeRows.map(m => m.native);
     if (!storeNatives.some(n => /^auipc x7,/.test(n)) || !storeNatives.some(n => /^sw x5, -?\d+\(x7\)$/.test(n))) {
       throw new Error('Store expansion did not use the named register: ' + JSON.stringify(storeNatives));
     }
-    if (pcRelTarget(storeRows) !== win.eval('dataBase') >>> 0) {
+    if (pcRelTarget(storeRows) !== win.eval('layout.dataBase') >>> 0) {
       throw new Error('Store expansion addressed 0x' + pcRelTarget(storeRows).toString(16) +
-                      ', not the symbol at 0x' + (win.eval('dataBase') >>> 0).toString(16));
+                      ', not the symbol at 0x' + (win.eval('layout.dataBase') >>> 0).toString(16));
     }
     console.log('Store to a symbol is PC-relative, honours the named register, and lands on the symbol');
 
     // A load has one - rd itself - so no other register is touched.
     assembleText('.text\nmain:\nlw s3, delay_val\n.data\ndelay_val: .word 4\n');
-    if (!win.eval('assembled')) throw new Error('`lw s3, delay_val` failed to assemble');
-    const loadRows = win.eval('machineCode').filter(m => m.native);
+    if (!win.eval('program.assembled')) throw new Error('`lw s3, delay_val` failed to assemble');
+    const loadRows = win.eval('program.machineCode').filter(m => m.native);
     const loadNatives = loadRows.map(m => m.native);
     if (!loadNatives.every(n => !/x5|x6/.test(n))) {
       throw new Error('Load expansion clobbered a scratch register: ' + JSON.stringify(loadNatives));
@@ -348,9 +348,9 @@ setTimeout(async () => {
     if (!loadNatives.some(n => /^auipc x19,/.test(n)) || !loadNatives.some(n => /^lw x19, -?\d+\(x19\)$/.test(n))) {
       throw new Error('Load expansion did not build the address in rd: ' + JSON.stringify(loadNatives));
     }
-    if (pcRelTarget(loadRows) !== win.eval('dataBase') >>> 0) {
+    if (pcRelTarget(loadRows) !== win.eval('layout.dataBase') >>> 0) {
       throw new Error('Load expansion addressed 0x' + pcRelTarget(loadRows).toString(16) +
-                      ', not the symbol at 0x' + (win.eval('dataBase') >>> 0).toString(16));
+                      ', not the symbol at 0x' + (win.eval('layout.dataBase') >>> 0).toString(16));
     }
     console.log('Load from a symbol is PC-relative, builds the address in rd, and lands on the symbol');
 
@@ -358,8 +358,8 @@ setTimeout(async () => {
     // whose only difference from the source is that naming is NOT marked as a
     // pseudo-instruction expansion.
     assembleText('.text\nmain:\nadd t0, t0, t1\nlw a0, 4(sp)\nli x1, 10\n');
-    if (!win.eval('assembled')) throw new Error('ABI-name program failed to assemble');
-    const rows = win.eval('machineCode').filter(m => m.native);
+    if (!win.eval('program.assembled')) throw new Error('ABI-name program failed to assemble');
+    const rows = win.eval('program.machineCode').filter(m => m.native);
     const byNative = Object.fromEntries(rows.map(m => [m.native, m]));
     if (!byNative['add x5, x5, x6']) {
       throw new Error('add t0, t0, t1 did not disassemble to x-names: ' + JSON.stringify(rows.map(m => m.native)));
@@ -389,8 +389,8 @@ setTimeout(async () => {
       throw new Error('No PC in the metrics readout: ' + statsEl.textContent);
     }
     const pcShown = statsEl.textContent.match(/PC:\s*(0x[0-9a-f]{8})/i)[1];
-    if (parseInt(pcShown, 16) !== (win.eval('pc') >>> 0)) {
-      throw new Error(`Metrics PC ${pcShown} does not match pc 0x${(win.eval('pc') >>> 0).toString(16)}`);
+    if (parseInt(pcShown, 16) !== (win.eval('cpu.pc') >>> 0)) {
+      throw new Error(`Metrics PC ${pcShown} does not match pc 0x${(win.eval('cpu.pc') >>> 0).toString(16)}`);
     }
     console.log(`Status row metrics: ${statsEl.textContent.replace(/\s+/g, ' ').trim()}`);
     console.log('✅ Assembler strictness, disassembly naming and PC readout verified!');
@@ -402,7 +402,7 @@ setTimeout(async () => {
       doc.getElementById('console').innerHTML = '';
       win.editor.value = src;
       try { win.assembleOnly(); } catch (e) { /* surfaced in the console */ }
-      return { ok: !!win.eval('assembled'), out: consoleText() };
+      return { ok: !!win.eval('program.assembled'), out: consoleText() };
     };
     const mustReject = (label, src, needle) => {
       const r = tryAsm('.text\nmain:\n' + src + '\n');
@@ -482,7 +482,7 @@ setTimeout(async () => {
     if (!/uses ecall \(2 sites\)/.test(consoleText())) {
       throw new Error('No ecall notice for an assembly program that uses it');
     }
-    if (!/hardware does not/.test(consoleText())) {
+    if (!/processor on the board does not/.test(consoleText())) {
       throw new Error('The ecall notice does not say the hardware lacks support');
     }
     await win.loadExample('dip_led');
@@ -587,8 +587,8 @@ setTimeout(async () => {
       doc.getElementById('console').innerHTML = '';
       win.editor.value = '.data\nmsg: .word 1,2,3,4,5,6,7,8,9,10\n.text\nmain:\n    la t0, ' + expr + '\n';
       try { win.assembleOnly(); } catch (e) { /* surfaced in the console */ }
-      if (!win.eval('assembled')) return null;
-      const rows = win.eval('JSON.stringify(machineCode.map(m => ({a: m.address >>> 0, n: m.native})))');
+      if (!win.eval('program.assembled')) return null;
+      const rows = win.eval('JSON.stringify(program.machineCode.map(m => ({a: m.address >>> 0, n: m.native})))');
       const parsed = JSON.parse(rows);
       const hi = parsed.find(r => /^auipc/.test(r.n || ''));
       const lo = parsed.find(r => /^addi/.test(r.n || ''));
@@ -627,8 +627,8 @@ setTimeout(async () => {
       doc.getElementById('console').innerHTML = '';
       win.editor.value = src;
       try { win.assembleOnly(); } catch (e) { /* surfaced in the console */ }
-      if (!win.eval('assembled')) throw new Error('did not assemble: ' + src);
-      return win.eval('machineCode').filter(m => m.native).map(m => m.native);
+      if (!win.eval('program.assembled')) throw new Error('did not assemble: ' + src);
+      return win.eval('program.machineCode').filter(m => m.native).map(m => m.native);
     };
     const pseudoSources = [
       '.data\nmsg: .word 1\n.text\nmain:\n    la t0, msg\n',
@@ -673,16 +673,16 @@ setTimeout(async () => {
       doc.getElementById('console').innerHTML = '';
       win.editor.value = src;
       try { win.assembleOnly(); } catch (e) { /* surfaced in the console */ }
-      return !!win.eval('assembled');
+      return !!win.eval('program.assembled');
     };
     // Steps until the PC reaches `halt`, so an `li` or `la` that expands to
     // two instructions cannot leave the check reading a register early.
     const runToHalt = (src) => {
       if (!assembleSrc(src)) throw new Error('did not assemble: ' + src);
-      const halt = win.eval('labels.halt');
-      for (let n = 0; n < 200 && win.eval('pc') !== halt; n++) win.stepOnce();
-      if (win.eval('pc') !== halt) throw new Error('never reached halt: ' + src);
-      return (r) => win.eval(`regs[${r}]`);
+      const halt = win.eval('program.labels.halt');
+      for (let n = 0; n < 200 && win.eval('cpu.pc') !== halt; n++) win.stepOnce();
+      if (win.eval('cpu.pc') !== halt) throw new Error('never reached halt: ' + src);
+      return (r) => win.eval(`cpu.regs[${r}]`);
     };
 
     // %lo of an address with bit 31 set must wrap to 32 bits, not come out 2**32 too large.
@@ -711,7 +711,7 @@ setTimeout(async () => {
     }
     // .space takes a hex size (parseInt(..., 10) of "0x10" would reserve nothing).
     assembleSrc('.data\nbuf: .space 0x10\nafter: .word 1\n.text\nmain: j main\n');
-    if (win.eval('labels.after - labels.buf') !== 16) {
+    if (win.eval('program.labels.after - program.labels.buf') !== 16) {
       throw new Error('.space 0x10 did not reserve 16 bytes');
     }
     console.log('%lo, li, data continuation and .space verified');
@@ -754,7 +754,7 @@ setTimeout(async () => {
       throw new Error(`fcvt.s.wu of 0xffffffff then back gave ${reg(15)}; it was read as signed`);
     }
     const fcvtWords = nativesOf('.text\nmain: fcvt.wu.s a0, fa0\n    fcvt.w.d a0, fa0\n').length;
-    const enc = win.eval('JSON.stringify(machineCode.filter(m => m.bytes).map(m => ' +
+    const enc = win.eval('JSON.stringify(program.machineCode.filter(m => m.bytes).map(m => ' +
       '(m.bytes[0] | m.bytes[1] << 8 | m.bytes[2] << 16 | m.bytes[3] << 24) >>> 0))');
     const [wus, wd] = JSON.parse(enc);
     if (fcvtWords !== 2 || wus === wd || wus !== 0xc0157553) {
@@ -770,18 +770,18 @@ setTimeout(async () => {
     win.startRegEdit(a7Cell);
     a7Cell.textContent = '5';
     win.eval('commitRegEdit')(a7Cell);
-    if (win.eval('regs[17]') !== 5 || win.eval('dregs[1]') !== 1.5) {
-      throw new Error(`editing a7 left a7=${win.eval('regs[17]')}, dregs[1]=${win.eval('dregs[1]')}`);
+    if (win.eval('cpu.regs[17]') !== 5 || win.eval('dregs[1]') !== 1.5) {
+      throw new Error(`editing a7 left a7=${win.eval('cpu.regs[17]')}, dregs[1]=${win.eval('dregs[1]')}`);
     }
     const commitModal = win.eval('commitRegEditModal');
     for (const [typed, want] of [['42', 42], ['-1', -1], ['0x2a', 42], ['ff', 255]]) {
       commitModal(5, typed);
-      if (win.eval('regs[5]') !== want) {
-        throw new Error(`the register popup read "${typed}" as ${win.eval('regs[5]')}, not ${want}`);
+      if (win.eval('cpu.regs[5]') !== want) {
+        throw new Error(`the register popup read "${typed}" as ${win.eval('cpu.regs[5]')}, not ${want}`);
       }
     }
     commitModal(5, '0x1ffffffff');
-    if (win.eval('regs[5]') !== 255) throw new Error('the register popup accepted a 33-bit value');
+    if (win.eval('cpu.regs[5]') !== 255) throw new Error('the register popup accepted a 33-bit value');
     console.log('register edits touch only the register, and read decimal as decimal');
     console.log('✅ Assembler, execution and edit-field corner cases verified!');
 
@@ -789,7 +789,7 @@ setTimeout(async () => {
     console.log('\n[17] Testing encodings, the FP register file, atomics and MMIO edges...');
     const words = (src) => {
       if (!assembleSrc(src)) throw new Error('did not assemble: ' + src);
-      return JSON.parse(win.eval('JSON.stringify(machineCode.filter(m => m.bytes && m.address < dataBase)' +
+      return JSON.parse(win.eval('JSON.stringify(program.machineCode.filter(m => m.bytes && m.address < layout.dataBase)' +
         '.map(m => (m.bytes[0] | m.bytes[1] << 8 | m.bytes[2] << 16 | m.bytes[3] << 24) >>> 0))'));
     };
     // Every mnemonic in the instruction table, plus the optional operand
@@ -816,7 +816,7 @@ setTimeout(async () => {
     if (reg(10) !== 7) throw new Error('call to a function 12 bytes away never reached it');
     // la/call/tail rows get the immediate readings every other row has.
     assembleSrc('.data\nmsg: .word 1\n.text\nmain: la t0, msg\n    call main\n');
-    const marked = win.eval('machineCode.filter(m => m.isPseudo && m.imm).length');
+    const marked = win.eval('program.machineCode.filter(m => m.isPseudo && m.imm).length');
     if (marked !== 4) throw new Error(`${marked} of la/call's four rows carry immediate readings`);
     // A label is an address: li with one is always lui + addi, in both passes.
     if (words('.text\nmain: li t0, later\nlater: nop\n').length !== 3) {
@@ -846,10 +846,10 @@ setTimeout(async () => {
     // 0xFFFF0000 read back as UART_RX_VALID, not as whatever was stored there.
     assembleSrc('.text\nmain: li t0, 0xFFFEFFFE\n    li t1, 0x00AB1234\n    sw t1, 0(t0)\n' +
                 '    lw a0, 0(t0)\nhalt: j halt\n');
-    win.eval('uartRxFull = true; uartRxByte = 0x41');
-    for (let n = 0; n < 12 && win.eval('pc') !== win.eval('labels.halt'); n++) win.stepOnce();
-    if ((win.eval('regs[10]') >>> 0) !== 0x00011234) {
-      throw new Error(`a straddling lw read 0x${(win.eval('regs[10]') >>> 0).toString(16)}, expected ` +
+    win.eval('uart.rxFull = true; uart.rxByte = 0x41');
+    for (let n = 0; n < 12 && win.eval('cpu.pc') !== win.eval('program.labels.halt'); n++) win.stepOnce();
+    if ((win.eval('cpu.regs[10]') >>> 0) !== 0x00011234) {
+      throw new Error(`a straddling lw read 0x${(win.eval('cpu.regs[10]') >>> 0).toString(16)}, expected ` +
         'the stored low half and RX_VALID = 1 above it');
     }
     const unmapped = win.eval('mmioReadOnlyMessage(0xFFFF0050)');

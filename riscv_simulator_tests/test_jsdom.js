@@ -81,8 +81,8 @@ setTimeout(async () => {
     if (!assembleBtn) throw new Error('Assemble button not found');
     assembleBtn.click();
 
-    console.log('Machine code items:', window.machineCode.length);
-    if (window.machineCode.length === 0) throw new Error('No machine code generated');
+    console.log('Machine code items:', window.program.machineCode.length);
+    if (window.program.machineCode.length === 0) throw new Error('No machine code generated');
     console.log('Assembled status:', document.getElementById('statusBar').textContent);
 
     console.log('\n--- JSDOM Test 3: Stepping Execution ---');
@@ -91,30 +91,30 @@ setTimeout(async () => {
     
     // Step 1: li x1, 0 (fib(0))
     stepBtn.click();
-    console.log('After Step 1: x1 =', window.regs[1], 'x4 =', window.regs[4], 'PC = 0x' + window.pc.toString(16));
-    console.log('currentExecLine =', window.currentExecLine);
-    if (window.regs[1] !== 0) throw new Error(`Expected x1=0, got ${window.regs[1]}`);
+    console.log('After Step 1: x1 =', window.cpu.regs[1], 'x4 =', window.cpu.regs[4], 'PC = 0x' + window.cpu.pc.toString(16));
+    console.log('currentExecLine =', window.run.currentLine);
+    if (window.cpu.regs[1] !== 0) throw new Error(`Expected x1=0, got ${window.cpu.regs[1]}`);
 
     // Step 2: li x2, 1 (fib(1))
     stepBtn.click();
-    console.log('After Step 2: x2 =', window.regs[2], 'PC = 0x' + window.pc.toString(16));
-    if (window.regs[2] !== 1) throw new Error(`Expected x2=1, got ${window.regs[2]}`);
+    console.log('After Step 2: x2 =', window.cpu.regs[2], 'PC = 0x' + window.cpu.pc.toString(16));
+    if (window.cpu.regs[2] !== 1) throw new Error(`Expected x2=1, got ${window.cpu.regs[2]}`);
 
     // Step 3: li x3, 10 (n)
     stepBtn.click();
-    console.log('After Step 3: x3 =', window.regs[3], 'PC = 0x' + window.pc.toString(16));
-    if (window.regs[3] !== 10) throw new Error(`Expected x3=10, got ${window.regs[3]}`);
+    console.log('After Step 3: x3 =', window.cpu.regs[3], 'PC = 0x' + window.cpu.pc.toString(16));
+    if (window.cpu.regs[3] !== 10) throw new Error(`Expected x3=10, got ${window.cpu.regs[3]}`);
 
     // Step 4: li x4, 2 (counter)
     stepBtn.click();
-    console.log('After Step 4: x4 =', window.regs[4]);
-    if (window.regs[4] !== 2) throw new Error(`Expected x4=2, got ${window.regs[4]}`);
+    console.log('After Step 4: x4 =', window.cpu.regs[4]);
+    if (window.cpu.regs[4] !== 2) throw new Error(`Expected x4=2, got ${window.cpu.regs[4]}`);
 
     // Step Back
     console.log('\n--- JSDOM Test 4: Step Back ---');
     backBtn.click();
-    console.log('After Step Back: x4 =', window.regs[4]);
-    if (window.regs[4] !== 0) throw new Error(`Expected x4=0 after stepBack, got ${window.regs[4]}`);
+    console.log('After Step Back: x4 =', window.cpu.regs[4]);
+    if (window.cpu.regs[4] !== 0) throw new Error(`Expected x4=0 after stepBack, got ${window.cpu.regs[4]}`);
 
     console.log('\n--- JSDOM Test 5: Breakpoint Toggling ---');
     // A line that carries an instruction, found in the source rather than
@@ -123,19 +123,19 @@ setTimeout(async () => {
     const instrLine = srcLines.findIndex(l => /^\s*(li|add|mv|addi|j|bgt|la|sw|ecall)\b/.test(l)) + 1;
     console.log('First instruction line:', instrLine);
     window.toggleBreakpoint(instrLine);
-    console.log(`Breakpoints has line ${instrLine}:`, window.breakpoints.has(instrLine));
-    if (!window.breakpoints.has(instrLine)) throw new Error(`Breakpoint at line ${instrLine} was not set`);
+    console.log(`Breakpoints has line ${instrLine}:`, window.run.breakpoints.has(instrLine));
+    if (!window.run.breakpoints.has(instrLine)) throw new Error(`Breakpoint at line ${instrLine} was not set`);
     window.toggleBreakpoint(instrLine);
-    console.log(`Breakpoints has line ${instrLine} after toggle:`, window.breakpoints.has(instrLine));
-    if (window.breakpoints.has(instrLine)) throw new Error(`Breakpoint at line ${instrLine} was not cleared`);
+    console.log(`Breakpoints has line ${instrLine} after toggle:`, window.run.breakpoints.has(instrLine));
+    if (window.run.breakpoints.has(instrLine)) throw new Error(`Breakpoint at line ${instrLine} was not cleared`);
 
     console.log('\n--- JSDOM Test 6: Example Loading & Execution ---');
     const examples = ['dip_led', 'rars_syscalls', 'fib', 'hello_world', 'hello_jal', 'circle_accel', 'image_display_accel'];
     for (const ex of examples) {
       await window.loadExample(ex);
       window.assembleOnly();
-      console.log(`Loaded and assembled example '${ex}': ${window.machineCode.length} instructions.`);
-      if (window.machineCode.length === 0) throw new Error(`Example '${ex}' produced 0 instructions`);
+      console.log(`Loaded and assembled example '${ex}': ${window.program.machineCode.length} instructions.`);
+      if (window.program.machineCode.length === 0) throw new Error(`Example '${ex}' produced 0 instructions`);
     }
 
     console.log('\n--- JSDOM Test 7: Find & Replace ---');

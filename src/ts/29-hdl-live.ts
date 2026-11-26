@@ -13,7 +13,7 @@ let hdlLive = null;   // { id, parser, stopAt, stopSent, checked } during a live
 function hdlLiveCapable() {
   return hdlSimulator === 'verilator' && !!(window.rvNative && window.rvNative.vlLive);
 }
-function hdlLiveHz() { return runPace === 'real' ? cpuHz() : 0; }
+function hdlLiveHz() { return clock.pace === 'real' ? cpuHz() : 0; }
 function hdlLiveSend(line) { if (hdlLive) window.rvNative.vlLiveSend(hdlLive.id, line); }
 function hdlLiveStop() {
   if (!hdlLive || hdlLive.stopSent) return;
@@ -52,8 +52,8 @@ async function hdlRunLive() {
       const hit = hdlBreakAt(hdlIdx + 1);
       if (hit >= 0) {
         hdlSeek(hit);
-        hdlStatus('stopped at a breakpoint - line ' + currentExecLine, 'ok');
-        setStatus('HDL stopped at breakpoint (line ' + currentExecLine + ', instruction ' + hit + ')', 'warn');
+        hdlStatus('stopped at a breakpoint - line ' + run.currentLine, 'ok');
+        setStatus('HDL stopped at breakpoint (line ' + run.currentLine + ', instruction ' + hit + ')', 'warn');
         return hdlTrace;
       }
     } else {
@@ -141,7 +141,7 @@ async function hdlRunLive() {
 
     let waveBusy = false, lastWave = 0, waveStopped = false;
     let rtWall = 0, rtCyc = -1;
-    rtRatio = 1;
+    clock.rtRatio = 1;
     const tick = () => {
       if (hdlLive !== live) return;
       hdlLiveTakeInputs(parser);
@@ -178,22 +178,22 @@ async function hdlRunLive() {
           if (typeof updateOledCanvas === 'function') updateOledCanvas();
           updateWaveView();
         }
-        totalCycles = nowCyc;
+        cpu.totalCycles = nowCyc;
         updateStats();
       }
       // The fraction of real time reached, measured as the JS engine does.
       const nowWall = performance.now();
-      if (!hz) { rtRatio = 1; rtCyc = -1; }
+      if (!hz) { clock.rtRatio = 1; rtCyc = -1; }
       else if (rtCyc < 0 || nowCyc < rtCyc) { rtWall = nowWall; rtCyc = nowCyc; }
       else if (nowWall - rtWall >= Math.max(500, 50000 / hz)) {
-        rtRatio = Math.min(1, (nowCyc - rtCyc) / ((nowWall - rtWall) / 1000 * hz));
+        clock.rtRatio = Math.min(1, (nowCyc - rtCyc) / ((nowWall - rtWall) / 1000 * hz));
         rtWall = nowWall; rtCyc = nowCyc;
         updateStats();
       }
       if (!live.stopSent) {
         const cyc = nowCyc;
         hdlStatus('running live - cycle ' + cyc.toLocaleString() + ' of ' + budget.toLocaleString() +
-          (runPace === 'real' ? ', paced to ' + fmtHz(cpuHz()) : ''), 'busy');
+          (clock.pace === 'real' ? ', paced to ' + fmtHz(cpuHz()) : ''), 'busy');
       }
       if (liveWave && !waveStopped && !waveBusy && performance.now() - lastWave > 500) {
         waveBusy = true;
@@ -291,13 +291,13 @@ async function hdlRunLive() {
 
     hdlSeek(live.stopAt >= 0 ? live.stopAt : t.steps.length);
     if (live.stopAt >= 0) {
-      hdlStatus('stopped at a breakpoint - line ' + currentExecLine, 'ok');
-      setStatus('HDL stopped at breakpoint (line ' + currentExecLine + ', instruction ' + live.stopAt + ')', 'warn');
+      hdlStatus('stopped at a breakpoint - line ' + run.currentLine, 'ok');
+      setStatus('HDL stopped at breakpoint (line ' + run.currentLine + ', instruction ' + live.stopAt + ')', 'warn');
     } else if (live.stopSent) {
       hdlStatus('paused at cycle ' + t.budget.toLocaleString(), 'ok');
       setStatus('HDL paused - ' + hdlRunSummary(t, t.budget), 'info');
     } else {
-      hdlStatus('done - ' + t.budget.toLocaleString() + ' cycles, LED=0x' + ledState.toString(16).padStart(2, '0'), 'ok');
+      hdlStatus('done - ' + t.budget.toLocaleString() + ' cycles, LED=0x' + board.leds.toString(16).padStart(2, '0'), 'ok');
       setStatus('HDL live run finished - ' + hdlRunSummary(t, t.budget), 'success');
     }
     if (hdlCompareEnabled) await hdlCompareWithJs();
@@ -306,13 +306,4 @@ async function hdlRunLive() {
   });
 }
 
-const hdlBaseSetRunPace = setRunPace;
-setRunPace = function (v) {
-  hdlBaseSetRunPace(v);
-  hdlLiveSend('hz ' + hdlLiveHz());
-};
-const hdlBaseSetClkDivBits = setClkDivBits;
-setClkDivBits = function (v) {
-  hdlBaseSetClkDivBits(v);
-  hdlLiveSend('hz ' + hdlLiveHz());
-};
+onClockChange(() => hdlLiveSend('hz ' + hdlLiveHz()));

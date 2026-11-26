@@ -248,7 +248,7 @@ compilation error.
 
 ## 6. The desktop app
 
-RVEduSim is also a desktop app for Linux, Windows and macOS, downloaded from the
+RVEduSim is also a desktop app for Linux, Windows and macOS (Apple silicon), downloaded from the
 [Releases page](https://github.com/r-panicker/RVEduSim/releases/latest). It looks and behaves
 like the page, with these differences:
 

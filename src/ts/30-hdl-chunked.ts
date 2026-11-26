@@ -28,14 +28,14 @@ async function hdlRunChunked() {
     const resume = !!hdlTrace && (hdlTraceEnabled || !hdlTrace.steps.length);
     const report = (stop, t) => {
       if (stop === 'breakpoint') {
-        hdlStatus('stopped at a breakpoint - line ' + currentExecLine, 'ok');
+        hdlStatus('stopped at a breakpoint - line ' + run.currentLine, 'ok');
         setStatus('HDL (' + hdlModeLabel() + ') stopped at breakpoint (line ' +
-          currentExecLine + ', instruction ' + hdlIdx + ')', 'warn');
+          run.currentLine + ', instruction ' + hdlIdx + ')', 'warn');
       } else if (stop === 'paused') {
         hdlStatus('paused at cycle ' + hdlCurrentCycle().toLocaleString(), 'ok');
         setStatus('HDL paused - ' + hdlRunSummary(t, t.budget) + ' recorded', 'info');
       } else {
-        hdlStatus('done - ' + t.budget.toLocaleString() + ' cycles, LED=0x' + ledState.toString(16).padStart(2, '0'), 'ok');
+        hdlStatus('done - ' + t.budget.toLocaleString() + ' cycles, LED=0x' + board.leds.toString(16).padStart(2, '0'), 'ok');
         setStatus('HDL ' + hdlModeLabel() + ' run finished - ' + hdlRunSummary(t, t.budget), 'success');
       }
     };
@@ -66,7 +66,7 @@ async function hdlRunChunked() {
     // each event, and the PC, is applied as the clock reaches it, and a
     // chunk is about HDL_CHUNK_MS of the clock, so the recording stays
     // close ahead.
-    const paced = runPace === 'real' && !hdlTraceEnabled;
+    const paced = clock.pace === 'real' && !hdlTraceEnabled;
     const cap = n => paced ? Math.min(n, Math.max(1, Math.round(cpuHz() * HDL_CHUNK_MS / 1000))) : n;
     size = cap(size);
     const showPaced = () => {
@@ -76,7 +76,7 @@ async function hdlRunChunked() {
       const from = preApplied, n = hdlPreShown();
       for (let i = from; i < n; i++) hdlApplyPer(t.pre[i][0], t.pre[i][1]);
       preApplied = n;
-      totalCycles = hdlCurrentCycle();
+      cpu.totalCycles = hdlCurrentCycle();
       if (n > from) {
         renderUartTerminal();
         updatePeripherals();
@@ -91,7 +91,7 @@ async function hdlRunChunked() {
     // without the trace the peripheral events as they come.
     const follow = (t, replayed) => {
       if (t.steps.length) {
-        if (runPace === 'real') hdlPlayTo(t.steps.length);
+        if (clock.pace === 'real') hdlPlayTo(t.steps.length);
         else hdlSeek(t.steps.length, true, true);
         return;
       }
@@ -106,7 +106,7 @@ async function hdlRunChunked() {
       if (replayed) return;
       for (let i = preApplied; i < t.pre.length; i++) hdlApplyPer(t.pre[i][0], t.pre[i][1]);
       preApplied = t.pre.length;
-      totalCycles = t.budget;
+      cpu.totalCycles = t.budget;
       renderUartTerminal();
       updatePeripherals();
       if (typeof updateOledCanvas === 'function') updateOledCanvas();
@@ -131,7 +131,7 @@ async function hdlRunChunked() {
         }
         const at = first ? 0 : hdlTrace.budget;
         if (at >= end) break;
-        if (runPace === 'real' && !first) {
+        if (clock.pace === 'real' && !first) {
           const shown = hdlTrace.steps.length ? hdlCurrentCycle()
             : cyc0 + (performance.now() - wall0) / 1000 * cpuHz();
           if (at - shown > 2 * size) { await new Promise(r => setTimeout(r, 50)); continue; }
@@ -145,14 +145,14 @@ async function hdlRunChunked() {
         size = cap(Math.max(200, Math.min(200000, Math.round((target - at) * HDL_CHUNK_MS / Math.max(1, performance.now() - t0)))));
         if (first) {
           first = false;
-          if (runPace === 'real') { hdlSeek(0); if (hdlPaced) preApplied = hdlPaced.applied; }
+          if (clock.pace === 'real') { hdlSeek(0); if (hdlPaced) preApplied = hdlPaced.applied; }
         }
         else said(t);
         hit = hdlBreakAt(Math.max(from, hdlIdx + 1));
         if (hit >= 0) { stop = 'breakpoint'; break; }
         follow(t, false);
         hdlStatus('running - cycle ' + (hdlPaced ? hdlCurrentCycle() : t.budget).toLocaleString() + ' of ' + end.toLocaleString() +
-          (runPace === 'real' ? ', paced to ' + fmtHz(cpuHz()) : ''), 'busy');
+          (clock.pace === 'real' ? ', paced to ' + fmtHz(cpuHz()) : ''), 'busy');
       }
       // The last chunk is recorded before the clock shown reaches it.
       if (stop === 'end' && hdlPaced) {
@@ -167,7 +167,7 @@ async function hdlRunChunked() {
     const t = hdlTrace;
     if (!t) return null;
     if (!resume) {
-      hdlLog('--- ' + hdlRunSummary(t, t.budget) + ', ' + uartTxBytes.length + ' UART bytes out ---', 'sys');
+      hdlLog('--- ' + hdlRunSummary(t, t.budget) + ', ' + uart.txBytes.length + ' UART bytes out ---', 'sys');
       if (hdlLooksPipelined(t))
         hdlLog('This core writes registers after its PC has moved on, as a pipeline does. Step, Back, ' +
           'breakpoints and the instruction count follow the fetch PC, so they run ahead of the results; ' +
@@ -191,9 +191,9 @@ async function runHdlSimulation() {
     return hdlWithBusy(async () => {
       await hdlResumeRun(r => {
         if (r.stop === 'breakpoint') {
-          hdlStatus('stopped at a breakpoint - line ' + currentExecLine, 'ok');
+          hdlStatus('stopped at a breakpoint - line ' + run.currentLine, 'ok');
           setStatus('HDL (' + hdlModeLabel() + ') stopped at breakpoint (line ' +
-            currentExecLine + ', instruction ' + hdlIdx + ')', 'warn');
+            run.currentLine + ', instruction ' + hdlIdx + ')', 'warn');
         } else {
           hdlStatus('at the end of ' + hdlTrace.budget + ' recorded cycles', 'ok');
           setStatus('HDL (' + hdlModeLabel() + ') ran ' + r.ran +
@@ -211,20 +211,20 @@ async function runHdlSimulation() {
     // Honour breakpoints on the very first run too, so a breakpoint set
     // before pressing Run behaves the way it does in the functional model.
     const hit = hdlBreakAt(0);
-    if (runPace === 'real') hdlSeek(0);
+    if (clock.pace === 'real') hdlSeek(0);
     hdlPlayTo(hit >= 0 ? hit : t.steps.length, () => {
-      hdlLog('--- ' + t.steps.length + ' instructions, ' + uartTxBytes.length + ' UART bytes out ---', 'sys');
+      hdlLog('--- ' + t.steps.length + ' instructions, ' + uart.txBytes.length + ' UART bytes out ---', 'sys');
       if (hdlLooksPipelined(t))
         hdlLog('This core writes registers after its PC has moved on, as a pipeline does. Step, Back, ' +
           'breakpoints and the instruction count follow the fetch PC, so they run ahead of the results; ' +
           'registers, memory, peripherals and the cross-check are unaffected.', 'warn');
       if (hit >= 0) {
-        hdlStatus('stopped at a breakpoint - line ' + currentExecLine, 'ok');
+        hdlStatus('stopped at a breakpoint - line ' + run.currentLine, 'ok');
         setStatus('HDL (' + hdlModeLabel() + ') stopped at breakpoint (line ' +
-          currentExecLine + ', instruction ' + hit + ')', 'warn');
+          run.currentLine + ', instruction ' + hit + ')', 'warn');
       } else {
         hdlStatus('done - ' + t.budget + ' cycles, LED=0x' +
-          ledState.toString(16).padStart(2, '0'), 'ok');
+          board.leds.toString(16).padStart(2, '0'), 'ok');
         setStatus('HDL ' + hdlModeLabel() + ' run finished - ' + hdlRunSummary(t, t.budget), 'success');
       }
     });
@@ -261,8 +261,8 @@ async function hdlGrowTrace(target) {
   return true;
 }
 
-// Real time, a run is recorded and then played back at the clock: the
-// position moves to the last instruction that has begun by now.
+// At Real time a recording is played back at the clock: the position
+// moves to the last instruction that has begun by now.
 let hdlPlay = null;              // { to, trace, wall, cyc0, done, timer }
 function hdlStepCycle(k) {
   const steps = hdlTrace.steps;
@@ -279,9 +279,9 @@ function hdlStopPlay() {
 }
 function hdlPlayTo(to, done) {
   hdlStopPlay();
-  if (runPace !== 'real' || to <= hdlIdx) { hdlSeek(to); if (done) done(); return; }
+  if (clock.pace !== 'real' || to <= hdlIdx) { hdlSeek(to); if (done) done(); return; }
   const play = hdlPlay = { to, trace: hdlTrace, wall: performance.now(), cyc0: hdlCurrentCycle(), done, timer: null };
-  rtRatio = 1;
+  clock.rtRatio = 1;
   const frame = () => {
     if (hdlPlay !== play) return;
     if (hdlTrace !== play.trace) { hdlStopPlay(); return; }
@@ -309,7 +309,7 @@ function hdlPlayTo(to, done) {
 async function hdlResumeRun(done) {
   const steps = () => hdlTrace.steps;
   let hit = hdlBreakAt(hdlIdx + 1);
-  if (hit < 0 && ((breakpoints && breakpoints.size) || hdlIdx >= steps().length)) {
+  if (hit < 0 && ((run.breakpoints && run.breakpoints.size) || hdlIdx >= steps().length)) {
     if (await hdlGrowTrace(hdlTrace.budget + hdlCycleBudget)) hit = hdlBreakAt(hdlIdx + 1);
   }
   const to = hit >= 0 ? hit : steps().length;
@@ -323,13 +323,13 @@ async function hdlResumeRun(done) {
 // that is a longer seek through the recording rather than more execution.
 function hdlStatementTarget(from) {
   const steps = hdlTrace.steps;
-  if (!statementStepping || from >= steps.length) return from + 1;
+  if (!run.statementStepping || from >= steps.length) return from + 1;
   const startLine = sourceLineForPc(steps[from].pc);
   if (!(startLine > 0)) return from + 1;
   let k = from + 1;
   while (k < steps.length && k - from < 10000) {
     const line = sourceLineForPc(steps[k].pc);
-    if (line !== startLine || (breakpoints && breakpoints.has(line))) break;
+    if (line !== startLine || (run.breakpoints && run.breakpoints.has(line))) break;
     k++;
   }
   return k;
@@ -340,7 +340,7 @@ function hdlStatementBackTarget(from) {
   const steps = hdlTrace.steps;
   if (from <= 0) return 0;
   let k = from - 1;
-  if (!statementStepping) return k;
+  if (!run.statementStepping) return k;
   const line = sourceLineForPc(steps[k].pc);
   if (!(line > 0)) return k;
   while (k > 0 && sourceLineForPc(steps[k - 1].pc) === line) k--;
@@ -363,7 +363,7 @@ async function hdlStepOnce() {
       const t = await hdlStartTrace(Math.min(hdlCycleBudget, hdlSimulator === 'verilator' ? 100000 : 2000));
       if (!t) return null;
       hdlSeek(0);
-      setStatus('HDL stepped to line ' + (currentExecLine > 0 ? currentExecLine : '?'), 'info');
+      setStatus('HDL stepped to line ' + (run.currentLine > 0 ? run.currentLine : '?'), 'info');
       return t;
     }
     if (hdlIdx >= hdlTrace.steps.length) {
@@ -375,7 +375,7 @@ async function hdlStepOnce() {
     const from = hdlIdx;
     hdlSeek(hdlStatementTarget(from));
     const covered = hdlIdx - from;
-    const where = 'line ' + (currentExecLine > 0 ? currentExecLine : '?');
+    const where = 'line ' + (run.currentLine > 0 ? run.currentLine : '?');
     setStatus(covered > 1
       ? 'HDL statement step \u2014 ' + covered + ' instructions, now at ' + where
       : 'HDL stepped to ' + where, 'info');
@@ -389,5 +389,5 @@ function hdlStepBack() {
     return;
   }
   hdlSeek(hdlStatementBackTarget(hdlIdx));
-  setStatus('HDL stepped back to line ' + (currentExecLine > 0 ? currentExecLine : '?'), 'info');
+  setStatus('HDL stepped back to line ' + (run.currentLine > 0 ? run.currentLine : '?'), 'info');
 }

@@ -6,7 +6,7 @@
 function getMemByte(addr) {
   const u = addr >>> 0;
   if (isMMIOAddr(u)) return handleMMIORead(u, 1);
-  const p = memoryPages.get(u >>> PAGE_BITS);
+  const p = memory.pages.get(u >>> PAGE_BITS);
   return p ? p[u & PAGE_MASK] : 0;
 }
 
@@ -17,34 +17,34 @@ function setMemByte(addr, val) {
     return;
   }
   const pageIdx = u >>> PAGE_BITS;
-  let p = memoryPages.get(pageIdx);
+  let p = memory.pages.get(pageIdx);
   if (!p) {
     p = new Uint8Array(PAGE_SIZE);
-    memoryPages.set(pageIdx, p);
+    memory.pages.set(pageIdx, p);
   }
   p[u & PAGE_MASK] = val & 0xFF;
 }
 
 function initializeState() {
-  regs = new Int32Array(32);
+  cpu.regs = new Int32Array(32);
   fpBits.fill(0);
   lrReservation = null;
-  memoryPages = new Map();
-  pc = baseAddress;
-  lastChangedReg = -1;
-  lastChangedMem = [];
-  totalCycles = 0;
-  instructionCount = 0;
+  memory.pages = new Map();
+  cpu.pc = layout.baseAddress;
+  cpu.lastChangedReg = -1;
+  cpu.lastChangedMem = [];
+  cpu.totalCycles = 0;
+  cpu.instructionCount = 0;
   pipeReset();
-  currentExecLine = -1;
-  heapPointer = (typeof dataBase !== 'undefined' ? dataBase : 0x20000) + 0x4000;
+  run.currentLine = -1;
+  heapPointer = (typeof layout.dataBase !== 'undefined' ? layout.dataBase : 0x20000) + 0x4000;
   // Note: In RISC-V hardware, integer registers (including sp / x2) are initialized to 0 on reset
-  oledCol = 0;
-  oledRow = 0;
-  oledCtrl = 0;
-  oledDataVal = 0;
-  oledAdvCol = false;
-  oledAdvRow = false;
+  oled.col = 0;
+  oled.row = 0;
+  oled.ctrl = 0;
+  oled.data = 0;
+  oled.advCol = false;
+  oled.advRow = false;
   oledResetPages();
   updateOledCanvas();
 }
@@ -65,9 +65,9 @@ function buildPcToLineMap(mc) {
 
 function loadProgram(mc) {
   initializeState();
-  execHistory = [];
-  stepWriteLog = [];
-  stepPixelLog = [];
+  stepHistory.entries = [];
+  stepHistory.writeLog = [];
+  stepHistory.pixelLog = [];
   buildPcToLineMap(mc);
   for (let k = 0; k < mc.length; k++) {
     const item = mc[k];
@@ -78,12 +78,12 @@ function loadProgram(mc) {
       }
     }
   }
-  if (labels['_start'] !== undefined) {
-    pc = labels['_start'];
-  } else if (labels['main'] !== undefined) {
-    pc = labels['main'];
+  if (program.labels['_start'] !== undefined) {
+    cpu.pc = program.labels['_start'];
+  } else if (program.labels['main'] !== undefined) {
+    cpu.pc = program.labels['main'];
   } else {
-    pc = baseAddress;
+    cpu.pc = layout.baseAddress;
   }
 }
 
@@ -117,7 +117,7 @@ function readMem(addr, size, peekOnly = false) {
   if (isMMIOAddr(uaddr)) return handleMMIORead(uaddr, size, peekOnly);
   const pageIdx = uaddr >>> PAGE_BITS;
   const offset = uaddr & PAGE_MASK;
-  const page = memoryPages.get(pageIdx);
+  const page = memory.pages.get(pageIdx);
   if (offset + size <= PAGE_SIZE) {
     if (!page) return 0;
     if (size === 4) {
@@ -136,7 +136,7 @@ function readMem(addr, size, peekOnly = false) {
   let val = 0;
   for (let i = 0; i < size; i++) {
     const a = (uaddr + i) >>> 0;
-    const p = memoryPages.get(a >>> PAGE_BITS);
+    const p = memory.pages.get(a >>> PAGE_BITS);
     const b = p ? p[a & PAGE_MASK] : 0;
     val |= (b << (i * 8));
   }
@@ -155,30 +155,30 @@ function writeMem(addr, val, size) {
   const uaddr = addr >>> 0;
   if (mmioSplitAccess(uaddr, size)) {
     for (let i = 0; i < size; i++) writeMem((uaddr + i) >>> 0, (val >>> (i * 8)) & 0xFF, 1);
-    lastChangedMem = [{ addr: uaddr, size }];
+    cpu.lastChangedMem = [{ addr: uaddr, size }];
     return;
   }
   if (isMMIOAddr(uaddr)) {
     handleMMIOWrite(uaddr, val, size);
-    lastChangedMem = [{ addr: uaddr, size }];
+    cpu.lastChangedMem = [{ addr: uaddr, size }];
     return;
   }
   // Journal old bytes for back-step (only during single-stepping execution)
-  if (journalEnabled) {
+  if (stepHistory.journalEnabled) {
     for (let i = 0; i < size; i++) {
       const a = (uaddr + i) >>> 0;
-      const p = memoryPages.get(a >>> PAGE_BITS);
+      const p = memory.pages.get(a >>> PAGE_BITS);
       const old = p ? p[a & PAGE_MASK] : 0;
-      stepWriteLog.push({ addr: a, old });
+      stepHistory.writeLog.push({ addr: a, old });
     }
   }
   const pageIdx = uaddr >>> PAGE_BITS;
   const offset = uaddr & PAGE_MASK;
   if (offset + size <= PAGE_SIZE) {
-    let page = memoryPages.get(pageIdx);
+    let page = memory.pages.get(pageIdx);
     if (!page) {
       page = new Uint8Array(PAGE_SIZE);
-      memoryPages.set(pageIdx, page);
+      memory.pages.set(pageIdx, page);
     }
     if (size === 4) {
       page[offset] = val & 0xFF;
@@ -199,15 +199,15 @@ function writeMem(addr, val, size) {
     for (let i = 0; i < size; i++) {
       const a = (uaddr + i) >>> 0;
       const pIdx = a >>> PAGE_BITS;
-      let page = memoryPages.get(pIdx);
+      let page = memory.pages.get(pIdx);
       if (!page) {
         page = new Uint8Array(PAGE_SIZE);
-        memoryPages.set(pIdx, page);
+        memory.pages.set(pIdx, page);
       }
       page[a & PAGE_MASK] = (val >> (i * 8)) & 0xFF;
     }
   }
-  lastChangedMem = [{ addr: uaddr, size }];
+  cpu.lastChangedMem = [{ addr: uaddr, size }];
 }
 
 function oledBlankPage(buf) {
@@ -217,13 +217,13 @@ function oledBlankPage(buf) {
 
 // Back to a single blank page, which is where a reset leaves the panel.
 function oledResetPages() {
-  oledPages = [new Uint8Array(96 * 64 * 4), new Uint8Array(96 * 64 * 4)];
-  oledPages.forEach(oledBlankPage);
-  oledFrontPage = 0;
-  oledBackPage = 0;
-  oledBuffer = oledPages[0];
-  oledSwapUnpolled = false;
-  oledRaceWarned = false;
+  oled.pages = [new Uint8Array(96 * 64 * 4), new Uint8Array(96 * 64 * 4)];
+  oled.pages.forEach(oledBlankPage);
+  oled.front = 0;
+  oled.back = 0;
+  oled.buffer = oled.pages[0];
+  oled.swapUnpolled = false;
+  oled.raceWarned = false;
 }
 
 // Present the page just drawn. The controller copies it into the new back
@@ -231,18 +231,18 @@ function oledResetPages() {
 // On hardware the copy sits inside the window OLED_SwapPending covers;
 // here there is no scanout to wait for, so it happens at once.
 function oledPresent() {
-  if (oledFrontPage === oledBackPage) {
+  if (oled.front === oled.back) {
     // First present: split the pages, leaving the drawn frame on screen.
-    oledBackPage = 1 - oledFrontPage;
+    oled.back = 1 - oled.front;
   } else {
-    const t = oledFrontPage;
-    oledFrontPage = oledBackPage;
-    oledBackPage = t;
+    const t = oled.front;
+    oled.front = oled.back;
+    oled.back = t;
   }
-  if (journalEnabled) stepPixelLog.push({ page: oledBackPage, full: oledPages[oledBackPage].slice() });
-  oledPages[oledBackPage].set(oledPages[oledFrontPage]);
-  oledBuffer = oledPages[oledBackPage];
-  oledSwapUnpolled = true;
+  if (stepHistory.journalEnabled) stepHistory.pixelLog.push({ page: oled.back, full: oled.pages[oled.back].slice() });
+  oled.pages[oled.back].set(oled.pages[oled.front]);
+  oled.buffer = oled.pages[oled.back];
+  oled.swapUnpolled = true;
   updateOledCanvas();
 }
 
@@ -258,8 +258,8 @@ function oledPresent() {
 let memoryPanelEdit = false;
 
 function oledNotePixelWrite() {
-  if (memoryPanelEdit || !oledSwapUnpolled || oledRaceWarned) return;
-  oledRaceWarned = true;
+  if (memoryPanelEdit || !oled.swapUnpolled || oled.raceWarned) return;
+  oled.raceWarned = true;
   log('OLED: pixels were written after a present, with no read of OLED_STATUS ' +
       'in between. That works here, where a present lands at once. On the board ' +
       'it waits up to a frame (15.73 ms) for the scanout boundary - ' +
@@ -301,23 +301,23 @@ function oledStoreData(offset, val, size) {
   for (let i = 0; i < size; i++) be |= 1 << ((offset + i) & 3);
   // The bus presents the data on the lanes the address selects.
   const wd = (((val >>> 0) << (8 * (offset & 3))) >>> 0);
-  const colorMode = (oledCtrl >> 4) & 0x0F;
+  const colorMode = (oled.ctrl >> 4) & 0x0F;
 
   if (colorMode === 0x1) {          // 16-bit 5R-6G-5B
     if ((be & 0x3) !== 0x3) return false;
-    oledDataVal = ((((wd >>> 11) & 0x1F) << 19) |
+    oled.data = ((((wd >>> 11) & 0x1F) << 19) |
                    (((wd >>> 5) & 0x3F) << 10) |
                    ((wd & 0x1F) << 3)) >>> 0;
   } else if (colorMode === 0x2) {   // 24-bit, one byte lane at a time
     if (!(be & 0x7)) return false;
-    let v = oledDataVal >>> 0;
+    let v = oled.data >>> 0;
     if (be & 0x4) v = (v & ~0xFF0000) | (wd & 0xFF0000);
     if (be & 0x2) v = (v & ~0x00FF00) | (wd & 0x00FF00);
     if (be & 0x1) v = (v & ~0x0000FF) | (wd & 0x0000FF);
-    oledDataVal = v >>> 0;
+    oled.data = v >>> 0;
   } else {                          // 8-bit 3R-3G-2B
     if (!(be & 0x1)) return false;
-    oledDataVal = ((((wd >>> 5) & 0x7) << 21) |
+    oled.data = ((((wd >>> 5) & 0x7) << 21) |
                    (((wd >>> 2) & 0x7) << 13) |
                    ((wd & 0x3) << 6)) >>> 0;
   }
@@ -331,28 +331,28 @@ function writeOledPixel(val) {
   const g = (val >>> 8) & 0xFF;
   const b = val & 0xFF;
 
-  const c = oledPanelCol(oledCol);
-  const rIdx = oledRow & 0x3F;
+  const c = oledPanelCol(oled.col);
+  const rIdx = oled.row & 0x3F;
   const pixelIdx = (rIdx * 96 + c) * 4;
-  if (journalEnabled) stepPixelLog.push({ page: oledBackPage, idx: pixelIdx, old: oledBuffer.slice(pixelIdx, pixelIdx + 4) });
-  oledBuffer[pixelIdx] = r;
-  oledBuffer[pixelIdx + 1] = g;
-  oledBuffer[pixelIdx + 2] = b;
-  oledBuffer[pixelIdx + 3] = 255;
+  if (stepHistory.journalEnabled) stepHistory.pixelLog.push({ page: oled.back, idx: pixelIdx, old: oled.buffer.slice(pixelIdx, pixelIdx + 4) });
+  oled.buffer[pixelIdx] = r;
+  oled.buffer[pixelIdx + 1] = g;
+  oled.buffer[pixelIdx + 2] = b;
+  oled.buffer[pixelIdx + 3] = 255;
 }
 
 function setUartSendMode(mode) {
-  uartSendMode = (mode === 'typed' || mode === 'forgiving') ? mode : 'paste';
+  uart.sendMode = (mode === 'typed' || mode === 'forgiving') ? mode : 'paste';
   // Keep the control in step when the mode is set from anywhere but the
   // control itself.
   const sel = document.getElementById('uartSendMode');
-  if (sel && sel.value !== uartSendMode) sel.value = uartSendMode;
+  if (sel && sel.value !== uart.sendMode) sel.value = uart.sendMode;
   const el = document.getElementById('uartCharInstr');
   // The instr/char box drives whichever rate the mode uses, so it follows
   // the mode rather than sitting there meaning nothing.
   if (el) {
-    el.value = uartSendMode === 'typed' ? uartTypedInstr : uartCharInstr;
-    el.disabled = uartSendMode !== 'typed';
+    el.value = uart.sendMode === 'typed' ? uart.typedInstr : uart.charInstr;
+    el.disabled = uart.sendMode !== 'typed';
     el.style.opacity = el.disabled ? '0.5' : '';
   }
   updatePeripherals();
@@ -361,13 +361,13 @@ function setUartSendMode(mode) {
 function setUartCharInstr(v) {
   const n = parseInt(v, 10);
   if (!Number.isFinite(n) || n < 1) return;
-  if (uartSendMode === 'typed') uartTypedInstr = n; else uartCharInstr = n;
+  if (uart.sendMode === 'typed') uart.typedInstr = n; else uart.charInstr = n;
   updatePeripherals();
 }
 
 function uartGapInstr() {
-  return uartSendMode === 'typed' ? Math.max(1, uartTypedInstr)
-       : Math.max(1, uartCharInstr);
+  return uart.sendMode === 'typed' ? Math.max(1, uart.typedInstr)
+       : Math.max(1, uart.charInstr);
 }
 
 // Hand one byte to the FPGA's holding register. If the program has not
@@ -376,39 +376,39 @@ function uartGapInstr() {
 // UART_RX alone, and raises no flag. Counted here only so the console can say
 // what happened.
 function uartDeliverByte(b) {
-  if (uartRxFull) { uartRxDropped++; uartRxDroppedTotal++; return false; }
-  uartRxByte = b & 0xFF;
-  uartRxFull = true;
+  if (uart.rxFull) { uart.rxDropped++; uart.rxDroppedTotal++; return false; }
+  uart.rxByte = b & 0xFF;
+  uart.rxFull = true;
   return true;
 }
 
 function uartReportDrops() {
-  if (!uartRxDropped || uartPending.length) return;
-  log(`UART RX: ${uartRxDropped} byte${uartRxDropped > 1 ? 's' : ''} lost - ` +
+  if (!uart.rxDropped || uart.pending.length) return;
+  log(`UART RX: ${uart.rxDropped} byte${uart.rxDropped > 1 ? 's' : ''} lost - ` +
       `the program did not read UART_RX before the next character arrived ` +
       `(${uartGapInstr()} cycles apart). The hardware holds one byte and ` +
       `discards the rest without any flag, so this would be silent on the board.`, 'warning');
-  uartRxDropped = 0;
+  uart.rxDropped = 0;
 }
 
 // The UART's clock. A character time is a count of single-cycle
 // instructions, which is a count of cycles once the pipeline is on.
-function uartNow() { return totalCycles; }
+function uartNow() { return cpu.totalCycles; }
 
 // Called once per executed instruction, or per cycle when pipelined.
 // Moves bytes from the PC's buffer into the holding register as their
 // time comes.
 function uartTickDelivery() {
-  if (!uartPending.length) return;
-  if (uartSendMode === 'forgiving') {
+  if (!uart.pending.length) return;
+  if (uart.sendMode === 'forgiving') {
     // Hand over only once the program has taken the previous byte, so
     // nothing is ever lost. The wire does not do this; see the guide.
-    if (!uartRxFull) uartDeliverByte(uartPending.shift());
+    if (!uart.rxFull) uartDeliverByte(uart.pending.shift());
     return;
   }
-  while (uartPending.length && uartNow() >= uartNextDeliveryInstr) {
-    uartDeliverByte(uartPending.shift());
-    uartNextDeliveryInstr = uartNow() + uartGapInstr();
+  while (uart.pending.length && uartNow() >= uart.nextDeliveryInstr) {
+    uartDeliverByte(uart.pending.shift());
+    uart.nextDeliveryInstr = uartNow() + uartGapInstr();
   }
   uartReportDrops();
 }
@@ -419,29 +419,29 @@ function uartTickDelivery() {
 // be listed here; the cost is one small object per single-step.
 function capturePeriphState() {
   return {
-    ledState, sevsegState,
-    oledCol, oledRow, oledCtrl, oledDataVal, oledAdvCol, oledAdvRow,
-    oledFrontPage, oledBackPage, oledSwapUnpolled, oledRaceWarned,
-    uartPending: uartPending.slice(),
-    uartRxByte, uartRxFull, uartRxDropped, uartRxDroppedTotal,
-    uartNextDeliveryInstr,
-    uartTxBuffer, uartTxLen: uartTxBytes.length
+    ledState: board.leds, sevsegState: board.sevseg,
+    oledCol: oled.col, oledRow: oled.row, oledCtrl: oled.ctrl, oledDataVal: oled.data, oledAdvCol: oled.advCol, oledAdvRow: oled.advRow,
+    oledFrontPage: oled.front, oledBackPage: oled.back, oledSwapUnpolled: oled.swapUnpolled, oledRaceWarned: oled.raceWarned,
+    uartPending: uart.pending.slice(),
+    uartRxByte: uart.rxByte, uartRxFull: uart.rxFull, uartRxDropped: uart.rxDropped, uartRxDroppedTotal: uart.rxDroppedTotal,
+    uartNextDeliveryInstr: uart.nextDeliveryInstr,
+    uartTxBuffer: uart.txText, uartTxLen: uart.txBytes.length
   };
 }
 
 function restorePeriphState(s) {
-  ledState = s.ledState; sevsegState = s.sevsegState;
-  oledCol = s.oledCol; oledRow = s.oledRow;
-  oledCtrl = s.oledCtrl; oledDataVal = s.oledDataVal;
-  oledAdvCol = s.oledAdvCol; oledAdvRow = s.oledAdvRow;
-  oledFrontPage = s.oledFrontPage; oledBackPage = s.oledBackPage;
-  oledBuffer = oledPages[oledBackPage];
-  oledSwapUnpolled = s.oledSwapUnpolled; oledRaceWarned = s.oledRaceWarned;
-  uartPending = s.uartPending.slice();
-  uartRxByte = s.uartRxByte; uartRxFull = s.uartRxFull;
-  uartRxDropped = s.uartRxDropped; uartRxDroppedTotal = s.uartRxDroppedTotal;
-  uartNextDeliveryInstr = s.uartNextDeliveryInstr;
-  uartTxBuffer = s.uartTxBuffer; uartTxBytes.length = s.uartTxLen;
+  board.leds = s.ledState; board.sevseg = s.sevsegState;
+  oled.col = s.oledCol; oled.row = s.oledRow;
+  oled.ctrl = s.oledCtrl; oled.data = s.oledDataVal;
+  oled.advCol = s.oledAdvCol; oled.advRow = s.oledAdvRow;
+  oled.front = s.oledFrontPage; oled.back = s.oledBackPage;
+  oled.buffer = oled.pages[oled.back];
+  oled.swapUnpolled = s.oledSwapUnpolled; oled.raceWarned = s.oledRaceWarned;
+  uart.pending = s.uartPending.slice();
+  uart.rxByte = s.uartRxByte; uart.rxFull = s.uartRxFull;
+  uart.rxDropped = s.uartRxDropped; uart.rxDroppedTotal = s.uartRxDroppedTotal;
+  uart.nextDeliveryInstr = s.uartNextDeliveryInstr;
+  uart.txText = s.uartTxBuffer; uart.txBytes.length = s.uartTxLen;
 }
 
 // Undo one step's OLED page edits, newest first: a whole-page entry is a
@@ -449,8 +449,8 @@ function restorePeriphState(s) {
 function restoreOledPages(log) {
   for (let i = log.length - 1; i >= 0; i--) {
     const e = log[i];
-    if (e.full) oledPages[e.page].set(e.full);
-    else oledPages[e.page].set(e.old, e.idx);
+    if (e.full) oled.pages[e.page].set(e.full);
+    else oled.pages[e.page].set(e.old, e.idx);
   }
 }
 
@@ -478,22 +478,22 @@ function handleMMIORead(addr, size, peekOnly = false) {
 }
 
 function uartTransmit(ch) {
-  uartTxBytes.push(ch);
-  uartTxBuffer += String.fromCharCode(ch);
+  uart.txBytes.push(ch);
+  uart.txText += String.fromCharCode(ch);
   // A run repaints the terminal once per batch; doing it per byte
   // re-sets the whole transcript each time, which grows as n squared.
-  if (!running) renderUartTerminal();
+  if (!run.running) renderUartTerminal();
 }
 
 function sevsegValue() {
-  return parseInt(sevsegState, 16) || 0;
+  return parseInt(board.sevseg, 16) || 0;
 }
 
 // vary_col / vary_row: writing the coordinate paints the stored colour.
 function oledTrigger(mode) {
-  if ((oledCtrl & 0x0F) !== mode) return;
-  oledAdvCol = oledAdvRow = false;
-  writeOledPixel(oledDataVal);
+  if ((oled.ctrl & 0x0F) !== mode) return;
+  oled.advCol = oled.advRow = false;
+  writeOledPixel(oled.data);
 }
 
 // The colour mode is resolved here, on the write, not when the pixel is
@@ -508,34 +508,34 @@ function oledTrigger(mode) {
 // flag, so the next pixel lands where it was set.
 function oledDataWrite(off, val, size) {
   oledStoreData(off, val, size);
-  const triggerMode = oledCtrl & 0x0F;
+  const triggerMode = oled.ctrl & 0x0F;
   if (triggerMode === 0x4) {          // autoadvance_col (row major)
-    if (oledAdvCol) {
-      if (oledCol >= 95) {
-        oledCol = 0;
-        oledRow = (oledRow + 1) & 0x3F;
+    if (oled.advCol) {
+      if (oled.col >= 95) {
+        oled.col = 0;
+        oled.row = (oled.row + 1) & 0x3F;
       } else {
-        oledCol++;
+        oled.col++;
       }
     }
-    oledAdvCol = true;
-    oledAdvRow = false;
-    writeOledPixel(oledDataVal);
+    oled.advCol = true;
+    oled.advRow = false;
+    writeOledPixel(oled.data);
   } else if (triggerMode === 0x5) {   // autoadvance_row (column major)
-    if (oledAdvRow) {
-      if (oledRow >= 63) {
-        oledRow = 0;
-        oledCol = (oledCol >= 95) ? 0 : oledCol + 1;
+    if (oled.advRow) {
+      if (oled.row >= 63) {
+        oled.row = 0;
+        oled.col = (oled.col >= 95) ? 0 : oled.col + 1;
       } else {
-        oledRow++;
+        oled.row++;
       }
     }
-    oledAdvRow = true;
-    oledAdvCol = false;
-    writeOledPixel(oledDataVal);
+    oled.advRow = true;
+    oled.advCol = false;
+    writeOledPixel(oled.data);
   } else if (triggerMode === 0x0) {   // vary_pixel_data
-    oledAdvCol = oledAdvRow = false;
-    writeOledPixel(oledDataVal);
+    oled.advCol = oled.advRow = false;
+    writeOledPixel(oled.data);
   }
 }
 
@@ -570,51 +570,51 @@ function decodeAndExecute(instr32, addr) {
 
   switch (opcode) {
     case 0b0110111: // LUI
-      regs[rd] = immU;
+      cpu.regs[rd] = immU;
       break;
     case 0b0010111: // AUIPC
-      regs[rd] = addr + immU;
+      cpu.regs[rd] = addr + immU;
       break;
     case 0b1101111: // JAL
-      if (rd !== 0) regs[rd] = addr + 4;
+      if (rd !== 0) cpu.regs[rd] = addr + 4;
       nextPC = addr + immJ;
       break;
     case 0b1100111: // JALR
-      const jalrTarget = (regs[rs1] + immI) & ~1;
-      if (rd !== 0) regs[rd] = addr + 4;
+      const jalrTarget = (cpu.regs[rs1] + immI) & ~1;
+      if (rd !== 0) cpu.regs[rd] = addr + 4;
       nextPC = jalrTarget;
       break;
     case 0b1100011: // BRANCH
       let taken = false;
       switch (funct3) {
-        case 0b000: taken = regs[rs1] === regs[rs2]; break; // BEQ
-        case 0b001: taken = regs[rs1] !== regs[rs2]; break; // BNE
-        case 0b100: taken = regs[rs1] < regs[rs2]; break; // BLT
-        case 0b101: taken = regs[rs1] >= regs[rs2]; break; // BGE
-        case 0b110: taken = unsigned(regs[rs1]) < unsigned(regs[rs2]); break; // BLTU
-        case 0b111: taken = unsigned(regs[rs1]) >= unsigned(regs[rs2]); break; // BGEU
+        case 0b000: taken = cpu.regs[rs1] === cpu.regs[rs2]; break; // BEQ
+        case 0b001: taken = cpu.regs[rs1] !== cpu.regs[rs2]; break; // BNE
+        case 0b100: taken = cpu.regs[rs1] < cpu.regs[rs2]; break; // BLT
+        case 0b101: taken = cpu.regs[rs1] >= cpu.regs[rs2]; break; // BGE
+        case 0b110: taken = unsigned(cpu.regs[rs1]) < unsigned(cpu.regs[rs2]); break; // BLTU
+        case 0b111: taken = unsigned(cpu.regs[rs1]) >= unsigned(cpu.regs[rs2]); break; // BGEU
       }
       if (taken) nextPC = addr + immB;
       break;
     case 0b0000011: // LOAD
-      let loadAddr = (regs[rs1] >>> 0) + immI;
+      let loadAddr = (cpu.regs[rs1] >>> 0) + immI;
       if (rd !== 0) {
         switch (funct3) {
-          case 0b000: regs[rd] = readMemSigned(loadAddr, 1); break; // LB
-          case 0b001: regs[rd] = readMemSigned(loadAddr, 2); break; // LH
-          case 0b010: regs[rd] = readMemSigned(loadAddr, 4); break; // LW
-          case 0b100: regs[rd] = readMem(loadAddr, 1); break; // LBU
-          case 0b101: regs[rd] = readMem(loadAddr, 2); break; // LHU
+          case 0b000: cpu.regs[rd] = readMemSigned(loadAddr, 1); break; // LB
+          case 0b001: cpu.regs[rd] = readMemSigned(loadAddr, 2); break; // LH
+          case 0b010: cpu.regs[rd] = readMemSigned(loadAddr, 4); break; // LW
+          case 0b100: cpu.regs[rd] = readMem(loadAddr, 1); break; // LBU
+          case 0b101: cpu.regs[rd] = readMem(loadAddr, 2); break; // LHU
         }
       }
       break;
     case 0b0100011: // STORE
       {
-        let storeAddr = (regs[rs1] >>> 0) + immS;
+        let storeAddr = (cpu.regs[rs1] >>> 0) + immS;
         switch (funct3) {
-          case 0b000: writeMem(storeAddr, regs[rs2] & 0xFF, 1); break; // SB
-          case 0b001: writeMem(storeAddr, regs[rs2] & 0xFFFF, 2); break; // SH
-          case 0b010: writeMem(storeAddr, regs[rs2], 4); break; // SW
+          case 0b000: writeMem(storeAddr, cpu.regs[rs2] & 0xFF, 1); break; // SB
+          case 0b001: writeMem(storeAddr, cpu.regs[rs2] & 0xFFFF, 2); break; // SH
+          case 0b010: writeMem(storeAddr, cpu.regs[rs2], 4); break; // SW
         }
       }
       break;
@@ -622,27 +622,27 @@ function decodeAndExecute(instr32, addr) {
       if (rd !== 0) {
         let shamtW = rs2 & 0x1F;
         switch (funct3) {
-          case 0b000: regs[rd] = (regs[rs1] + immI) | 0; break; // ADDIW
-          case 0b001: regs[rd] = (regs[rs1] << shamtW) | 0; break; // SLLIW
+          case 0b000: cpu.regs[rd] = (cpu.regs[rs1] + immI) | 0; break; // ADDIW
+          case 0b001: cpu.regs[rd] = (cpu.regs[rs1] << shamtW) | 0; break; // SLLIW
           case 0b101:
-            if ((funct7 >> 5) & 1) regs[rd] = (regs[rs1] >> shamtW) | 0; // SRAIW
-            else regs[rd] = (unsigned(regs[rs1]) >>> shamtW) | 0; // SRLIW
+            if ((funct7 >> 5) & 1) cpu.regs[rd] = (cpu.regs[rs1] >> shamtW) | 0; // SRAIW
+            else cpu.regs[rd] = (unsigned(cpu.regs[rs1]) >>> shamtW) | 0; // SRLIW
             break;
         }
       }
       break;
     case 0b0111011: // OP-32 (addw, subw, sllw, srlw, sraw)
       if (rd !== 0) {
-        let shamtW = regs[rs2] & 0x1F;
+        let shamtW = cpu.regs[rs2] & 0x1F;
         switch (funct3) {
           case 0b000:
-            if (funct7 & 0x20) regs[rd] = (regs[rs1] - regs[rs2]) | 0; // SUBW
-            else regs[rd] = (regs[rs1] + regs[rs2]) | 0; // ADDW
+            if (funct7 & 0x20) cpu.regs[rd] = (cpu.regs[rs1] - cpu.regs[rs2]) | 0; // SUBW
+            else cpu.regs[rd] = (cpu.regs[rs1] + cpu.regs[rs2]) | 0; // ADDW
             break;
-          case 0b001: regs[rd] = (regs[rs1] << shamtW) | 0; break; // SLLW
+          case 0b001: cpu.regs[rd] = (cpu.regs[rs1] << shamtW) | 0; break; // SLLW
           case 0b101:
-            if (funct7 & 0x20) regs[rd] = (regs[rs1] >> shamtW) | 0; // SRAW
-            else regs[rd] = (unsigned(regs[rs1]) >>> shamtW) | 0; // SRLW
+            if (funct7 & 0x20) cpu.regs[rd] = (cpu.regs[rs1] >> shamtW) | 0; // SRAW
+            else cpu.regs[rd] = (unsigned(cpu.regs[rs1]) >>> shamtW) | 0; // SRLW
             break;
         }
       }
@@ -667,16 +667,16 @@ function decodeAndExecute(instr32, addr) {
       if (rd !== 0) {
         let shamt = rs2 & 0x1F;
         switch (funct3) {
-          case 0b000: regs[rd] = regs[rs1] + immI; break; // ADDI
-          case 0b010: regs[rd] = regs[rs1] < immI ? 1 : 0; break; // SLTI
-          case 0b011: regs[rd] = unsigned(regs[rs1]) < unsigned(immI) ? 1 : 0; break; // SLTIU
-          case 0b100: regs[rd] = regs[rs1] ^ immI; break; // XORI
-          case 0b110: regs[rd] = regs[rs1] | immI; break; // ORI
-          case 0b111: regs[rd] = regs[rs1] & immI; break; // ANDI
-          case 0b001: regs[rd] = regs[rs1] << shamt; break; // SLLI
+          case 0b000: cpu.regs[rd] = cpu.regs[rs1] + immI; break; // ADDI
+          case 0b010: cpu.regs[rd] = cpu.regs[rs1] < immI ? 1 : 0; break; // SLTI
+          case 0b011: cpu.regs[rd] = unsigned(cpu.regs[rs1]) < unsigned(immI) ? 1 : 0; break; // SLTIU
+          case 0b100: cpu.regs[rd] = cpu.regs[rs1] ^ immI; break; // XORI
+          case 0b110: cpu.regs[rd] = cpu.regs[rs1] | immI; break; // ORI
+          case 0b111: cpu.regs[rd] = cpu.regs[rs1] & immI; break; // ANDI
+          case 0b001: cpu.regs[rd] = cpu.regs[rs1] << shamt; break; // SLLI
           case 0b101:
-            if ((funct7 >> 5) & 1) regs[rd] = regs[rs1] >> shamt; // SRAI
-            else regs[rd] = unsigned(regs[rs1]) >>> shamt; // SRLI
+            if ((funct7 >> 5) & 1) cpu.regs[rd] = cpu.regs[rs1] >> shamt; // SRAI
+            else cpu.regs[rd] = unsigned(cpu.regs[rs1]) >>> shamt; // SRLI
             break;
         }
       }
@@ -685,53 +685,53 @@ function decodeAndExecute(instr32, addr) {
       if (rd !== 0) {
         if (funct7 === 0b0000001) {
           switch (funct3) {
-            case 0b000: regs[rd] = Math.imul(regs[rs1], regs[rs2]); break; // MUL
+            case 0b000: cpu.regs[rd] = Math.imul(cpu.regs[rs1], cpu.regs[rs2]); break; // MUL
             case 0b001: // MULH
-              regs[rd] = mulh(regs[rs1], regs[rs2]); break;
+              cpu.regs[rd] = mulh(cpu.regs[rs1], cpu.regs[rs2]); break;
             case 0b010: // MULHSU
-              regs[rd] = mulhsu(regs[rs1], regs[rs2]); break;
+              cpu.regs[rd] = mulhsu(cpu.regs[rs1], cpu.regs[rs2]); break;
             case 0b011: // MULHU
-              regs[rd] = mulhu(unsigned(regs[rs1]), unsigned(regs[rs2])); break;
+              cpu.regs[rd] = mulhu(unsigned(cpu.regs[rs1]), unsigned(cpu.regs[rs2])); break;
             case 0b100: // DIV
-              if (regs[rs2] === 0) regs[rd] = -1;
-              else regs[rd] = Math.trunc(regs[rs1] / regs[rs2]);
+              if (cpu.regs[rs2] === 0) cpu.regs[rd] = -1;
+              else cpu.regs[rd] = Math.trunc(cpu.regs[rs1] / cpu.regs[rs2]);
               break;
             case 0b101: // DIVU
-              if (regs[rs2] === 0) regs[rd] = -1;
-              else regs[rd] = Math.trunc(unsigned(regs[rs1]) / unsigned(regs[rs2]));
+              if (cpu.regs[rs2] === 0) cpu.regs[rd] = -1;
+              else cpu.regs[rd] = Math.trunc(unsigned(cpu.regs[rs1]) / unsigned(cpu.regs[rs2]));
               break;
             case 0b110: // REM
-              if (regs[rs2] === 0) regs[rd] = regs[rs1];
-              else regs[rd] = regs[rs1] % regs[rs2];
+              if (cpu.regs[rs2] === 0) cpu.regs[rd] = cpu.regs[rs1];
+              else cpu.regs[rd] = cpu.regs[rs1] % cpu.regs[rs2];
               break;
             case 0b111: // REMU
-              if (regs[rs2] === 0) regs[rd] = unsigned(regs[rs1]);
-              else regs[rd] = unsigned(regs[rs1]) % unsigned(regs[rs2]);
+              if (cpu.regs[rs2] === 0) cpu.regs[rd] = unsigned(cpu.regs[rs1]);
+              else cpu.regs[rd] = unsigned(cpu.regs[rs1]) % unsigned(cpu.regs[rs2]);
               break;
           }
         } else {
           switch (funct3) {
             case 0b000:
-              if (funct7 & 0x20) regs[rd] = regs[rs1] - regs[rs2]; // SUB
-              else regs[rd] = regs[rs1] + regs[rs2]; // ADD
+              if (funct7 & 0x20) cpu.regs[rd] = cpu.regs[rs1] - cpu.regs[rs2]; // SUB
+              else cpu.regs[rd] = cpu.regs[rs1] + cpu.regs[rs2]; // ADD
               break;
-            case 0b001: regs[rd] = regs[rs1] << (regs[rs2] & 0x1F); break; // SLL
-            case 0b010: regs[rd] = regs[rs1] < regs[rs2] ? 1 : 0; break; // SLT
-            case 0b011: regs[rd] = unsigned(regs[rs1]) < unsigned(regs[rs2]) ? 1 : 0; break; // SLTU
-            case 0b100: regs[rd] = regs[rs1] ^ regs[rs2]; break; // XOR
+            case 0b001: cpu.regs[rd] = cpu.regs[rs1] << (cpu.regs[rs2] & 0x1F); break; // SLL
+            case 0b010: cpu.regs[rd] = cpu.regs[rs1] < cpu.regs[rs2] ? 1 : 0; break; // SLT
+            case 0b011: cpu.regs[rd] = unsigned(cpu.regs[rs1]) < unsigned(cpu.regs[rs2]) ? 1 : 0; break; // SLTU
+            case 0b100: cpu.regs[rd] = cpu.regs[rs1] ^ cpu.regs[rs2]; break; // XOR
             case 0b101:
-              if (funct7 & 0x20) regs[rd] = regs[rs1] >> (regs[rs2] & 0x1F); // SRA
-              else regs[rd] = unsigned(regs[rs1]) >>> (regs[rs2] & 0x1F); // SRL
+              if (funct7 & 0x20) cpu.regs[rd] = cpu.regs[rs1] >> (cpu.regs[rs2] & 0x1F); // SRA
+              else cpu.regs[rd] = unsigned(cpu.regs[rs1]) >>> (cpu.regs[rs2] & 0x1F); // SRL
               break;
-            case 0b110: regs[rd] = regs[rs1] | regs[rs2]; break; // OR
-            case 0b111: regs[rd] = regs[rs1] & regs[rs2]; break; // AND
+            case 0b110: cpu.regs[rd] = cpu.regs[rs1] | cpu.regs[rs2]; break; // OR
+            case 0b111: cpu.regs[rd] = cpu.regs[rs1] & cpu.regs[rs2]; break; // AND
           }
         }
       }
       break;
     case 0b0000111: // LOAD FP
       {
-        const fAddr = regs[rs1] + immI;
+        const fAddr = cpu.regs[rs1] + immI;
         if (funct3 === 0b010) setSBits(rd, readMem(fAddr, 4));           // FLW
         else if (funct3 === 0b011) {                                      // FLD
           fpBits[2 * rd] = readMem(fAddr, 4);
@@ -742,7 +742,7 @@ function decodeAndExecute(instr32, addr) {
     case 0b0100111: // STORE FP
       {
         // The bits as they are, boxed or not: stores do not check.
-        const fAddr = regs[rs1] + immS;
+        const fAddr = cpu.regs[rs1] + immS;
         if (funct3 === 0b010) writeMem(fAddr, fpBits[2 * rs2], 4);       // FSW
         else if (funct3 === 0b011) {                                      // FSD
           writeMem(fAddr, fpBits[2 * rs2], 4);
@@ -767,11 +767,11 @@ function decodeAndExecute(instr32, addr) {
       break;
   }
 
-  regs[0] = 0;
+  cpu.regs[0] = 0;
 
   // Track last written register for UI highlighting
   if (rd !== 0 && opcode !== 0b0100011 && opcode !== 0b0100111 && opcode !== 0b1100011) {
-    lastExecutedRd = rd;
+    cpu.lastExecutedRd = rd;
   }
 
   return nextPC;
@@ -853,8 +853,8 @@ function executeFP(instr32, rd, funct3, rs1, rs2, funct7) {
       case 0b0001101: dregs[rd] = a / b; break;                            // FDIV.D
       case 0b0101101: if (rs2 === 0) dregs[rd] = Math.sqrt(a); break;      // FSQRT.D
       case 0b0010101: if (funct3 <= 1) dregs[rd] = fpMinMax(a, b, funct3 === 1); break; // FMIN.D / FMAX.D
-      case 0b1100001: if (rs2 <= 1) regs[rd] = fpToInt(a, rs2 === 1, funct3); break;    // FCVT.W[U].D
-      case 0b1101001: if (rs2 <= 1) dregs[rd] = rs2 === 1 ? unsigned(regs[rs1]) : regs[rs1]; break; // FCVT.D.W[U]
+      case 0b1100001: if (rs2 <= 1) cpu.regs[rd] = fpToInt(a, rs2 === 1, funct3); break;    // FCVT.W[U].D
+      case 0b1101001: if (rs2 <= 1) dregs[rd] = rs2 === 1 ? unsigned(cpu.regs[rs1]) : cpu.regs[rs1]; break; // FCVT.D.W[U]
       case 0b0100000: if (rs2 === 1) setS(rd, a); break;                   // FCVT.S.D
       case 0b0100001: if (rs2 === 0) dregs[rd] = getS(rs1); break;         // FCVT.D.S
       case 0b0010001:                                                      // FSGNJ[N|X].D
@@ -866,11 +866,11 @@ function executeFP(instr32, rd, funct3, rs1, rs2, funct7) {
         }
         break;
       case 0b1010001:
-        if (funct3 === 0b010) regs[rd] = a === b ? 1 : 0;                  // FEQ.D
-        else if (funct3 === 0b001) regs[rd] = a < b ? 1 : 0;               // FLT.D
-        else if (funct3 === 0b000) regs[rd] = a <= b ? 1 : 0;              // FLE.D
+        if (funct3 === 0b010) cpu.regs[rd] = a === b ? 1 : 0;                  // FEQ.D
+        else if (funct3 === 0b001) cpu.regs[rd] = a < b ? 1 : 0;               // FLT.D
+        else if (funct3 === 0b000) cpu.regs[rd] = a <= b ? 1 : 0;              // FLE.D
         break;
-      case 0b1110001: if (funct3 === 0b001) regs[rd] = fclass(a, true); break; // FCLASS.D
+      case 0b1110001: if (funct3 === 0b001) cpu.regs[rd] = fclass(a, true); break; // FCLASS.D
     }
   } else {
     const a = getS(rs1), b = getS(rs2);
@@ -881,13 +881,13 @@ function executeFP(instr32, rd, funct3, rs1, rs2, funct7) {
       case 0b0001100: setS(rd, a / b); break;                              // FDIV.S
       case 0b0101100: if (rs2 === 0) setS(rd, Math.sqrt(a)); break;        // FSQRT.S
       case 0b0010100: if (funct3 <= 1) setS(rd, fpMinMax(a, b, funct3 === 1)); break; // FMIN.S / FMAX.S
-      case 0b1100000: if (rs2 <= 1) regs[rd] = fpToInt(a, rs2 === 1, funct3); break;  // FCVT.W[U].S
+      case 0b1100000: if (rs2 <= 1) cpu.regs[rd] = fpToInt(a, rs2 === 1, funct3); break;  // FCVT.W[U].S
       case 0b1110000: // FMV.X.W moves the low word as it is; FCLASS.S shares funct7
-        if (funct3 === 0b000) regs[rd] = fpBits[2 * rs1] | 0;
-        else if (funct3 === 0b001) regs[rd] = fclass(a, false);
+        if (funct3 === 0b000) cpu.regs[rd] = fpBits[2 * rs1] | 0;
+        else if (funct3 === 0b001) cpu.regs[rd] = fclass(a, false);
         break;
-      case 0b1101000: if (rs2 <= 1) setS(rd, rs2 === 1 ? unsigned(regs[rs1]) : regs[rs1]); break; // FCVT.S.W[U]
-      case 0b1111000: if (funct3 === 0b000) setSBits(rd, regs[rs1]); break; // FMV.W.X
+      case 0b1101000: if (rs2 <= 1) setS(rd, rs2 === 1 ? unsigned(cpu.regs[rs1]) : cpu.regs[rs1]); break; // FCVT.S.W[U]
+      case 0b1111000: if (funct3 === 0b000) setSBits(rd, cpu.regs[rs1]); break; // FMV.W.X
       case 0b0010000:                                                      // FSGNJ[N|X].S
         if (funct3 <= 2) {
           const x = getSBits(rs1);
@@ -896,9 +896,9 @@ function executeFP(instr32, rd, funct3, rs1, rs2, funct7) {
         }
         break;
       case 0b1010000:
-        if (funct3 === 0b010) regs[rd] = a === b ? 1 : 0;                  // FEQ.S
-        else if (funct3 === 0b001) regs[rd] = a < b ? 1 : 0;               // FLT.S
-        else if (funct3 === 0b000) regs[rd] = a <= b ? 1 : 0;              // FLE.S
+        if (funct3 === 0b010) cpu.regs[rd] = a === b ? 1 : 0;                  // FEQ.S
+        else if (funct3 === 0b001) cpu.regs[rd] = a < b ? 1 : 0;               // FLT.S
+        else if (funct3 === 0b000) cpu.regs[rd] = a <= b ? 1 : 0;              // FLE.S
         break;
     }
   }
@@ -925,21 +925,21 @@ let lrReservation = null;
 function executeAtomic(instr32, rd, funct3, rs1, rs2, funct7) {
   if (funct3 !== 0b010) return;
   const funct5 = funct7 >>> 2;
-  const addr = regs[rs1] >>> 0;
+  const addr = cpu.regs[rs1] >>> 0;
   if (funct5 === 0b00011) {                        // SC.W
     const ok = lrReservation === addr;
-    if (ok) writeMem(addr, regs[rs2], 4);
-    regs[rd] = ok ? 0 : 1;
+    if (ok) writeMem(addr, cpu.regs[rs2], 4);
+    cpu.regs[rd] = ok ? 0 : 1;
     lrReservation = null;
     return;
   }
   const memVal = readMem(addr, 4) | 0;
   if (funct5 === 0b00010) {                        // LR.W
-    regs[rd] = memVal;
+    cpu.regs[rd] = memVal;
     lrReservation = addr;
     return;
   }
-  const src = regs[rs2];
+  const src = cpu.regs[rs2];
   let result;
   switch (funct5) {
     case 0b00001: result = src; break;                                        // AMOSWAP.W
@@ -953,14 +953,14 @@ function executeAtomic(instr32, rd, funct3, rs1, rs2, funct7) {
     case 0b11100: result = Math.max(unsigned(memVal), unsigned(src)); break;  // AMOMAXU.W
     default: return;
   }
-  regs[rd] = memVal;
+  cpu.regs[rd] = memVal;
   writeMem(addr, result, 4);
 }
 
 function handleECall() {
-  const a7 = regs[17]; // x17 = a7 service number
-  const a0 = regs[10]; // x10 = a0 argument
-  const a1 = regs[11]; // x11 = a1 argument
+  const a7 = cpu.regs[17]; // x17 = a7 service number
+  const a0 = cpu.regs[10]; // x10 = a0 argument
+  const a1 = cpu.regs[11]; // x11 = a1 argument
 
   switch (a7) {
     case 1: // print_int (a0)
@@ -990,7 +990,7 @@ function handleECall() {
           const input = prompt('RARS Syscall 5 (read_int): Enter integer:');
           val = parseInt(input, 10) || 0;
         }
-        regs[10] = val | 0;
+        cpu.regs[10] = val | 0;
         log(`[Syscall read_int]: ${val}`, 'info');
       }
       break;
@@ -1037,13 +1037,13 @@ function handleECall() {
         const bytes = a0 | 0;
         const oldHeap = heapPointer;
         heapPointer += bytes;
-        regs[10] = oldHeap;
+        cpu.regs[10] = oldHeap;
         log(`[Syscall sbrk]: allocated ${bytes} bytes at 0x${oldHeap.toString(16)}`, 'info');
       }
       break;
     case 10: // exit
       log('Program exited via ecall 10 (Exit).', 'info');
-      running = false;
+      run.running = false;
       break;
     case 11: // print_char (a0 = ASCII char)
       {
@@ -1058,7 +1058,7 @@ function handleECall() {
           const input = prompt('RARS Syscall 12 (read_char): Enter character:') || '';
           if (input.length > 0) ch = input[0];
         }
-        regs[10] = ch.charCodeAt(0) & 0xFF;
+        cpu.regs[10] = ch.charCodeAt(0) & 0xFF;
         log(`[Syscall read_char]: '${ch}'`, 'info');
       }
       break;
@@ -1076,7 +1076,7 @@ function handleECall() {
       break;
     case 93: // exit2 (exit with code in a0)
       log(`Program exited via ecall 93 (Exit2) with return code ${a0}.`, 'info');
-      running = false;
+      run.running = false;
       break;
     default:
       log(`[ECALL] Syscall #${a7} (a0=0x${(a0 >>> 0).toString(16)})`, 'warn');
@@ -1085,5 +1085,5 @@ function handleECall() {
 
 function handleEBreak() {
   log('[EBREAK] Breakpoint hit', 'warn');
-  running = false;
+  run.running = false;
 }

@@ -105,7 +105,7 @@ function pipeStore(addr, val, f3) {
 // peeked, and read for real by pipeClock.
 function pipeEvaluate() {
   const H = pipeHaz, { D, E, M, W } = pipe;
-  const s = { pcF: pc >>> 0 };
+  const s = { pcF: cpu.pc >>> 0 };
   s.instrF = readMem(s.pcF, 4, true) >>> 0;
 
   s.resultW = W ? (W.MemtoReg ? W.readData : W.aluResult) : 0;
@@ -167,8 +167,8 @@ function pipeEvaluate() {
     const d = D.dec;
     s.forward1D = !!(H.fwdD && s.wrW && d.rs1 === W.rd);
     s.forward2D = !!(H.fwdD && s.wrW && d.rs2 === W.rd);
-    s.rd1D = s.forward1D ? s.resultW : regs[d.rs1] >>> 0;
-    s.rd2D = s.forward2D ? s.resultW : regs[d.rs2] >>> 0;
+    s.rd1D = s.forward1D ? s.resultW : cpu.regs[d.rs1] >>> 0;
+    s.rd2D = s.forward2D ? s.resultW : cpu.regs[d.rs2] >>> 0;
   }
 
   // Hazard unit.
@@ -191,7 +191,7 @@ function pipeClock(s) {
   const p = pipe, { D, E, M, W } = p;
   const stage = r => r ? { seq: r.seq, pc: r.pc } : null;
   const node = {
-    cyc: totalCycles,
+    cyc: cpu.totalCycles,
     st: [s.instrF ? { seq: p.seqF, pc: s.pcF } : null, stage(D), stage(E), stage(M), stage(W)],
     stall: s.stallD, flushD: s.flushD, flushE: s.flushE && !s.stallD, miss: !!s.mispredict,
     serial: !!s.serialExec, prev: p.trace, n: p.trace ? p.trace.n + 1 : 1,
@@ -203,10 +203,10 @@ function pipeClock(s) {
     t.prev = null;
   }
 
-  totalCycles++;
-  lastChangedReg = -1;
-  if (s.wrW) { regs[W.rd] = s.resultW | 0; lastChangedReg = W.rd; }
-  if (W) instructionCount++;
+  cpu.totalCycles++;
+  cpu.lastChangedReg = -1;
+  if (s.wrW) { cpu.regs[W.rd] = s.resultW | 0; cpu.lastChangedReg = W.rd; }
+  if (W) cpu.instructionCount++;
 
   if (pipeBP.on && E) {
     const i = pipeBhtIndex(E.pc), bht = p.bht;
@@ -224,12 +224,12 @@ function pipeClock(s) {
   if (s.serialExec) {
     const instr = D.instr;
     const exiting = D.dec.op === 0x73 && D.dec.f3 === 0 && (instr >>> 20) === 0 &&
-      (regs[17] === 10 || regs[17] === 93);
-    lastExecutedRd = -1;
+      (cpu.regs[17] === 10 || cpu.regs[17] === 93);
+    cpu.lastExecutedRd = -1;
     const next = decodeAndExecute(instr, D.pc) >>> 0;
-    regs[0] = 0;
-    instructionCount++;
-    if (lastExecutedRd > 0) lastChangedReg = lastExecutedRd;
+    cpu.regs[0] = 0;
+    cpu.instructionCount++;
+    if (cpu.lastExecutedRd > 0) cpu.lastChangedReg = cpu.lastExecutedRd;
     if (exiting) p.exited = true;
     // Predicted, the instruction behind it may be on a wrong path that
     // Execute will never check, since this one does not get there.
@@ -257,8 +257,8 @@ function pipeClock(s) {
   // off); the redirect still wins the PC.
   const loadPC = !s.stallF || s.redirect;
   if (loadPC) p.seqF++;
-  if (redirect !== null) pc = redirect;
-  else if (loadPC) pc = s.pcIn;
+  if (redirect !== null) cpu.pc = redirect;
+  else if (loadPC) cpu.pc = s.pcIn;
 
   p.D = newD; p.E = newE; p.M = newM; p.W = newW;
 }
@@ -281,7 +281,7 @@ function pipeStatementStep() {
   const lineOf = r => r ? sourceLineForPc(r.pc) : -1;
   const oldest = () => pipe.W || pipe.M || pipe.E;
   const first = oldest() || pipe.D;
-  pipeStmtLine = first ? lineOf(first) : sourceLineForPc(pc);
+  pipeStmtLine = first ? lineOf(first) : sourceLineForPc(cpu.pc);
   if (pipeStmtLine <= 0) return pipeStep();
   let sig = null, retired = false;
   for (let n = 0; n < 10000; n++) {
@@ -291,7 +291,7 @@ function pipeStatementStep() {
     const next = oldest();
     if (retired && next && lineOf(next) !== pipeStmtLine) break;
     const e = lineOf(pipe.E);
-    if (e > 0 && e !== pipeStmtLine && breakpoints.has(e)) break;
+    if (e > 0 && e !== pipeStmtLine && run.breakpoints.has(e)) break;
   }
   return sig;
 }
@@ -301,9 +301,9 @@ function pipeStatementStep() {
 function pipeDone() {
   if (pipe.exited) return true;
   if (!pipeEmpty()) return false;
-  const u = pc >>> 0;
-  if (u < (baseAddress >>> 0) || u >= (mmioBase >>> 0)) return true;
-  return sourceLineForPc(pc) === -1 && readMem(u, 4, true) === 0;
+  const u = cpu.pc >>> 0;
+  if (u < (layout.baseAddress >>> 0) || u >= (layout.mmioBase >>> 0)) return true;
+  return sourceLineForPc(cpu.pc) === -1 && readMem(u, 4, true) === 0;
 }
 
 // Switching microarchitecture starts the program again: a pipeline
@@ -317,8 +317,8 @@ const JS_ARCH_LOG = {
 function setJsArch(a) {
   if (!JS_ARCH_LOG[a]) a = 'single';
   if (a === jsArch) { pipeSyncControls(); return; }
-  if (running) {
-    running = false;
+  if (run.running) {
+    run.running = false;
     if (runTimerId) { clearTimeout(runTimerId); runTimerId = null; }
   }
   jsArch = a;
@@ -347,7 +347,7 @@ function pipeInitControls() {
     el.onchange = () => {
       apply(el);
       if (pipeMode) {
-        if (running) { running = false; if (runTimerId) { clearTimeout(runTimerId); runTimerId = null; } }
+        if (run.running) { run.running = false; if (runTimerId) { clearTimeout(runTimerId); runTimerId = null; } }
         resetAll();
       }
       pipeSyncControls();

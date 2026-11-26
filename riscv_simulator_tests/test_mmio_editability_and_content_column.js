@@ -1,14 +1,16 @@
 // test_mmio_editability_and_content_column.js
-// Covers three behaviours of the Memory and Registers panels:
+// Covers four behaviours of the Memory and Registers panels:
 //   1. Read-only MMIO registers (DIP, PB, ...) are not editable in the
 //      Memory view, and a write to one - from a program or from the view -
 //      is ignored, the same way real hardware ignores it. UART_RX stays
-//      editable on purpose (see MMIO_REGISTERS in src/ts/03-state.ts).
+//      editable on purpose (see MMIO_REGISTERS in src/ts/machine/mmio.ts).
 //   2. An MMIO edit is visible immediately, not only after the next Step:
 //      the Peripherals DOM is built at boot, not lazily on first tab visit.
 //   3. The Memory panel's Content column is ASCII in Byte mode and DEC (with
 //      a signed/unsigned switch) in Word mode; the Registers panel's
 //      Content (Dec) column has the same switch.
+//   4. Each MMIO register's name, with its access, labels its row in the
+//      Memory view ("LED (WO)", "DIP (RO)").
 
 const fs = require('fs');
 const path = require('path');
@@ -58,19 +60,19 @@ setTimeout(() => {
 
     // --- [2] A WO register write sticks and is visible immediately ---
     win.writeMem(0xFFFF0060, 0x05, 1); // LED = 0b101
-    win.eval("lastChangedMem=[{addr:0xFFFF0060,size:1}]; updateMemoryView(); updatePeripherals();");
+    win.eval("cpu.lastChangedMem=[{addr:0xFFFF0060,size:1}]; updateMemoryView(); updatePeripherals();");
     if (!doc.getElementById('led0').classList.contains('on')) throw new Error('LED0 should be on after writing 0x05 to PERIPH_LED');
     if (doc.getElementById('led1').classList.contains('on')) throw new Error('LED1 should be off after writing 0x05 to PERIPH_LED');
     if (!doc.getElementById('led2').classList.contains('on')) throw new Error('LED2 should be on after writing 0x05 to PERIPH_LED');
     console.log('✅ MMIO write to LED (WO) sticks and is visible without stepping');
 
     // --- [3] A RO register write is ignored ---
-    win.eval('dipSwitches = 0x1234;');
+    win.eval('board.dip = 0x1234;');
     win.writeMem(0xFFFF0064, 0xFFFF, 2);
-    if (win.eval('dipSwitches') !== 0x1234) throw new Error('DIP is read-only; a write to it must be ignored');
-    win.eval('pbState = 0x5;');
+    if (win.eval('board.dip') !== 0x1234) throw new Error('DIP is read-only; a write to it must be ignored');
+    win.eval('board.buttons = 0x5;');
     win.writeMem(0xFFFF0068, 0x7, 1);
-    if (win.eval('pbState') !== 0x5) throw new Error('PB is read-only; a write to it must be ignored');
+    if (win.eval('board.buttons') !== 0x5) throw new Error('PB is read-only; a write to it must be ignored');
     console.log('✅ MMIO write to DIP/PB (RO) is ignored, matching real hardware');
 
     // --- [4] The registry drives read-only-ness correctly, with the UART_RX exception ---
@@ -118,7 +120,7 @@ setTimeout(() => {
 
     // --- [8] Sign toggle changes the rendered decimal (Data segment, Word mode) ---
     win.memGo('data');
-    const dataBase = win.eval('dataBase');
+    const dataBase = win.eval('layout.dataBase');
     win.eval(`document.getElementById('memAddr').value='0x${dataBase.toString(16)}'; document.getElementById('memRows').value='2';`);
     win.writeMem(dataBase, 0xFFFFFFFF, 4);
     win.setMemViewMode('word');
@@ -133,7 +135,7 @@ setTimeout(() => {
     console.log('✅ Memory panel sign toggle switches Content (DEC) between signed and unsigned');
 
     // --- [9] Registers panel has the same sign toggle ---
-    win.eval('regs[5] = -1;');
+    win.eval('cpu.regs[5] = -1;');
     win.setRegDecSigned(true);
     win.updateRegisters();
     const regRowSigned = doc.querySelectorAll('#regBody tr')[5].querySelectorAll('td')[3].textContent.trim();

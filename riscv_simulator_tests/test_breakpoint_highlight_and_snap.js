@@ -65,11 +65,11 @@ setTimeout(async () => {
 
     console.log('\n--- Test 1: Snapping from a comment line ---');
     win.toggleBreakpoint(commentLine);
-    console.log('Breakpoints Set:', Array.from(win.breakpoints));
-    if (!win.breakpoints.has(instrLine)) {
-      throw new Error(`Expected breakpoint on line ${instrLine}, got ${Array.from(win.breakpoints)}`);
+    console.log('Breakpoints Set:', Array.from(win.run.breakpoints));
+    if (!win.run.breakpoints.has(instrLine)) {
+      throw new Error(`Expected breakpoint on line ${instrLine}, got ${Array.from(win.run.breakpoints)}`);
     }
-    if (win.breakpoints.has(commentLine)) {
+    if (win.run.breakpoints.has(commentLine)) {
       throw new Error(`Breakpoint should NOT be on line ${commentLine}!`);
     }
     console.log(`✅ Line ${commentLine} snapped to line ${instrLine}!`);
@@ -77,16 +77,16 @@ setTimeout(async () => {
     // Toggling .text snaps to the same instruction, which is already set, so it clears it
     console.log('\n--- Test 2: Toggling from the .text directive ---');
     win.toggleBreakpoint(textLine);
-    console.log('Breakpoints Set after toggle:', Array.from(win.breakpoints));
-    if (win.breakpoints.has(instrLine)) {
+    console.log('Breakpoints Set after toggle:', Array.from(win.run.breakpoints));
+    if (win.run.breakpoints.has(instrLine)) {
       throw new Error(`Expected breakpoint on line ${instrLine} to be toggled off`);
     }
     console.log(`✅ Toggling line ${textLine} toggled off line ${instrLine}!`);
 
     console.log('\n--- Test 3: Snapping from the label line ---');
     win.toggleBreakpoint(mainLine);
-    console.log('Breakpoints Set:', Array.from(win.breakpoints));
-    if (!win.breakpoints.has(instrLine)) {
+    console.log('Breakpoints Set:', Array.from(win.run.breakpoints));
+    if (!win.run.breakpoints.has(instrLine)) {
       throw new Error(`Expected breakpoint on line ${instrLine}`);
     }
     console.log(`✅ Line ${mainLine} snapped to line ${instrLine}!`);
@@ -98,17 +98,17 @@ setTimeout(async () => {
 
     // Run assemble and step to line 4
     win.assembleOnly();
-    console.log('Assembled machine code length:', win.machineCode.length);
+    console.log('Assembled machine code length:', win.program.machineCode.length);
 
     // Pause cancels the pending batch, so the run loop never reaches the exit
     // path that normally moves the highlight. Without this the editor keeps
     // pointing at the first instruction however far the program has run.
     console.log('\n--- Test 5: Pausing a run highlights where it stopped ---');
-    win.breakpoints.clear();
+    win.run.breakpoints.clear();
     await win.loadExample('dip_led');   // loops forever, so a run spans several batches
     win.assembleOnly();
-    const lineOfPc = () => win.eval('sourceLineForPc(pc)');
-    const firstLine = win.currentExecLine;
+    const lineOfPc = () => win.eval('sourceLineForPc(cpu.pc)');
+    const firstLine = win.run.currentLine;
     if (firstLine !== lineOfPc()) {
       throw new Error(`Expected the highlight to start on the first instruction, ` +
                       `got ${firstLine} against PC line ${lineOfPc()}`);
@@ -119,12 +119,12 @@ setTimeout(async () => {
       win.toggleRunPause();                                  // Run / Resume
       await new Promise(r => setTimeout(r, 20));             // let a batch land
       win.toggleRunPause();                                  // Pause
-      if (win.currentExecLine !== lineOfPc()) {
-        throw new Error(`Pause ${round + 1}: highlight on line ${win.currentExecLine}, ` +
+      if (win.run.currentLine !== lineOfPc()) {
+        throw new Error(`Pause ${round + 1}: highlight on line ${win.run.currentLine}, ` +
                         `PC on line ${lineOfPc()}`);
       }
-      stops.push(win.currentExecLine);
-      console.log(`  pause ${round + 1}: highlight and PC agree on line ${win.currentExecLine}`);
+      stops.push(win.run.currentLine);
+      console.log(`  pause ${round + 1}: highlight and PC agree on line ${win.run.currentLine}`);
     }
     if (stops.every(l => l === firstLine)) {
       throw new Error(`The highlight never left the first instruction (line ${firstLine})`);

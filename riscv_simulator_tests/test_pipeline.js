@@ -57,7 +57,7 @@ function assembleSrc(src) {
   win.setLanguageMode('asm');
   win.editor.value = src;
   win.assembleOnly();
-  return ev('assembled');
+  return ev('program.assembled');
 }
 
 function setPipe(on, haz, bp) {
@@ -70,7 +70,7 @@ function runPipe(cap = 20000) {
   ev('resetAll()');
   let c = 0;
   while (!ev('pipeDone()') && c++ < cap) ev('pipeStep()');
-  return ev('totalCycles');
+  return ev('cpu.totalCycles');
 }
 
 // Every kind of dependency the hazard unit handles, every instruction the
@@ -171,17 +171,17 @@ setTimeout(async () => {
     console.log('\n[1] With every hazard switch on, the pipeline matches the functional model');
     setPipe(false);
     if (!assembleSrc(HAZ)) throw new Error('hazard program did not assemble');
-    const done = ev('labels.done');
-    const fTrace = [JSON.stringify(Array.from(ev('regs')))];
+    const done = ev('program.labels.done');
+    const fTrace = [JSON.stringify(Array.from(ev('cpu.regs')))];
     let guard = 0;
-    while (ev('pc') !== done && guard++ < 2000) {
-      const n = ev('instructionCount');
+    while (ev('cpu.pc') !== done && guard++ < 2000) {
+      const n = ev('cpu.instructionCount');
       win.executeOne();
-      if (ev('instructionCount') !== n) fTrace.push(JSON.stringify(Array.from(ev('regs'))));
+      if (ev('cpu.instructionCount') !== n) fTrace.push(JSON.stringify(Array.from(ev('cpu.regs'))));
     }
-    const fRegs = Array.from(ev('regs'));
+    const fRegs = Array.from(ev('cpu.regs'));
     fRegs[17] = 10;   // the pipeline also runs done's li a7, 10
-    const fMem = ev('Array.from({length: 12}, (_, i) => readMem(labels.buf + 4 * i, 4, true))');
+    const fMem = ev('Array.from({length: 12}, (_, i) => readMem(program.labels.buf + 4 * i, 4, true))');
     const fFp = ev('Array.from(fpBits)');
 
     for (const stall of ['all switches on']) {
@@ -190,18 +190,18 @@ setTimeout(async () => {
       let bad = null, c = 0;
       while (!ev('pipeDone()') && c++ < 5000) {
         ev('pipeStep()');
-        const n = ev('instructionCount');
-        const r = JSON.stringify(Array.from(ev('regs')));
+        const n = ev('cpu.instructionCount');
+        const r = JSON.stringify(Array.from(ev('cpu.regs')));
         if (n < fTrace.length && r !== fTrace[n] && !bad) bad = `after instruction ${n}, cycle ${c}`;
       }
       check(`[${stall} stall] every retirement leaves the registers the functional model has`, !bad, bad);
       check(`[${stall} stall] the program exits through its ecall`, ev('pipe.exited') === true);
-      check(`[${stall} stall] final registers match`, JSON.stringify(Array.from(ev('regs'))) === JSON.stringify(fRegs));
+      check(`[${stall} stall] final registers match`, JSON.stringify(Array.from(ev('cpu.regs'))) === JSON.stringify(fRegs));
       check(`[${stall} stall] data memory matches`,
-        JSON.stringify(ev('Array.from({length: 12}, (_, i) => readMem(labels.buf + 4 * i, 4, true))')) === JSON.stringify(fMem));
+        JSON.stringify(ev('Array.from({length: 12}, (_, i) => readMem(program.labels.buf + 4 * i, 4, true))')) === JSON.stringify(fMem));
       check(`[${stall} stall] FP registers match`, JSON.stringify(ev('Array.from(fpBits)')) === JSON.stringify(fFp));
       check(`[${stall} stall] retired the same instructions, plus the two that exit`,
-        ev('instructionCount') === fTrace.length + 1, ev('instructionCount') + ' vs ' + (fTrace.length + 1));
+        ev('cpu.instructionCount') === fTrace.length + 1, ev('cpu.instructionCount') + ' vs ' + (fTrace.length + 1));
     }
 
     // The bundled examples, which poll peripherals forever: registers after
@@ -210,21 +210,21 @@ setTimeout(async () => {
     for (const f of ['HelloWorld.asm', 'DIP_to_LED.asm', 'Circle_delay_accel.asm', 'ImageDisplay_autoadvance_accel.asm']) {
       setPipe(false);
       assembleSrc(fs.readFileSync(path.join(exDir, f), 'utf8'));
-      const trace = [JSON.stringify(Array.from(ev('regs')))];
+      const trace = [JSON.stringify(Array.from(ev('cpu.regs')))];
       for (let i = 0; i < 1500; i++) {
-        const n = ev('instructionCount');
+        const n = ev('cpu.instructionCount');
         win.executeOne();
-        if (ev('instructionCount') !== n) trace.push(JSON.stringify(Array.from(ev('regs'))));
+        if (ev('cpu.instructionCount') !== n) trace.push(JSON.stringify(Array.from(ev('cpu.regs'))));
       }
       setPipe(true);
       ev('resetAll()');
       let bad = null, c = 0;
-      while (ev('instructionCount') < trace.length - 1 && c++ < 8000) {
+      while (ev('cpu.instructionCount') < trace.length - 1 && c++ < 8000) {
         ev('pipeStep()');
-        const n = ev('instructionCount');
-        if (JSON.stringify(Array.from(ev('regs'))) !== trace[n]) { bad = `instruction ${n}, cycle ${c}`; break; }
+        const n = ev('cpu.instructionCount');
+        if (JSON.stringify(Array.from(ev('cpu.regs'))) !== trace[n]) { bad = `instruction ${n}, cycle ${c}`; break; }
       }
-      check(`${f}: ${trace.length - 1} retirements match`, !bad && ev('instructionCount') === trace.length - 1, bad);
+      check(`${f}: ${trace.length - 1} retirements match`, !bad && ev('cpu.instructionCount') === trace.length - 1, bad);
     }
 
     // [2] The classic scenarios, cycle for cycle. A program of n instructions
@@ -233,26 +233,26 @@ setTimeout(async () => {
     const DATA = '.data\nbuf: .word 5, 0\n.text\nmain: la s0, buf\n';   // la is 2 instructions
     setPipe(true);
     assembleSrc(DATA + '    addi t0, x0, 1\n    addi t1, x0, 2\n    add t2, t0, t1\n');
-    check('5 instructions with only forwarded dependencies: 5 + 4 cycles', runPipe() === 9, ev('totalCycles'));
-    check('and the result is right', ev('regs[7]') === 3);
+    check('5 instructions with only forwarded dependencies: 5 + 4 cycles', runPipe() === 9, ev('cpu.totalCycles'));
+    check('and the result is right', ev('cpu.regs[7]') === 3);
 
     assembleSrc(DATA + '    lw t0, 0(s0)\n    add t1, t0, t0\n');
-    check('lw then a use: one stall cycle (4 + 4 + 1)', runPipe() === 9, ev('totalCycles'));
-    check('and the use gets the loaded value', ev('regs[6]') === 10);
+    check('lw then a use: one stall cycle (4 + 4 + 1)', runPipe() === 9, ev('cpu.totalCycles'));
+    check('and the use gets the loaded value', ev('cpu.regs[6]') === 10);
 
     assembleSrc(DATA + '    lw t0, 0(s0)\n    nop\n    add t1, t0, t0\n');
-    check('lw, one instruction, then a use: no stall', runPipe() === 9, ev('totalCycles'));
+    check('lw, one instruction, then a use: no stall', runPipe() === 9, ev('cpu.totalCycles'));
 
     assembleSrc(DATA + '    beq x0, x0, t\n    addi a0, x0, 1\n    addi a0, x0, 2\nt:  addi a1, x0, 3\n');
     check('a taken branch flushes two: 4 retire, in 4 + 4 + 2 cycles',
-      runPipe() === 10 && ev('instructionCount') === 4, ev('totalCycles') + ' cycles, ' + ev('instructionCount') + ' retired');
-    check('and neither flushed instruction wrote', ev('regs[10]') === 0 && ev('regs[11]') === 3);
+      runPipe() === 10 && ev('cpu.instructionCount') === 4, ev('cpu.totalCycles') + ' cycles, ' + ev('cpu.instructionCount') + ' retired');
+    check('and neither flushed instruction wrote', ev('cpu.regs[10]') === 0 && ev('cpu.regs[11]') === 3);
 
     assembleSrc(DATA + '    bne x0, x0, t\n    addi a0, x0, 1\nt:  addi a1, x0, 3\n');
-    check('a branch not taken costs nothing', runPipe() === 9, ev('totalCycles'));
+    check('a branch not taken costs nothing', runPipe() === 9, ev('cpu.totalCycles'));
 
     assembleSrc(DATA + '    jal ra, t\n    addi a0, x0, 1\nt:  addi a1, x0, 3\n');
-    check('jal is resolved in Execute too: two flushed', runPipe() === 10, ev('totalCycles'));
+    check('jal is resolved in Execute too: two flushed', runPipe() === 10, ev('cpu.totalCycles'));
 
     // The hazard unit's own signals.
     assembleSrc(DATA + '    addi t0, x0, 7\n    add t1, t0, x0\n    add t2, t0, x0\n    add t3, t0, x0\n');
@@ -262,83 +262,83 @@ setTimeout(async () => {
     check('distance 1: ForwardAE = 10, from M', sigs.some(s => s.forwardAE === '10'));
     check('distance 2: ForwardAE = 01, from W', sigs.some(s => s.forwardAE === '01'));
     check('distance 3: Forward1D, W to D', sigs.some(s => s.forward1D));
-    check('all three read 7', ev('regs[6]') === 7 && ev('regs[7]') === 7 && ev('regs[28]') === 7);
+    check('all three read 7', ev('cpu.regs[6]') === 7 && ev('cpu.regs[7]') === 7 && ev('cpu.regs[28]') === 7);
 
     assembleSrc(DATA + '    lw t0, 0(s0)\n    sw t0, 4(s0)\n');
     setPipe(true);
     ev('resetAll()');
     let sawM = false;
     while (!ev('pipeDone()')) { if (ev('pipeEvaluate().forwardM')) sawM = true; ev('pipeStep()'); }
-    check('lw then sw of the loaded value: no stall, ForwardM copies it', ev('totalCycles') === 8 && sawM, ev('totalCycles'));
-    check('and memory gets the loaded word', ev('readMem(labels.buf + 4, 4, true)') === 5);
+    check('lw then sw of the loaded value: no stall, ForwardM copies it', ev('cpu.totalCycles') === 8 && sawM, ev('cpu.totalCycles'));
+    check('and memory gets the loaded word', ev('readMem(program.labels.buf + 4, 4, true)') === 5);
     assembleSrc(DATA + '    lw t0, 0(s0)\n    sw x0, 4(t0)\n');
-    check('lw then sw using it as the address: that one stalls', runPipe() === 9, ev('totalCycles'));
+    check('lw then sw using it as the address: that one stalls', runPipe() === 9, ev('cpu.totalCycles'));
     assembleSrc(DATA + '    lw x0, 0(s0)\n    add t1, x0, x0\n');
-    check('a load into x0 stalls nothing', runPipe() === 8, ev('totalCycles'));
+    check('a load into x0 stalls nothing', runPipe() === 8, ev('cpu.totalCycles'));
     assembleSrc(DATA + '    lw t0, 0(s0)\n    lui t1, 0x28\n');   // lui's imm puts x5 in its rs1 field
-    check('nor does an instruction whose register field only looks like a match', runPipe() === 8, ev('totalCycles'));
+    check('nor does an instruction whose register field only looks like a match', runPipe() === 8, ev('cpu.totalCycles'));
 
     // [3] Each switch, turned off, gives the answer that hardware would.
     console.log('\n[3] Each hazard switch off gives the wrong answer the hardware would');
     assembleSrc(DATA + '    addi t0, x0, 5\n    add t1, t0, t0\n');
     setPipe(true, { fwdE: false });
     runPipe();
-    check('no E forwarding: add reads t0 before addi has written it (0)', ev('regs[6]') === 0, ev('regs[6]'));
+    check('no E forwarding: add reads t0 before addi has written it (0)', ev('cpu.regs[6]') === 0, ev('cpu.regs[6]'));
 
     assembleSrc(DATA + '    addi t0, x0, 5\n    nop\n    nop\n    add t1, t0, t0\n');
     setPipe(true, { fwdD: false });
     runPipe();
-    check('no W-to-D forwarding: distance 3 reads the old register (0)', ev('regs[6]') === 0, ev('regs[6]'));
+    check('no W-to-D forwarding: distance 3 reads the old register (0)', ev('cpu.regs[6]') === 0, ev('cpu.regs[6]'));
     setPipe(true);
     runPipe();
-    check('with it: 10', ev('regs[6]') === 10);
+    check('with it: 10', ev('cpu.regs[6]') === 10);
 
     assembleSrc(DATA + '    lw t0, 0(s0)\n    add t1, t0, t0\n');
     setPipe(true, { lwStall: false });
     runPipe();
-    const addr = ev('labels.buf');
+    const addr = ev('program.labels.buf');
     check('no load-use stall: add is forwarded the address from ALUResultM, not the data',
-      (ev('regs[6]') >>> 0) === ((2 * addr) >>> 0), ev('regs[6]'));
+      (ev('cpu.regs[6]') >>> 0) === ((2 * addr) >>> 0), ev('cpu.regs[6]'));
 
     assembleSrc(DATA + '    lw t0, 0(s0)\n    sw t0, 4(s0)\n');
     setPipe(true, { fwdM: false });
     runPipe();
     check('no mem-mem copy: sw is forwarded the load\'s address from ALUResultM and stores that',
-      ev('readMem(labels.buf + 4, 4, true)') === ev('labels.buf'), ev('readMem(labels.buf + 4, 4, true)'));
+      ev('readMem(program.labels.buf + 4, 4, true)') === ev('program.labels.buf'), ev('readMem(program.labels.buf + 4, 4, true)'));
 
     assembleSrc(DATA + '    beq x0, x0, t\n    addi a0, a0, 1\n    addi a0, a0, 1\nt:  addi a1, x0, 3\n');
     setPipe(true, { flush: false });
     runPipe();
-    check('no branch flush: both instructions behind a taken branch execute (a0 = 2)', ev('regs[10]') === 2, ev('regs[10]'));
+    check('no branch flush: both instructions behind a taken branch execute (a0 = 2)', ev('cpu.regs[10]') === 2, ev('cpu.regs[10]'));
 
     // [3c] Branch prediction.
     console.log('\n[3c] Branch prediction');
     for (const bp of [{ on: true }, { on: true, bits: 2 }, { on: true, entries: 4 }]) {
       setPipe(false);
       assembleSrc(HAZ);
-      const tr = [JSON.stringify(Array.from(ev('regs')))];
-      while (ev('pc') !== ev('labels.done')) { const n = ev('instructionCount'); win.executeOne(); if (ev('instructionCount') !== n) tr.push(JSON.stringify(Array.from(ev('regs')))); }
+      const tr = [JSON.stringify(Array.from(ev('cpu.regs')))];
+      while (ev('cpu.pc') !== ev('program.labels.done')) { const n = ev('cpu.instructionCount'); win.executeOne(); if (ev('cpu.instructionCount') !== n) tr.push(JSON.stringify(Array.from(ev('cpu.regs')))); }
       setPipe(true, {}, bp);
       ev('resetAll()');
       let bad = null, c = 0;
       while (!ev('pipeDone()') && c++ < 5000) {
         ev('pipeStep()');
-        const n = ev('instructionCount');
-        if (n < tr.length && JSON.stringify(Array.from(ev('regs'))) !== tr[n] && !bad) bad = `instruction ${n}, cycle ${c}`;
+        const n = ev('cpu.instructionCount');
+        if (n < tr.length && JSON.stringify(Array.from(ev('cpu.regs'))) !== tr[n] && !bad) bad = `instruction ${n}, cycle ${c}`;
       }
       check(`${JSON.stringify(bp)}: every retirement matches the functional model`, !bad && ev('pipe.exited'), bad);
     }
     for (const f of ['HelloWorld.asm', 'DIP_to_LED.asm', 'Circle_delay_accel.asm']) {
       setPipe(false);
       assembleSrc(fs.readFileSync(path.resolve(__dirname, '../examples/asm', f), 'utf8'));
-      const tr = [JSON.stringify(Array.from(ev('regs')))];
-      for (let i = 0; i < 1500; i++) { const n = ev('instructionCount'); win.executeOne(); if (ev('instructionCount') !== n) tr.push(JSON.stringify(Array.from(ev('regs')))); }
+      const tr = [JSON.stringify(Array.from(ev('cpu.regs')))];
+      for (let i = 0; i < 1500; i++) { const n = ev('cpu.instructionCount'); win.executeOne(); if (ev('cpu.instructionCount') !== n) tr.push(JSON.stringify(Array.from(ev('cpu.regs')))); }
       setPipe(true, {}, { on: true, bits: 2, entries: 4 });
       ev('resetAll()');
       let bad = null, c = 0;
-      while (ev('instructionCount') < tr.length - 1 && c++ < 8000) {
+      while (ev('cpu.instructionCount') < tr.length - 1 && c++ < 8000) {
         ev('pipeStep()');
-        if (JSON.stringify(Array.from(ev('regs'))) !== tr[ev('instructionCount')]) { bad = `instruction ${ev('instructionCount')}`; break; }
+        if (JSON.stringify(Array.from(ev('cpu.regs'))) !== tr[ev('cpu.instructionCount')]) { bad = `instruction ${ev('cpu.instructionCount')}`; break; }
       }
       check(`${f}, 2-bit, 4 entries: ${tr.length - 1} retirements match`, !bad, bad);
     }
@@ -346,14 +346,14 @@ setTimeout(async () => {
     const LOOP = DATA + '    li t0, 10\nloop: addi t0, t0, -1\n    bnez t0, loop\n    addi a0, x0, 1\n';
     assembleSrc(LOOP);
     setPipe(true);
-    check('no prediction: nine taken branches cost two cycles each (24 + 4 + 18)', runPipe() === 46, ev('totalCycles'));
+    check('no prediction: nine taken branches cost two cycles each (24 + 4 + 18)', runPipe() === 46, ev('cpu.totalCycles'));
     setPipe(true, {}, { on: true });
     check('1-bit: the first taken and the exit mispredict (24 + 4 + 4)', runPipe() === 32 && ev('pipe.mispredicts') === 2,
-      ev('totalCycles') + ' cycles, ' + ev('pipe.mispredicts') + ' mispredicts');
-    check('and the loop gives the right answer', ev('regs[5]') === 0 && ev('regs[10]') === 1);
+      ev('cpu.totalCycles') + ' cycles, ' + ev('pipe.mispredicts') + ' mispredicts');
+    check('and the loop gives the right answer', ev('cpu.regs[5]') === 0 && ev('cpu.regs[10]') === 1);
     setPipe(true, {}, { on: true, bits: 2 });
     check('2-bit from 00: two to warm up, one at the exit (24 + 4 + 6)', runPipe() === 34 && ev('pipe.mispredicts') === 3,
-      ev('totalCycles') + ' cycles, ' + ev('pipe.mispredicts') + ' mispredicts');
+      ev('cpu.totalCycles') + ' cycles, ' + ev('pipe.mispredicts') + ' mispredicts');
 
     // An inner loop entered twice: 1-bit pays at every exit and re-entry, 2-bit only at exits.
     const NEST = DATA + '    li s1, 2\nouter: li t0, 4\ninner: addi t0, t0, -1\n    bnez t0, inner\n    addi s1, s1, -1\n    bnez s1, outer\n';
@@ -366,7 +366,7 @@ setTimeout(async () => {
 
     assembleSrc(DATA + '    li t0, 3\nl:  addi t0, t0, -1\n    beqz t0, e\n    j l\ne:  addi a0, x0, 1\n');
     setPipe(true, {}, { on: true }); runPipe();
-    check('a j backwards is learnt: it mispredicts once, then is free', ev('regs[10]') === 1 && ev('pipe.mispredicts') === 2,
+    check('a j backwards is learnt: it mispredicts once, then is free', ev('cpu.regs[10]') === 1 && ev('pipe.mispredicts') === 2,
       ev('pipe.mispredicts'));
 
     assembleSrc(DATA + '    jal ra, f\n    jal ra, f\n    j e\nf:  ret\ne:  addi a0, x0, 1\n');
@@ -374,7 +374,7 @@ setTimeout(async () => {
     const seen = [];
     ev('resetAll()');
     while (!ev('pipeDone()')) { const sg = JSON.parse(ev('JSON.stringify(pipeEvaluate())')); if (sg.btaMiss) seen.push(sg.pcNextE); ev('pipeStep()'); }
-    check('a ret back to a different caller is a BTA misprediction', seen.length >= 1 && ev('regs[10]') === 1, JSON.stringify(seen));
+    check('a ret back to a different caller is a BTA misprediction', seen.length >= 1 && ev('cpu.regs[10]') === 1, JSON.stringify(seen));
 
     // Four entries, and a loop body five words long: the branch shares its
     // entry with the loop's first instruction, and they overwrite each other.
@@ -386,7 +386,7 @@ setTimeout(async () => {
     const m4 = ev('pipe.mispredicts');
     check('16 entries: the loop mispredicts only on entry and exit', m16 === 2, m16);
     check('4 entries, untagged: the branch and the addi sharing its entry ping-pong, twice an iteration',
-      m4 > 2 * 3 && ev('regs[10]') === 1 && ev('regs[5]') === 0, m4);
+      m4 > 2 * 3 && ev('cpu.regs[10]') === 1 && ev('cpu.regs[5]') === 0, m4);
 
     assembleSrc(LOOP);
     setPipe(true, {}, { on: true });
@@ -423,46 +423,46 @@ setTimeout(async () => {
     setPipe(true);
     assembleSrc(HAZ);
     ev('resetAll()');
-    const fresh = ev('JSON.stringify({r: Array.from(regs), pc, c: totalCycles, i: instructionCount})');
+    const fresh = ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount})');
     const states = [];
     for (let i = 0; i < 40; i++) {
       win.stepOnce();
-      states.push(ev('JSON.stringify({r: Array.from(regs), pc, c: totalCycles, i: instructionCount, m: readMem(labels.buf + 12, 4, true), D: pipe.D && pipe.D.seq, W: pipe.W && pipe.W.seq})'));
+      states.push(ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount, m: readMem(program.labels.buf + 12, 4, true), D: pipe.D && pipe.D.seq, W: pipe.W && pipe.W.seq})'));
     }
-    check('each Step is one cycle', ev('totalCycles') === 40);
+    check('each Step is one cycle', ev('cpu.totalCycles') === 40);
     check('Statement Stepping does not change that', (() => {
-      ev('statementStepping = true'); const c0 = ev('totalCycles'); win.stepOnce(); const c1 = ev('totalCycles');
-      ev('statementStepping = false'); win.stepBack(); return c1 === c0 + 1;
+      ev('run.statementStepping = true'); const c0 = ev('cpu.totalCycles'); win.stepOnce(); const c1 = ev('cpu.totalCycles');
+      ev('run.statementStepping = false'); win.stepBack(); return c1 === c0 + 1;
     })());
     for (let i = 0; i < 20; i++) win.stepBack();
     check('Back 20 returns to exactly the state 20 cycles in',
-      ev('JSON.stringify({r: Array.from(regs), pc, c: totalCycles, i: instructionCount, m: readMem(labels.buf + 12, 4, true), D: pipe.D && pipe.D.seq, W: pipe.W && pipe.W.seq})') === states[19]);
+      ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount, m: readMem(program.labels.buf + 12, 4, true), D: pipe.D && pipe.D.seq, W: pipe.W && pipe.W.seq})') === states[19]);
     for (let i = 0; i < 20; i++) win.stepOnce();
     check('and stepping forward again repeats the same 20 cycles',
-      ev('JSON.stringify({r: Array.from(regs), pc, c: totalCycles, i: instructionCount, m: readMem(labels.buf + 12, 4, true), D: pipe.D && pipe.D.seq, W: pipe.W && pipe.W.seq})') === states[39]);
+      ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount, m: readMem(program.labels.buf + 12, 4, true), D: pipe.D && pipe.D.seq, W: pipe.W && pipe.W.seq})') === states[39]);
     for (let i = 0; i < 40; i++) win.stepBack();
     check('Back to the start restores reset state',
-      ev('JSON.stringify({r: Array.from(regs), pc, c: totalCycles, i: instructionCount})') === fresh);
+      ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount})') === fresh);
 
     ev('resetAll()');
     win.runProgram();
-    for (let i = 0; i < 100 && ev('running'); i++) await sleep(20);
+    for (let i = 0; i < 100 && ev('run.running'); i++) await sleep(20);
     check('Run finishes the program', ev('programFinished') === true);
-    check('with the same registers as stepping', JSON.stringify(Array.from(ev('regs'))) === JSON.stringify(fRegs));
+    check('with the same registers as stepping', JSON.stringify(Array.from(ev('cpu.regs'))) === JSON.stringify(fRegs));
     check('and the stats bar shows CPI', /CPI: \d+\.\d\d/.test(doc.getElementById('statsBar').textContent),
       doc.getElementById('statsBar').textContent);
 
     const overLine = win.editor.value.split('\n').findIndex(l => /^over:/.test(l)) + 2;   // jal ra, func
     ev('resetAll()');
-    ev(`breakpoints = new Set([${overLine}])`);
+    ev(`run.breakpoints = new Set([${overLine}])`);
     win.runProgram();
-    for (let i = 0; i < 100 && ev('running'); i++) await sleep(20);
+    for (let i = 0; i < 100 && ev('run.running'); i++) await sleep(20);
     check('a breakpoint stops the run with its instruction in Execute',
       !ev('programFinished') && ev('sourceLineForPc(pipe.E.pc)') === overLine, ev('pipe.E && sourceLineForPc(pipe.E.pc)'));
-    ev('breakpoints = new Set()');
+    ev('run.breakpoints = new Set()');
 
     ev('resetAll()');
-    while (!ev('programFinished') && ev('totalCycles') < 5000) win.stepOnce();
+    while (!ev('programFinished') && ev('cpu.totalCycles') < 5000) win.stepOnce();
     check('stepping to the end marks the program finished', ev('programFinished') === true && ev('pipe.exited') === true);
     check('Step is then disabled', doc.getElementById('btnStep').disabled === true);
     win.stepBack();
@@ -521,7 +521,7 @@ setTimeout(async () => {
       doc.querySelectorAll('#dpEnc .pdp-enc-row').length === 5 &&
       doc.querySelector('#dpEnc .pdp-enc-head b').textContent === 'W');
     win.dpNext();
-    check('▶ clocks exactly one cycle', ev('totalCycles') === 1);
+    check('▶ clocks exactly one cycle', ev('cpu.totalCycles') === 1);
     win.dpNext(); win.dpNext();
     check('and the new cycle is drawn at once, with no phases to step through, and no second cycle count in the header',
       lit() > 20 && doc.getElementById('dpPhase').textContent === '' &&
@@ -531,13 +531,13 @@ setTimeout(async () => {
       doc.getElementById('dpCaption').textContent.slice(0, 200));
     check('and the stall lines are lit', ev('dpSvg().querySelectorAll(".pl-lit[data-pl=H]").length') > 0);
     win.dpPrev();
-    check('◀ goes back one cycle', ev('totalCycles') === 3);
+    check('◀ goes back one cycle', ev('cpu.totalCycles') === 3);
     win.dpPlay();
     await sleep(2100);
-    const played = ev('totalCycles');
+    const played = ev('cpu.totalCycles');
     win.dpPlay();
     await sleep(1000);
-    check('▶▶ keeps clocking until pressed again', played >= 5 && ev('totalCycles') === played, played + ' then ' + ev('totalCycles'));
+    check('▶▶ keeps clocking until pressed again', played >= 5 && ev('cpu.totalCycles') === played, played + ' then ' + ev('cpu.totalCycles'));
 
     check('the strip header shows the pipeline controls: settings and a Diagram/Timeline switch',
       !!doc.getElementById('dpPipeCfgBtn') && doc.getElementById('dpViewDiagram').classList.contains('active'));
@@ -553,18 +553,18 @@ setTimeout(async () => {
       doc.querySelectorAll('#dpTimeline tbody tr:not(.pdp-tl-gone)').length >= 1 &&
       doc.querySelectorAll('#dpTimeline tbody tr:not(.pdp-tl-gone)').length <= 5);
     check('Timeline replaces the diagram', doc.body.classList.contains('dp-view-timeline'));
-    const cyc0 = ev('totalCycles');
+    const cyc0 = ev('cpu.totalCycles');
     win.dpNext();
-    check('in the timeline ▶ clocks a cycle', ev('totalCycles') === cyc0 + 1);
+    check('in the timeline ▶ clocks a cycle', ev('cpu.totalCycles') === cyc0 + 1);
     const rows = doc.querySelectorAll('#dpTimeline tbody tr').length;
     check('one row per instruction seen', rows >= 5, String(rows));
     check('the stalled cycle is marked', doc.querySelectorAll('#dpTimeline .pdp-tl-stall').length >= 2);
     win.dpPrev();
-    check('and ◀ steps back a cycle', ev('totalCycles') === cyc0);
+    check('and ◀ steps back a cycle', ev('cpu.totalCycles') === cyc0);
     const liveTh = doc.querySelector('#dpTimeline th.pdp-tl-live');
     check('the live column is headed "next", so the numbered cycles match the log',
       liveTh && liveTh.textContent === 'next' &&
-      Number(liveTh.previousElementSibling.textContent) === ev('totalCycles'),
+      Number(liveTh.previousElementSibling.textContent) === ev('cpu.totalCycles'),
       liveTh && liveTh.previousElementSibling.textContent);
     for (let i = 0; i < 8; i++) win.dpNext();
     const tlRows = () => Array.from(doc.querySelectorAll('#dpTimeline tbody tr'));
@@ -604,11 +604,11 @@ setTimeout(async () => {
     ev("setPanelVisible('peripherals', true); setMobileTab('peripherals')");
     check('the tab strip\'s 🔍 filters the tabs that have rows, and is gone from the others', regsFind && findBtn.hidden);
     ev("setMobileTab('datapath')");
-    const cyc1 = ev('totalCycles');
+    const cyc1 = ev('cpu.totalCycles');
     barBtns()[1].click();
-    check('the floating ▶ clocks one cycle', ev('totalCycles') === cyc1 + 1);
+    check('the floating ▶ clocks one cycle', ev('cpu.totalCycles') === cyc1 + 1);
     barBtns()[0].click();
-    check('and ◀ goes back one', ev('totalCycles') === cyc1);
+    check('and ◀ goes back one', ev('cpu.totalCycles') === cyc1);
     win.dpSetView('timeline');
     const phoneRows = Array.from(doc.querySelectorAll('#dpTimeline tbody tr'));
     const firstCells = phoneRows.map(tr => Array.from(tr.children).slice(1).findIndex(td => td.textContent));
@@ -628,9 +628,9 @@ setTimeout(async () => {
     check('single-cycle, same: the toolbar\'s Back and Step, with no ▶▶',
       !bar.hidden && bar.dataset.mode === 'tb' && barBtns()[1].textContent === '⏭' && barBtns()[2].hidden,
       `hidden=${bar.hidden} mode=${bar.dataset.mode} tab=${ev('mobileTab')} arch=${ev('jsArch')} dpVis=${ev('panelDock.datapath.visible')}`);
-    const pc0 = ev('pc');
+    const pc0 = ev('cpu.pc');
     barBtns()[1].click();
-    check('and ⏭ steps an instruction', ev('pc') !== pc0 && ev('totalCycles') === 1);
+    check('and ⏭ steps an instruction', ev('cpu.pc') !== pc0 && ev('cpu.totalCycles') === 1);
     ev('floatStepsWanted = false');
     win.innerWidth = 1400;
     ev('applyPanelDock(); updateDatapathPanelAvailability(); updateFloatSteps()');
@@ -647,19 +647,19 @@ setTimeout(async () => {
     // Switching back is a reset; the single-cycle strip returns.
     win.pipeSetMode(false);
     check('single-cycle again: reset, and the single-cycle drawing is back',
-      ev('totalCycles') === 0 && !doc.body.classList.contains('dp-pipe') && ev('dpSvg().id') === 'dpSvg');
+      ev('cpu.totalCycles') === 0 && !doc.body.classList.contains('dp-pipe') && ev('dpSvg().id') === 'dpSvg');
     check('with no stage marks left', doc.querySelectorAll('.cm-pipe-stage').length === 0);
     check('and the CPI readout gone', !/CPI/.test(doc.getElementById('statsBar').textContent));
 
     // [6] The three JS microarchitectures.
     console.log('\n[6] Single-cycle, multi-cycle and pipelined cycle counts');
     const THREE = '.data\nbuf: .word 5\n.text\nmain: la s0, buf\n    lw t0, 0(s0)\n    sw t0, 4(s0)\n    addi t1, t0, 1\n';
-    const cyclesAfter = n => { ev('resetAll()'); for (let i = 0; i < n; i++) win.stepOnce(); return ev('totalCycles'); };
+    const cyclesAfter = n => { ev('resetAll()'); for (let i = 0; i < n; i++) win.stepOnce(); return ev('cpu.totalCycles'); };
     ev("setJsArch('single')");
     assembleSrc(THREE);
-    check('single-cycle: one cycle per instruction', cyclesAfter(5) === 5 && ev('instructionCount') === 5);
+    check('single-cycle: one cycle per instruction', cyclesAfter(5) === 5 && ev('cpu.instructionCount') === 5);
     ev("setJsArch('multi')");
-    check('multi-cycle: each category\'s count from the table (load 2, store 2)', cyclesAfter(5) === 7, String(ev('totalCycles')));
+    check('multi-cycle: each category\'s count from the table (load 2, store 2)', cyclesAfter(5) === 7, String(ev('cpu.totalCycles')));
     check('with its own tag and a CPI', /Cycles: 7 multi/.test(doc.getElementById('statsBar').textContent) &&
       /CPI: 1\.40/.test(doc.getElementById('statsBar').textContent), doc.getElementById('statsBar').textContent);
     win.updateToolbarButtonStates();
@@ -675,20 +675,20 @@ setTimeout(async () => {
     console.log('\n[7] Statement Stepping in the pipeline');
     ev("setJsArch('pipe')");
     assembleSrc(THREE);
-    ev('resetAll(); statementStepping = true');
-    const s0buf = ev("labels['buf']") >>> 0;
+    ev('resetAll(); run.statementStepping = true');
+    const s0buf = ev("program.labels['buf']") >>> 0;
     win.stepOnce();
     check('stepping over la (two instructions): 6 cycles, s0 set, the lw after it not yet retired',
-      ev('totalCycles') === 6 && (ev('regs[8]') >>> 0) === s0buf && ev('regs[5]') === 0,
-      `cycles=${ev('totalCycles')} s0=${(ev('regs[8]') >>> 0).toString(16)} t0=${ev('regs[5]')}`);
+      ev('cpu.totalCycles') === 6 && (ev('cpu.regs[8]') >>> 0) === s0buf && ev('cpu.regs[5]') === 0,
+      `cycles=${ev('cpu.totalCycles')} s0=${(ev('cpu.regs[8]') >>> 0).toString(16)} t0=${ev('cpu.regs[5]')}`);
     win.stepOnce();
     check('the next step retires the lw, one cycle later, and t0 holds the loaded 5',
-      ev('totalCycles') === 7 && ev('regs[5]') === 5, `cycles=${ev('totalCycles')} t0=${ev('regs[5]')}`);
+      ev('cpu.totalCycles') === 7 && ev('cpu.regs[5]') === 5, `cycles=${ev('cpu.totalCycles')} t0=${ev('cpu.regs[5]')}`);
     win.stepBack();
-    check('Back undoes the whole statement step', ev('totalCycles') === 6 && ev('regs[5]') === 0);
+    check('Back undoes the whole statement step', ev('cpu.totalCycles') === 6 && ev('cpu.regs[5]') === 0);
     win.dpNext();
-    check('the strip\'s ▶ still clocks one cycle with Statement Stepping on', ev('totalCycles') === 7);
-    ev("statementStepping = false; setJsArch('single')");
+    check('the strip\'s ▶ still clocks one cycle with Statement Stepping on', ev('cpu.totalCycles') === 7);
+    ev("run.statementStepping = false; setJsArch('single')");
 
     // [8] The clock: CLK_DIV_BITS as on the board, and Run paced to it.
     console.log('\n[8] The clock, and real time');
@@ -709,14 +709,14 @@ setTimeout(async () => {
     ev('resetAll()');
     win.runProgram();
     await sleep(600);
-    const paced = ev('totalCycles');
+    const paced = ev('cpu.totalCycles');
     win.toggleRunPause();
     check('Real time at 381 Hz: about 229 cycles in 0.6 s', paced >= 120 && paced <= 300, String(paced));
     win.setRunPace('max');
     ev('resetAll()');
     win.runProgram();
     await sleep(300);
-    const fast = ev('totalCycles');
+    const fast = ev('cpu.totalCycles');
     win.toggleRunPause();
     check('Max speed runs far past it', fast > 50000, String(fast));
     win.setClkDivBits(5);

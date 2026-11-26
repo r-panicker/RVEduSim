@@ -1,10 +1,8 @@
 // The RV32GC instruction table, the pseudo-instruction expansions and the
 // register names.
 
-import { parseImm } from './04-registers';
-
-// The assembler's labels, defined by 03-state.ts.
-declare let labels: Record<string, number>;
+import { parseImm } from '../asm/operands';
+import { program } from '../machine/state';
 
 // One instruction's encoding: its format and the fixed fields of that format.
 export interface InstrDef {
@@ -203,7 +201,7 @@ export const PSEUDO_INSTRUCTIONS: Record<string, PseudoExpansion> = {
     // sizes this line, so it is always the two-instruction form, as GNU
     // as makes it. Otherwise the two passes could disagree on its size.
     const op = String(operand).trim();
-    const isLabel = labels[op] !== undefined || labels[op.toLowerCase()] !== undefined;
+    const isLabel = program.labels[op] !== undefined || program.labels[op.toLowerCase()] !== undefined;
     if (!isLabel && imm >= -2048 && imm <= 2047) return [`addi ${rd}, x0, ${imm}`];
     let upper = imm >>> 12;
     let lower = imm & 0xFFF;

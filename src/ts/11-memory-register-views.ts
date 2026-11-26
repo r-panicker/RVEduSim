@@ -7,7 +7,7 @@ let memViewMode = 'word'; // 'word' = one whole 32-bit word per 4-byte group (de
 let memDecSigned = true; // sign of the Word-mode Content(DEC) column; irrelevant in Byte mode (always ASCII)
 
 function isCodeSegmentAddress(addr) {
-  return (addr >= baseAddress && addr < dataBase) || (activeMemRegion === 'code' && addr < dataBase);
+  return (addr >= layout.baseAddress && addr < layout.dataBase) || (activeMemRegion === 'code' && addr < layout.dataBase);
 }
 
 function updateMemoryView() {
@@ -19,16 +19,16 @@ function updateMemoryView() {
   const addrStr = addrEl.value;
   const rows = parseInt(rowsEl.value) || 16;
   let addr = parseInt(addrStr, 16);
-  if (isNaN(addr)) addr = (activeMemRegion === 'stack' || currentMemSegment === 'stack') ? stackBase : baseAddress;
+  if (isNaN(addr)) addr = (activeMemRegion === 'stack' || ui.memSegment === 'stack') ? layout.stackBase : layout.baseAddress;
   addr = (addr >>> 0) & ~0x3;  // Align to 4-byte (one word) boundary unsigned
 
-  const isStackView = (activeMemRegion === 'stack' || currentMemSegment === 'stack');
+  const isStackView = (activeMemRegion === 'stack' || ui.memSegment === 'stack');
   const wordMode = (memViewMode === 'word');
 
   // Build address -> label-name map (same approach as the disassembly view)
   const labelsByAddr = {};
-  if (labels && typeof labels === 'object') {
-    for (const [name, addr] of Object.entries(labels)) {
+  if (program.labels && typeof program.labels === 'object') {
+    for (const [name, addr] of Object.entries(program.labels)) {
       if (typeof addr === 'number' && !isNaN(addr)) {
         const uaddr = addr >>> 0;
         if (!labelsByAddr[uaddr]) labelsByAddr[uaddr] = [];
@@ -148,7 +148,7 @@ function updateMemoryView() {
           const offset = (wordStart + i) >>> 0;
           const bv = readMem(offset, 1, true) & 0xFF;
           wordVal |= bv << (i * 8);
-          if (lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size)) isChanged = true;
+          if (cpu.lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size)) isChanged = true;
         }
         const cls = isChanged ? ' changed' : '';
         const wordHex = (wordVal >>> 0).toString(16).padStart(8, '0');
@@ -176,7 +176,7 @@ function updateMemoryView() {
         const offset = (wordStart + i) >>> 0;
         const val = readMem(offset, 1, true) & 0xFF;
         hexText += val.toString(16).padStart(2, '0');
-        const isChanged = lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size);
+        const isChanged = cpu.lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size);
         const cls = isChanged ? ' changed' : '';
         if (editable) {
           groupBytes += `<span class="val${cls}" contenteditable="true" spellcheck="false" data-addr="${offset}" data-size="1" data-old="${val.toString(16).padStart(2, '0')}" onfocus="startMemByteEdit(this)" ondblclick="startMemWordEdit(event,${offset})" onkeydown="handleMemByteEditKey(event,this)" onblur="commitMemByteEdit(this)" title="Single-click: edit byte | Double-click: edit word">${val.toString(16).padStart(2, '0')}</span>`;
@@ -209,7 +209,7 @@ function updateMemoryView() {
         offsets.push(offset);
         const bv = getMemByte(offset);
         wordVal |= bv << (c * 8);
-        if (lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size)) isChanged = true;
+        if (cpu.lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size)) isChanged = true;
         if (!replayed && !isCodeSegmentAddress(offset)) allReadonly = false;
       }
       const cls = isChanged ? ' changed' : '';
@@ -236,7 +236,7 @@ function updateMemoryView() {
         const val = getMemByte(offset);
         hexText += val.toString(16).padStart(2, '0');
         asciiText += (val >= 32 && val <= 126) ? String.fromCharCode(val) : '.';
-        const isChanged = lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size);
+        const isChanged = cpu.lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size);
         const cls = isChanged ? ' changed' : '';
         const isCodeSegment = stateIsReplayed() || isCodeSegmentAddress(offset);
 
@@ -373,7 +373,7 @@ function commitMemByteEdit(el) {
     return;
   }
   writeMemFromPanel(addr, val, 1);
-  lastChangedMem = [{ addr, size: 1 }];
+  cpu.lastChangedMem = [{ addr, size: 1 }];
   updateMemoryView();
   updatePeripherals();
   setStatus('Memory updated at 0x' + addr.toString(16).padStart(8, '0'), 'success');
@@ -538,7 +538,7 @@ function commitMemWordEdit(overlay) {
   const spans = overlay._spans;
 
   writeMemFromPanel(addr, val, 4);
-  lastChangedMem = [{ addr, size: 4 }];
+  cpu.lastChangedMem = [{ addr, size: 4 }];
 
   // Update the individual byte spans visually
   for (let i = 0; i < 4; i++) {
@@ -599,7 +599,7 @@ function commitRegEdit(el) {
   const idx = parseInt(el.dataset.idx, 10);
   if (isNaN(idx) || idx < 0 || idx > 31) return;
   if (idx === 0) {
-    regs[0] = 0;
+    cpu.regs[0] = 0;
     updateRegisters();
     return;
   }
@@ -621,8 +621,8 @@ function commitRegEdit(el) {
     }
   }
   const uval = newVal >>> 0;
-  regs[idx] = uval;
-  lastChangedReg = idx;
+  cpu.regs[idx] = uval;
+  cpu.lastChangedReg = idx;
   updateRegisters();
   updateMemoryView();
 }
@@ -669,7 +669,7 @@ function popRegEditModal(event, el) {
   if (isNaN(idx) || idx < 0 || idx > 31) return;
   const name = ABI_NAMES[idx] || `x${idx}`;
   const type = el.dataset.type || 'hex';
-  const val = regs[idx];
+  const val = cpu.regs[idx];
   const uval = val >>> 0;
   const initVal = (type === 'hex') ? '0x' + uval.toString(16).padStart(8, '0') : val.toString();
 
@@ -722,7 +722,7 @@ function commitRegEditModal(idx, text) {
   closeRegEditModal();
   if (idx < 0 || idx > 31) return;
   if (idx === 0) {
-    regs[0] = 0;
+    cpu.regs[0] = 0;
     updateRegisters();
     return;
   }
@@ -731,8 +731,8 @@ function commitRegEditModal(idx, text) {
     setStatus('Invalid register value; use hex (0x…) or decimal, within 32 bits', 'error');
     return;
   }
-  regs[idx] = uval;
-  lastChangedReg = idx;
+  cpu.regs[idx] = uval;
+  cpu.lastChangedReg = idx;
   updateRegisters();
   updateMemoryView();
   setStatus(`Register x${idx} updated to 0x${uval.toString(16).padStart(8, '0')} (${uval})`, 'success');
@@ -746,14 +746,14 @@ function closeRegEditModal() {
 }
 
 function memGo(region) {
-  currentMemSegment = region;
+  ui.memSegment = region;
   activeMemRegion = region;
   const el = document.getElementById('memAddr');
   const rowsEl = document.getElementById('memRows');
-  if (region === 'code') { if (el) el.value = '0x' + (baseAddress >>> 0).toString(16); }
-  else if (region === 'data') { if (el) el.value = '0x' + (dataBase >>> 0).toString(16); }
-  else if (region === 'stack') { if (el) el.value = '0x' + (stackBase >>> 0).toString(16); }
-  else if (region === 'mmio') { if (el) el.value = '0x' + (mmioBase >>> 0).toString(16); if (rowsEl) rowsEl.value = '24'; }
+  if (region === 'code') { if (el) el.value = '0x' + (layout.baseAddress >>> 0).toString(16); }
+  else if (region === 'data') { if (el) el.value = '0x' + (layout.dataBase >>> 0).toString(16); }
+  else if (region === 'stack') { if (el) el.value = '0x' + (layout.stackBase >>> 0).toString(16); }
+  else if (region === 'mmio') { if (el) el.value = '0x' + (layout.mmioBase >>> 0).toString(16); if (rowsEl) rowsEl.value = '24'; }
   updateMemSubTabs();
   updateMemoryView();
 }
@@ -763,7 +763,7 @@ function updateMemSubTabs() {
   tabs.forEach(t => {
     const btn = document.getElementById('memTabBtn-' + t);
     if (btn) {
-      if (t === currentMemSegment) btn.classList.add('active');
+      if (t === ui.memSegment) btn.classList.add('active');
       else btn.classList.remove('active');
     }
   });
@@ -779,8 +779,8 @@ function updateMemSubTabs() {
     // editability note goes rather than reading "Editable" over cells
     // that are not.
     const text = stateIsReplayed() ? ''
-      : currentMemSegment === 'code' ? 'Read only'
-      : currentMemSegment === 'mmio' ? 'Editable except RO'
+      : ui.memSegment === 'code' ? 'Read only'
+      : ui.memSegment === 'mmio' ? 'Editable except RO'
       : 'Editable';
     editableEl.innerHTML = text ? `<span class="mem-legend-editable">${text}</span>` : '';
     const sep = document.getElementById('memLegendSep');

@@ -989,10 +989,10 @@ setTimeout(async () => {
         }
         check('Found a source line that expands to several instructions', kPair >= 0);
         if (kPair >= 0) {
-          win.statementStepping = false;
+          win.run.statementStepping = false;
           check('Off: one Step is one machine instruction',
             win.hdlStatementTarget(kPair) === kPair + 1);
-          win.statementStepping = true;
+          win.run.statementStepping = true;
           const target = win.hdlStatementTarget(kPair);
           check('On: one Step covers the whole statement (' +
             (target - kPair) + ' instructions)', target > kPair + 1);
@@ -1001,7 +1001,7 @@ setTimeout(async () => {
             win.sourceLineForPc(tB.steps[kPair].pc));
           check('Back undoes exactly what Step did',
             win.hdlStatementBackTarget(target) === kPair);
-          win.statementStepping = false;
+          win.run.statementStepping = false;
           check('Off: Back is one machine instruction',
             win.hdlStatementBackTarget(target) === target - 1);
         }

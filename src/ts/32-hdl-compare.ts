@@ -20,7 +20,7 @@ async function hdlCompareWithJs() {
   if (!hdlTrace.regBank)
     hdlLog('Cross-check: no register-file path, so only data memory writes are compared.', 'warn');
   const at = hdlIdx;
-  const dmem0 = dataBase >>> 0;
+  const dmem0 = layout.dataBase >>> 0;
   const inDmem = a => a >= dmem0 && a < dmem0 + hdlDmemBytes;
   // An input changed part-way through arrives on a clock the model does
   // not have, so the comparison ends there.
@@ -46,14 +46,14 @@ async function hdlCompareWithJs() {
   const lastCyc = Math.min(stop, hdlTrace.final ? hdlTrace.final.cyc : hdlTrace.steps[hdlTrace.steps.length - 1].cyc);
 
   // The model, from reset, with the inputs the run started with.
-  const saved = [dipSwitches, pbState, accelX, accelY, accelZ, accelTemp, accelDready];
+  const saved = [board.dip, board.buttons, accel.x, accel.y, accel.z, accel.temp, accel.dready];
   const s8 = v => ((v & 0xFF) << 24) >> 24;
-  dipSwitches = hdlBase.dip; pbState = hdlBase.pb; accelDready = hdlBase.adrdy ? 1 : 0;
-  accelTemp = s8(hdlBase.accel >>> 24); accelX = s8(hdlBase.accel >>> 16);
-  accelY = s8(hdlBase.accel >>> 8); accelZ = s8(hdlBase.accel);
-  const wasJournal = journalEnabled;
-  journalEnabled = false;
-  loadProgram(machineCode);
+  board.dip = hdlBase.dip; board.buttons = hdlBase.pb; accel.dready = hdlBase.adrdy ? 1 : 0;
+  accel.temp = s8(hdlBase.accel >>> 24); accel.x = s8(hdlBase.accel >>> 16);
+  accel.y = s8(hdlBase.accel >>> 8); accel.z = s8(hdlBase.accel);
+  const wasJournal = stepHistory.journalEnabled;
+  stepHistory.journalEnabled = false;
+  loadProgram(program.machineCode);
   programFinished = false;
   const jsReg = [], jsMem = [];
   const jsShadow = new Int32Array(32);
@@ -69,21 +69,21 @@ async function hdlCompareWithJs() {
     // No core retires more than one instruction a cycle.
     for (let n = 0; n <= lastCyc && !programFinished &&
          (jsReg.length < hwReg.length || jsMem.length < hwMem.length); n++) {
-      curPc = pc >>> 0;
-      lastExecutedRd = -1;
+      curPc = cpu.pc >>> 0;
+      cpu.lastExecutedRd = -1;
       executeOne();
-      const rd = lastExecutedRd;
-      if (rd > 0 && (regs[rd] | 0) !== jsShadow[rd]) {
-        jsShadow[rd] = regs[rd] | 0;
-        jsReg.push({ r: rd, v: regs[rd] >>> 0, pc: curPc });
+      const rd = cpu.lastExecutedRd;
+      if (rd > 0 && (cpu.regs[rd] | 0) !== jsShadow[rd]) {
+        jsShadow[rd] = cpu.regs[rd] | 0;
+        jsReg.push({ r: rd, v: cpu.regs[rd] >>> 0, pc: curPc });
       }
     }
   } catch (e) {
     fault = e;
   } finally {
     writeMem = baseWriteMem;
-    journalEnabled = wasJournal;
-    [dipSwitches, pbState, accelX, accelY, accelZ, accelTemp, accelDready] = saved;
+    stepHistory.journalEnabled = wasJournal;
+    [board.dip, board.buttons, accel.x, accel.y, accel.z, accel.temp, accel.dready] = saved;
   }
 
   const firstDiff = (hw, js, same) => {

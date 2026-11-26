@@ -14,11 +14,11 @@ function switchTab(tab) {
   }
 }
 
-// Every C example but one lives in examples/c/*.c, fetched at runtime by
-// loadExample() (see EXAMPLE_FILENAMES). The exception, dip_led_c, is baked
-// in as BAKED_C_EXAMPLE so its *source* loads with no server, matching
-// dip_led on the assembly side. Compiling it still needs the network for
-// Godbolt, as every C example does.
+// Built-in examples. Every example is a file in examples/asm/ or
+// examples/c/, fetched by loadExample() (see EXAMPLE_FILENAMES). DIP to LED
+// is also built into the page, in both languages (BAKED_ASM_EXAMPLE,
+// BAKED_C_EXAMPLE), so its source loads with no server at all; compiling
+// the C one still needs the network for Godbolt, as every C example does.
 
 // The Example menu is read from examples/index.txt, not written out here -
 // adding a program is a row in that file plus the file itself, no source
@@ -191,18 +191,18 @@ function setLanguageMode(mode) {
 // the user rebuild rather than leave a program running that no longer
 // corresponds to the settings on screen.
 function invalidateCompiledProgram(what) {
-  if (typeof running !== 'undefined' && running) {
-    running = false;
+  if (typeof run.running !== 'undefined' && run.running) {
+    run.running = false;
     if (runTimerId) { clearTimeout(runTimerId); runTimerId = null; }
   }
   if (typeof hdlDiscardTrace === 'function') hdlDiscardTrace();
-  const hadProgram = assembled || (machineCode && machineCode.length);
-  assembled = false;
+  const hadProgram = program.assembled || (program.machineCode && program.machineCode.length);
+  program.assembled = false;
   lastAssembledCode = null;
-  machineCode = [];
+  program.machineCode = [];
   initializeState();
-  execHistory = [];
-  currentExecLine = -1;
+  stepHistory.entries = [];
+  run.currentLine = -1;
   programFinished = false;
   if (typeof hideExecMarker === 'function') hideExecMarker();
   updateRegisters(); updateMemoryView(); updateDisassembly();
@@ -250,8 +250,7 @@ function resetCompilerConfig() {
   setStatus('Reset Godbolt compiler settings to default (Clang 20.1, -O0)', 'info');
 }
 
-// The one example baked into the page: DIP to LED, in both languages -
-// see the note before EXAMPLE_MENU.
+// DIP to LED, built into the page - see "Built-in examples" above.
 const BAKED_ASM_EXAMPLE = `#----------------------------------------------------------------------------------
 #--	MIT License
 #--
@@ -404,9 +403,8 @@ async function loadExample(name) {
   let source;
 
   if (name === 'dip_led' || name === 'dip_led_c') {
-    // The one example baked into the page itself, in both languages, so
-    // it works with no server at all - see BAKED_ASM_EXAMPLE /
-    // BAKED_C_EXAMPLE and the note before EXAMPLE_MENU.
+    // Built in, so it loads with no server - see "Built-in examples" at
+    // the top of this file.
     source = name === 'dip_led' ? BAKED_ASM_EXAMPLE : BAKED_C_EXAMPLE;
   } else {
     await exampleIndexReady; // don't build the URL off the two-entry fallback
@@ -438,10 +436,10 @@ async function loadExample(name) {
   }
   editor.value = source;
   lastAssembledCode = null;
-  assembled = false;
+  program.assembled = false;
   editor.scrollTop = 0;
   editor.scrollLeft = 0;
-  breakpoints.clear();
+  run.breakpoints.clear();
   resetAll();
   editorHistory.initialState();
   updateEditor();
@@ -452,7 +450,7 @@ async function loadExample(name) {
     assembleOnly(); // Auto-assemble on load so Run / Step are active immediately
   }
   log(`Example loaded: ${name} (${currentFileName})`, 'info');
-  setStatus('Example loaded: ' + name + (editorLanguageMode === 'asm' && assembled ? ' (auto-assembled — ready to Run/Step)' : ''));
+  setStatus('Example loaded: ' + name + (editorLanguageMode === 'asm' && program.assembled ? ' (auto-assembled — ready to Run/Step)' : ''));
   updateToolbarButtonStates();
 }
 window.loadExample = loadExample;

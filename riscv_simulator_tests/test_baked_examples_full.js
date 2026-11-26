@@ -72,8 +72,8 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   }
 
   let circlePixels = 0;
-  for (let i = 0; i < win.oledBuffer.length; i += 4) {
-    if (win.oledBuffer[i] > 0 || win.oledBuffer[i+1] > 0 || win.oledBuffer[i+2] > 0) circlePixels++;
+  for (let i = 0; i < win.oled.frontBuffer.length; i += 4) {
+    if (win.oled.frontBuffer[i] > 0 || win.oled.frontBuffer[i+1] > 0 || win.oled.frontBuffer[i+2] > 0) circlePixels++;
   }
   console.log(`  - Circle pixels rendered on OLED: ${circlePixels}`);
   if (circlePixels === 0) throw new Error('No pixels rendered for circle_accel');
@@ -89,8 +89,8 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   for (let s = 0; s < 75000; s++) win.executeOne();
 
   let imgPixels = 0;
-  for (let i = 0; i < win.oledBuffer.length; i += 4) {
-    if (win.oledBuffer[i] > 0 || win.oledBuffer[i+1] > 0 || win.oledBuffer[i+2] > 0) imgPixels++;
+  for (let i = 0; i < win.oled.frontBuffer.length; i += 4) {
+    if (win.oled.frontBuffer[i] > 0 || win.oled.frontBuffer[i+1] > 0 || win.oled.frontBuffer[i+2] > 0) imgPixels++;
   }
   console.log(`  - Image pixels rendered on OLED: ${imgPixels}`);
   if (imgPixels !== 6144) throw new Error(`Expected 6144 pixels, got ${imgPixels}`);
@@ -117,8 +117,8 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   // through a page exchange and its copy - a count alone would not notice if
   // double buffering swallowed the drawing.
   let circleCPixels = 0;
-  for (let i = 0; i < win.oledBuffer.length; i += 4) {
-    if (win.oledBuffer[i] > 0 || win.oledBuffer[i+1] > 0 || win.oledBuffer[i+2] > 0) circleCPixels++;
+  for (let i = 0; i < win.oled.frontBuffer.length; i += 4) {
+    if (win.oled.frontBuffer[i] > 0 || win.oled.frontBuffer[i+1] > 0 || win.oled.frontBuffer[i+2] > 0) circleCPixels++;
   }
   console.log(`  - Circle pixels presented on OLED: ${circleCPixels}`);
   if (circleCPixels !== 2533) throw new Error(`Expected 2533 pixels, got ${circleCPixels}`);
@@ -134,8 +134,8 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   for (let s = 0; s < 200000; s++) win.executeOne();
 
   let cImgPixels = 0;
-  for (let i = 0; i < win.oledBuffer.length; i += 4) {
-    if (win.oledBuffer[i] > 0 || win.oledBuffer[i+1] > 0 || win.oledBuffer[i+2] > 0) cImgPixels++;
+  for (let i = 0; i < win.oled.frontBuffer.length; i += 4) {
+    if (win.oled.frontBuffer[i] > 0 || win.oled.frontBuffer[i+1] > 0 || win.oled.frontBuffer[i+2] > 0) cImgPixels++;
   }
   console.log(`  - Image pixels rendered on OLED: ${cImgPixels}`);
   if (cImgPixels !== 6144) throw new Error(`Expected 6144 pixels, got ${cImgPixels}`);

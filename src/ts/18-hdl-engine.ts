@@ -13,14 +13,14 @@
    Files move between the stages through each module's in-memory
    filesystem (MEMFS); nothing touches the real disk.
 
-   The uploaded Wrapper.v is instantiated verbatim and never edited
-   — the simulator only generates a TESTBENCH around it
-   (22-hdl-testbench.ts), which is the
-   same thing a student does in Vivado. The testbench drives the
-   Wrapper's fixed port list, feeds the peripherals from the live
-   UI state, and reports every peripheral write back as a tagged
-   `$display` line that hdlApplyPer() (27-hdl-seek.ts) folds into
-   the LED / 7-segment / OLED / UART models.
+   The uploaded Wrapper.v is instantiated verbatim and never edited:
+   the simulator only generates a testbench around it
+   (22-hdl-testbench.ts), as a student does in Vivado. The testbench
+   drives the Wrapper's fixed port list, feeds the peripherals from the
+   UI state, and reports every peripheral write as a tagged `$display`
+   line, which hdlTraceParser() (26-hdl-trace.ts) reads and
+   hdlApplyPer() (27-hdl-seek.ts) applies to the LED, 7-segment, OLED
+   and UART models.
    ================================================================ */
 
 // Where to fetch ivlpp.js / ivl.js / vvp.js (+ their .wasm) from: the

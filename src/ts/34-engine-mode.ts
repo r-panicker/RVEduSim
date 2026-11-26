@@ -16,8 +16,8 @@ function setSimEngineMode(mode) {
   // The functional engine runs on a timer chain; stop it so it cannot
   // keep executing underneath the HDL view. Its state is kept, so
   // switching back and pressing Resume carries on from here.
-  if (running) {
-    running = false;
+  if (run.running) {
+    run.running = false;
     if (runTimerId) { clearTimeout(runTimerId); runTimerId = null; }
     log('Paused the functional run - switching to the ' +
         (want === 'hdl' ? 'HDL' : 'JavaScript') + ' engine.', 'info');
@@ -40,8 +40,8 @@ function setSimEngineMode(mode) {
     // coming back does not mean re-running the hardware from reset. Land
     // on whichever instruction the other engine reached, so the two hand
     // over at the same point in the program.
-    if (hdlTrace && hdlTrace.steps.length && machineCode && machineCode.length) {
-      hdlSeek(Math.max(0, Math.min(instructionCount - (hdlTrace.offset || 0), hdlTrace.steps.length)));
+    if (hdlTrace && hdlTrace.steps.length && program.machineCode && program.machineCode.length) {
+      hdlSeek(Math.max(0, Math.min(cpu.instructionCount - (hdlTrace.offset || 0), hdlTrace.steps.length)));
       setStatus('HDL mode - resumed the recording at instruction ' + hdlIdx, 'info');
     } else {
       setStatus('HDL mode - Run and Step execute your Verilog through ' + hdlSimulatorName(), 'info');

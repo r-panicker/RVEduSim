@@ -88,7 +88,7 @@ setTimeout(async () => {
     check('Each binary byte group is exactly 8 digits', row0Text().split('_').every(g => g.length === 8));
     // Verify the numeric value is preserved (little-endian: LSB on the right).
     const binVal = parseInt(row0Text().replace(/_/g, ''), 2);
-    const mc = win.machineCode && win.machineCode[0] && win.machineCode[0].bytes;
+    const mc = win.program.machineCode && win.program.machineCode[0] && win.program.machineCode[0].bytes;
     const knownVal = (mc && ((mc[3] << 24) | (mc[2] << 16) | (mc[1] << 8) | mc[0]) >>> 0);
     check('Binary word value equals the little-endian word value', knownVal !== undefined && binVal === knownVal);
 

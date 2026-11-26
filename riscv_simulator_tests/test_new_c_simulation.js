@@ -122,8 +122,8 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
 
   // Check OLED buffer has circle pixels drawn
   let coloredPixels = 0;
-  for (let i = 0; i < win.oledBuffer.length; i += 4) {
-    if (win.oledBuffer[i] > 0 || win.oledBuffer[i+1] > 0 || win.oledBuffer[i+2] > 0) {
+  for (let i = 0; i < win.oled.frontBuffer.length; i += 4) {
+    if (win.oled.frontBuffer[i] > 0 || win.oled.frontBuffer[i+1] > 0 || win.oled.frontBuffer[i+2] > 0) {
       coloredPixels++;
     }
   }
@@ -156,10 +156,10 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   console.log('  - Executing simulation steps for ImageDisplay (Mode 5 Autoadvance)...');
   for (let s = 0; s < 400000; s++) {
     win.executeOne();
-    if (win.oledCol === 0 && win.oledRow === 0 && s > 150000) break;
+    if (win.oled.col === 0 && win.oled.row === 0 && s > 150000) break;
   }
 
-  const cBuffer = new Uint8Array(win.oledBuffer);
+  const cBuffer = new Uint8Array(win.oled.frontBuffer);
   let imgColoredPixels = 0;
   for (let i = 0; i < cBuffer.length; i += 4) {
     if (cBuffer[i] > 0 || cBuffer[i+1] > 0 || cBuffer[i+2] > 0) {

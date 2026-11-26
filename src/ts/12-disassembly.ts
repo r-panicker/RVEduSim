@@ -8,15 +8,15 @@ function updateMachineCode() {
 function updateDisasmViewButtons() {
   const bytesBtn = document.getElementById('disasmViewModeBytes');
   const wordBtn = document.getElementById('disasmViewModeWord');
-  if (bytesBtn) bytesBtn.classList.toggle('active', disasmViewMode === 'bytes');
-  if (wordBtn) wordBtn.classList.toggle('active', disasmViewMode === 'word');
+  if (bytesBtn) bytesBtn.classList.toggle('active', ui.disasmView === 'bytes');
+  if (wordBtn) wordBtn.classList.toggle('active', ui.disasmView === 'word');
 }
 
 function setDisasmViewMode(mode) {
-  disasmViewMode = (mode === 'bytes') ? 'bytes' : 'word';
+  ui.disasmView = (mode === 'bytes') ? 'bytes' : 'word';
   updateDisasmViewButtons();
   updateDisassembly();
-  setStatus(disasmViewMode === 'word' ? 'Disassembly: 32-bit word machine-code display' : 'Disassembly: separate byte machine-code display', 'info');
+  setStatus(ui.disasmView === 'word' ? 'Disassembly: 32-bit word machine-code display' : 'Disassembly: separate byte machine-code display', 'info');
 }
 
 function handleDisasmShowToggle(checkbox) {
@@ -41,12 +41,12 @@ function updateDisassembly() {
   // Byte mode = "LSB to the left" (bytes in memory order, low byte first),
   // Word mode = "LSB to the right" (one whole little-endian 32-bit word).
   const orderHintEl = document.getElementById('disasmOrderHint');
-  if (orderHintEl) orderHintEl.textContent = (disasmViewMode === 'word') ? 'LSB to the right' : 'LSB to the left';
+  if (orderHintEl) orderHintEl.textContent = (ui.disasmView === 'word') ? 'LSB to the right' : 'LSB to the left';
 
   // Build address-to-labels mapping for label headers and target annotations
   const addrToLabels = {};
-  if (typeof labels === 'object' && labels) {
-    for (const [name, addr] of Object.entries(labels)) {
+  if (typeof program.labels === 'object' && program.labels) {
+    for (const [name, addr] of Object.entries(program.labels)) {
       if (typeof addr === 'number' && !isNaN(addr)) {
         const uaddr = addr >>> 0;
         if (!addrToLabels[uaddr]) addrToLabels[uaddr] = [];
@@ -130,9 +130,9 @@ function updateDisassembly() {
   const stageAt = new Map();
   if (pipeMode && simEngineMode !== 'hdl' && pipe) {
     ['W', 'M', 'E', 'D'].forEach(k => { if (pipe[k]) stageAt.set(pipe[k].pc >>> 0, k); });
-    if (!programFinished) stageAt.set(pc >>> 0, (stageAt.has(pc >>> 0) ? stageAt.get(pc >>> 0) + ' ' : '') + 'F');
+    if (!programFinished) stageAt.set(cpu.pc >>> 0, (stageAt.has(cpu.pc >>> 0) ? stageAt.get(cpu.pc >>> 0) + ' ' : '') + 'F');
   }
-  for (const item of machineCode) {
+  for (const item of program.machineCode) {
     if (!item.bytes || item.error) continue;
 
     const uaddr = item.address >>> 0;
@@ -161,7 +161,7 @@ function updateDisassembly() {
     const source = item.text || item.asmLine || '';
     const native = item.native || source;
     const expanded = !!item.isPseudo;
-    const rowClass = item.address === pc ? 'current-native' : '';
+    const rowClass = item.address === cpu.pc ? 'current-native' : '';
 
     let cSrcTag = '';
     if (item.cLine && editorLanguageMode === 'c') {
@@ -172,7 +172,7 @@ function updateDisassembly() {
     let bytesStr = '';
     // Byte mode (default grouping): separate hex bytes, 4 per chunk.
     // Word mode: one whole 32-bit little-endian hex word per 4-byte chunk.
-    const wordMode = (disasmViewMode === 'word');
+    const wordMode = (ui.disasmView === 'word');
     if (showHex) {
       const hexBytes = Array.from(item.bytes).map(b => b.toString(16).padStart(2, '0'));
       if (wordMode) {

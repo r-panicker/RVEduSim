@@ -1112,7 +1112,7 @@ function setHdlSynth(on) {
   hdlWithBusy(async () => {
     try {
       const wrapper = hdlFindWrapper();
-      loadProgram(machineCode);
+      loadProgram(program.machineCode);
       const mem = hdlMemFiles(wrapper.src);
       await hdlPostSynthCheck(hdlLastRtlOut, hdlTrace.budget,
                               hdlTraceEnabled ? 2 : 1, mem.files);

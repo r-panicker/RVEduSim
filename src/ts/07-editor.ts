@@ -625,15 +625,15 @@ riscvHoverTooltip = CM6.hoverTooltip((view, pos, side) => {
         const offsetTxt = `s0 ${varInfo.offset >= 0 ? '+' : '-'} ${Math.abs(varInfo.offset)}`;
         let addrLine = offsetTxt;
         let valueHtml = '';
-        const pcReady = typeof pc !== 'undefined' && (pc >>> 0) > varInfo.framePtrAddr;
-        if (typeof assembled !== 'undefined' && assembled && typeof regs !== 'undefined' && pcReady) {
-          const s0 = regs[8] >>> 0;
+        const pcReady = typeof cpu.pc !== 'undefined' && (cpu.pc >>> 0) > varInfo.framePtrAddr;
+        if (typeof program.assembled !== 'undefined' && program.assembled && typeof cpu.regs !== 'undefined' && pcReady) {
+          const s0 = cpu.regs[8] >>> 0;
           const addr = (s0 + varInfo.offset) >>> 0;
           const uval = readMem(addr, 4, true) >>> 0;
           const sval = readMemSigned(addr, 4, true);
           addrLine += ` = 0x${addr.toString(16).padStart(8, '0')}`;
           valueHtml = `<div style="font-size:11px;color:#a6adc8;border-top:1px solid #313244;padding-top:3px;margin-top:3px;">Hex 0x${uval.toString(16).padStart(8, '0')} &nbsp;·&nbsp; Dec (signed) ${sval} &nbsp;·&nbsp; Dec (unsigned) ${uval}</div>`;
-        } else if (typeof assembled !== 'undefined' && assembled && !pcReady) {
+        } else if (typeof program.assembled !== 'undefined' && program.assembled && !pcReady) {
           valueHtml = `<div style="font-size:11px;color:#a6adc8;border-top:1px solid #313244;padding-top:3px;margin-top:3px;">s0 not set up yet at the current PC</div>`;
         }
         dom.innerHTML = `
@@ -1010,14 +1010,14 @@ function resetExecutionForSourceChange() {
     return;
   }
   initializeState();
-  execHistory = [];
-  stepWriteLog = [];
-  stepPixelLog = [];
-  assembled = false;
-  running = false;
-  machineCode = [];
-  currentExecLine = -1;
-  lastExecutedRd = -1;
+  stepHistory.entries = [];
+  stepHistory.writeLog = [];
+  stepHistory.pixelLog = [];
+  program.assembled = false;
+  run.running = false;
+  program.machineCode = [];
+  run.currentLine = -1;
+  cpu.lastExecutedRd = -1;
   updateRegisters();
   updateMemoryView();
   updateMachineCode();

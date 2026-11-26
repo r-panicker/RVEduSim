@@ -59,40 +59,40 @@ function assembleSrc(src) {
 
 // Counting steps would depend on how many instructions each `li` expands to,
 // so the tests land on an instruction by address instead.
-const addrOf = (re) => ev(`(() => { const m = machineCode.find(m => ${re}.test(m.text));
+const addrOf = (re) => ev(`(() => { const m = program.machineCode.find(m => ${re}.test(m.text));
   return m ? m.address : -1; })()`);
 
 function stepTo(re, max = 80) {
   const target = addrOf(re);
   let n = 0;
-  while (ev('pc') !== target && n++ < max) win.stepOnce();
-  return ev('pc') === target;
+  while (ev('cpu.pc') !== target && n++ < max) win.stepOnce();
+  return ev('cpu.pc') === target;
 }
 
 function backTo(re, max = 80) {
   const target = addrOf(re);
   let n = 0;
-  while (ev('pc') !== target && n++ < max) win.stepBack();
-  return ev('pc') === target;
+  while (ev('cpu.pc') !== target && n++ < max) win.stepBack();
+  return ev('cpu.pc') === target;
 }
 
 // The panel state a step can move, as one comparable string.
 function periphSnapshot() {
   return ev(`JSON.stringify({
-    led: ledState, sevseg: sevsegState,
-    col: oledCol, row: oledRow, ctrl: oledCtrl, data: oledDataVal,
-    advCol: oledAdvCol, advRow: oledAdvRow,
-    front: oledFrontPage, back: oledBackPage, unpolled: oledSwapUnpolled,
-    pending: uartPending.slice(), rxByte: uartRxByte, rxFull: uartRxFull,
-    dropped: uartRxDroppedTotal, nextDeliv: uartNextDeliveryInstr,
-    tx: uartTxBuffer, txBytes: uartTxBytes.length,
-    pixels: [oledPages[0][0], oledPages[0][1], oledPages[0][2],
-             oledPages[1][0], oledPages[1][1], oledPages[1][2]]
+    led: board.leds, sevseg: board.sevseg,
+    col: oled.col, row: oled.row, ctrl: oled.ctrl, data: oled.data,
+    advCol: oled.advCol, advRow: oled.advRow,
+    front: oled.front, back: oled.back, unpolled: oled.swapUnpolled,
+    pending: uart.pending.slice(), rxByte: uart.rxByte, rxFull: uart.rxFull,
+    dropped: uart.rxDroppedTotal, nextDeliv: uart.nextDeliveryInstr,
+    tx: uart.txText, txBytes: uart.txBytes.length,
+    pixels: [oled.pages[0][0], oled.pages[0][1], oled.pages[0][2],
+             oled.pages[1][0], oled.pages[1][1], oled.pages[1][2]]
   })`);
 }
 
 const pixelAt = (page, col, row) =>
-  ev(`(() => { const b = oledPages[${page}], i = (${row} * 96 + ${col}) * 4;
+  ev(`(() => { const b = oled.pages[${page}], i = (${row} * 96 + ${col}) * 4;
       return [b[i], b[i + 1], b[i + 2]].join(','); })()`);
 
 setTimeout(() => {
@@ -114,15 +114,15 @@ main:
     assembleSrc(SIMPLE);
     stepTo(/sw\s+a2/); win.stepOnce();
     check('LED, 7-seg and the terminal all took the writes',
-      ev('ledState') === 0xAA && ev('sevsegState') === '12345678' && ev('uartTxBuffer') === 'A');
+      ev('board.leds') === 0xAA && ev('board.sevseg') === '12345678' && ev('uart.txText') === 'A');
 
     win.stepBack();
-    check('back over the UART write un-prints the character', ev('uartTxBuffer') === '');
-    check('and drops the raw byte with it', ev('uartTxBytes.length') === 0);
+    check('back over the UART write un-prints the character', ev('uart.txText') === '');
+    check('and drops the raw byte with it', ev('uart.txBytes.length') === 0);
     backTo(/sw\s+a1/);
-    check('back over the 7-segment write restores it', ev('sevsegState') === '00000000');
+    check('back over the 7-segment write restores it', ev('board.sevseg') === '00000000');
     backTo(/sw\s+a0/);
-    check('back over the LED write restores it', ev('ledState') === 0);
+    check('back over the LED write restores it', ev('board.leds') === 0);
 
     // ---------------------------------------------------------------
     console.log('\n[2] OLED registers and a painted pixel');
@@ -142,20 +142,20 @@ main:
 `;
     assembleSrc(PIXEL);
     stepTo(/sw\s+t4/); win.stepOnce();
-    const painted = pixelAt(ev('oledBackPage'), 7, 3);
+    const painted = pixelAt(ev('oled.back'), 7, 3);
     check('the pixel landed', painted !== '0,0,0');
     check('and the registers hold what was written',
-      ev('oledCol') === 7 && ev('oledRow') === 3 && ev('oledCtrl') === 0x20);
+      ev('oled.col') === 7 && ev('oled.row') === 3 && ev('oled.ctrl') === 0x20);
 
     win.stepBack();
     check('back over the data write unpaints the pixel',
-      pixelAt(ev('oledBackPage'), 7, 3) === '0,0,0');
+      pixelAt(ev('oled.back'), 7, 3) === '0,0,0');
     backTo(/sw\s+t3/);
-    check('back over the row write restores OLED_ROW', ev('oledRow') === 0);
+    check('back over the row write restores OLED_ROW', ev('oled.row') === 0);
     backTo(/sw\s+t2/);
-    check('back over the column write restores OLED_COL', ev('oledCol') === 0);
+    check('back over the column write restores OLED_COL', ev('oled.col') === 0);
     backTo(/sw\s+t1/);
-    check('back over the control write restores OLED_CTRL', ev('oledCtrl') === 0);
+    check('back over the control write restores OLED_CTRL', ev('oled.ctrl') === 0);
 
     // ---------------------------------------------------------------
     console.log('\n[3] A present, which copies a whole page');
@@ -167,18 +167,18 @@ main:
 `);
     assembleSrc(PRESENT);
     stepTo(/sw\s+t6/); win.stepOnce();
-    check('the present split the pages', ev('oledFrontPage') !== ev('oledBackPage'));
-    const afterSecond = pixelAt(ev('oledBackPage'), 7, 3);
+    check('the present split the pages', ev('oled.front') !== ev('oled.back'));
+    const afterSecond = pixelAt(ev('oled.back'), 7, 3);
     check('and the second colour is in the back page', afterSecond !== painted);
 
     win.stepBack();
     check('back over the second paint restores the presented colour',
-      pixelAt(ev('oledBackPage'), 7, 3) === painted);
+      pixelAt(ev('oled.back'), 7, 3) === painted);
     backTo(/sw\s+t5/);
     check('back over the present puts both page pointers back',
-      ev('oledFrontPage') === ev('oledBackPage') && ev('oledFrontPage') === 0);
+      ev('oled.front') === ev('oled.back') && ev('oled.front') === 0);
     check('and leaves the pixel drawn before it alone',
-      pixelAt(ev('oledBackPage'), 7, 3) === painted);
+      pixelAt(ev('oled.back'), 7, 3) === painted);
     check('with the page the copy overwrote blank again',
       pixelAt(1, 7, 3) === '0,0,0');
 
@@ -196,60 +196,60 @@ wait:
 `;
     assembleSrc(POLL);
     win.stepOnce();
-    ev('uartPending = [0x41, 0x42]; uartSendTotal = 2; uartNextDeliveryInstr = instructionCount;');
+    ev('uart.pending = [0x41, 0x42]; uart.sendTotal = 2; uart.nextDeliveryInstr = cpu.instructionCount;');
     win.stepOnce();
     check('one byte is handed over, the other still queued',
-      ev('uartRxFull') === true && ev('uartRxByte') === 0x41 && ev('uartPending.length') === 1);
+      ev('uart.rxFull') === true && ev('uart.rxByte') === 0x41 && ev('uart.pending.length') === 1);
 
     win.stepBack();
-    check('back-step un-delivers it', ev('uartRxFull') === false);
+    check('back-step un-delivers it', ev('uart.rxFull') === false);
     check('and puts it back at the head of the queue',
-      ev('JSON.stringify(uartPending)') === '[65,66]');
+      ev('JSON.stringify(uart.pending)') === '[65,66]');
 
     // Re-stepping must deliver the same byte, not the next one; otherwise the
     // receive path falls out of step with instructionCount.
     win.stepOnce();
     check('stepping forward again delivers the same byte, losing nothing',
-      ev('uartRxByte') === 0x41 && ev('uartPending.length') === 1);
+      ev('uart.rxByte') === 0x41 && ev('uart.pending.length') === 1);
 
     // ---------------------------------------------------------------
     console.log('\n[5] Receive: the load that consumes the held byte');
     check('reached the consuming load', stepTo(/lw\s+t2/));
-    const heldBefore = ev('uartRxByte');
-    check('with a byte held', ev('uartRxFull') === true);
+    const heldBefore = ev('uart.rxByte');
+    check('with a byte held', ev('uart.rxFull') === true);
     win.stepOnce();
     check('the load takes it and clears UART_RX_VALID',
-      ev('uartRxFull') === false && (ev('regs[7]') & 0xFF) === heldBefore);
+      ev('uart.rxFull') === false && (ev('cpu.regs[7]') & 0xFF) === heldBefore);
     win.stepBack();
-    check('back-step hands it back', ev('uartRxFull') === true && ev('uartRxByte') === heldBefore);
+    check('back-step hands it back', ev('uart.rxFull') === true && ev('uart.rxByte') === heldBefore);
 
     // ---------------------------------------------------------------
     console.log('\n[6] Step back then forward is a no-op, peripherals included');
     assembleSrc(PRESENT);
     stepTo(/sw\s+t3/);
-    ev('uartPending = [0x39]; uartNextDeliveryInstr = instructionCount;');
+    ev('uart.pending = [0x39]; uart.nextDeliveryInstr = cpu.instructionCount;');
     win.stepOnce(); win.stepOnce();
     const before = periphSnapshot();
-    const pcBefore = ev('pc');
+    const pcBefore = ev('cpu.pc');
     win.stepBack(); win.stepBack();
     check('two back-steps move the state', periphSnapshot() !== before);
     win.stepOnce(); win.stepOnce();
     check('and two forward steps put it back exactly', periphSnapshot() === before);
-    check('with the PC where it was', ev('pc') === pcBefore);
+    check('with the PC where it was', ev('cpu.pc') === pcBefore);
 
     // ---------------------------------------------------------------
     console.log('\n[7] The history entry carries what the restore needs');
     check('a step records its peripheral snapshot and page journal',
-      ev('execHistory.length > 0 && !!execHistory[execHistory.length - 1].periph && ' +
-         'Array.isArray(execHistory[execHistory.length - 1].pixels)'));
+      ev('stepHistory.entries.length > 0 && !!stepHistory.entries[stepHistory.entries.length - 1].periph && ' +
+         'Array.isArray(stepHistory.entries[stepHistory.entries.length - 1].pixels)'));
     check('and a step that paints records the pixel it overwrote',
       ev(`(() => {
         setLanguageMode('asm'); editor.value = ${JSON.stringify(PIXEL)}; assembleOnly();
-        const target = machineCode.find(m => /sw\\s+t4/.test(m.text)).address;
+        const target = program.machineCode.find(m => /sw\\s+t4/.test(m.text)).address;
         let n = 0;
-        while (pc !== target && n++ < 80) stepOnce();
+        while (cpu.pc !== target && n++ < 80) stepOnce();
         stepOnce();
-        return execHistory[execHistory.length - 1].pixels.length === 1;
+        return stepHistory.entries[stepHistory.entries.length - 1].pixels.length === 1;
       })()`));
 
     console.log('\n===========================================================');

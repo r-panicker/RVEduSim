@@ -478,7 +478,9 @@ if (process.argv[2] === '--checkpoints') {
     win.setHdlDetail('fastest', true);
     win.setHdlCycles(50000000);
     win.setRunPace('real');
-    win.setClkDivBits(0);
+    // 25 MHz: a clock no machine keeps up with, but one a slow one still
+    // reaches a fraction of that shows above ×0.00.
+    win.setClkDivBits(2);
     win.setDipSwitches(0x0011);
     const noTrace = win.runHdlSimulation();
     await until(() => /running live/.test(doc.getElementById('statusBar').textContent), 120000);
@@ -487,7 +489,7 @@ if (process.argv[2] === '--checkpoints') {
     const pcsLive = new Set(), pcLedsOk = [];
     for (let i = 0; i < 26; i++) {
       await sleep(30);
-      const v = win.eval('pc') >>> 0;
+      const v = win.eval('cpu.pc') >>> 0;
       pcsLive.add(v);
       pcLedsOk.push(pcLedsV() === ((v >>> 2) & 0x7F).toString(2).padStart(7, '0'));
     }

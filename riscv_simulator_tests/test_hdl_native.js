@@ -397,7 +397,7 @@ setTimeout(async () => {
       const pcsSeen = new Set(), ledsMatch = [];
       while (!(win.getHdlTrace() && win.getHdlTrace().budget > 33000) && pcsSeen.size < 50) {
         await sleep(30);
-        const pcNow = win.eval('pc') >>> 0;
+        const pcNow = win.eval('cpu.pc') >>> 0;
         if (win.getHdlTrace() && win.getHdlTrace().budget) { pcsSeen.add(pcNow); ledsMatch.push(pcLeds() === ((pcNow >>> 2) & 0x7F).toString(2).padStart(7, '0')); }
       }
       win.setDipSwitches(0x33);
@@ -434,7 +434,7 @@ setTimeout(async () => {
       const r7 = win.runHdlSimulation();
       const pcsSlow = new Set();
       await until(() => /running - cycle/.test(st()), 60000);
-      for (let i = 0; i < 30; i++) { await sleep(50); pcsSlow.add(win.eval('pc') >>> 0); }
+      for (let i = 0; i < 30; i++) { await sleep(50); pcsSlow.add(win.eval('cpu.pc') >>> 0); }
       win.toggleRunPause();
       await r7;
       check('…and at a clock slow enough to watch, the PC LEDs show every instruction (' + pcsSlow.size + ' PCs in 1.5 s)',

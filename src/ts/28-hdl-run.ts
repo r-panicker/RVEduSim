@@ -7,11 +7,11 @@
 // Position k means "about to execute steps[k]", which is where execution
 // should come to rest when steps[k] is on a breakpoint line.
 function hdlBreakAt(from) {
-  if (!hdlTrace || !breakpoints || !breakpoints.size) return -1;
+  if (!hdlTrace || !run.breakpoints || !run.breakpoints.size) return -1;
   const steps = hdlTrace.steps;
   for (let k = Math.max(0, from); k < steps.length; k++) {
     const line = sourceLineForPc(steps[k].pc);
-    if (line >= 1 && breakpoints.has(line)) return k;
+    if (line >= 1 && run.breakpoints.has(line)) return k;
   }
   return -1;
 }
@@ -36,10 +36,10 @@ function hdlDiscardTrace() {
 
 function hdlCurrentInputs() {
   return {
-    dip: dipSwitches & 0xFFFF,
-    pb: pbState & 0x7,
+    dip: board.dip & 0xFFFF,
+    pb: board.buttons & 0x7,
     accel: hdlAccelWord(),
-    adrdy: !!accelDready
+    adrdy: !!accel.dready
   };
 }
 

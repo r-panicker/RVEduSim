@@ -6,7 +6,7 @@
 
 **A RISC-V simulator for learning computer architecture, from assembly down to your own Verilog processor.**
 Write RV32I(M) assembly or C, watch it run on a single-cycle, multi-cycle or pipelined model, then run the same program on the processor you designed, on a simulated FPGA board.
-Runs in the browser with nothing to install, or as a desktop app on Windows, macOS and Linux with fast native Verilog simulation.
+Runs in the browser with nothing to install, or as a desktop app on Windows, macOS (Apple silicon) and Linux with fast native Verilog simulation.
 
 [![Pages](https://github.com/r-panicker/RVEduSim/actions/workflows/pages.yml/badge.svg)](https://github.com/r-panicker/RVEduSim/actions/workflows/pages.yml)
 [![Desktop app](https://github.com/r-panicker/RVEduSim/actions/workflows/desktop.yml/badge.svg)](https://github.com/r-panicker/RVEduSim/actions/workflows/desktop.yml)
@@ -39,7 +39,7 @@ Download the installer for your OS from [Releases](https://github.com/r-panicker
 | OS | File |
 |---|---|
 | Windows | `RVEduSim-<version>-win-x64.exe` |
-| macOS | `RVEduSim-<version>-mac-arm64.dmg` (Apple Silicon) or `RVEduSim-<version>-mac-x64.dmg` (Intel) |
+| macOS (Apple silicon) | `RVEduSim-<version>-mac-arm64.dmg` |
 | Linux | `RVEduSim-<version>-linux-x86_64.AppImage` |
 
 The builds are not code-signed yet, so the first launch needs one extra step:

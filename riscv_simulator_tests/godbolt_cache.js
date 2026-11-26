@@ -1,9 +1,9 @@
 // Godbolt output for the built-in C examples, captured once so the suites do
 // not need the network.
 //
-// Every example but `dip_led` / `dip_led_c` lives in examples/asm/ and
-// examples/c/ and is fetched at runtime (see examples_fetch.js for the
-// test-side fetch shim), so this cache is keyed by filename and matched by
+// Every C example is a file in examples/c/ (the page fetches all but
+// DIP_to_LED.c, which it has built in; see examples_fetch.js for the
+// test-side fetch), so this cache is keyed by filename and matched by
 // reading those same files off disk.
 //
 // DIP_to_LED.c's entry lives in its own file, godbolt_cache_dip_led.json,

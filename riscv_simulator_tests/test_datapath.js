@@ -55,7 +55,7 @@ function assembleSrc(src) {
   win.setLanguageMode('asm');
   win.editor.value = src;
   win.assembleOnly();
-  return ev('assembled');
+  return ev('program.assembled');
 }
 
 // Every row of the decoder table, every ALU operation and each branch both
@@ -141,18 +141,18 @@ setTimeout(async () => {
     const rows = new Set(), ops = new Set(), branches = new Set();
     const bad = [];
     let n = 0;
-    const halt = ev('labels.halt');
-    while (ev('pc') !== halt && n++ < 200) {
+    const halt = ev('program.labels.halt');
+    while (ev('cpu.pc') !== halt && n++ < 200) {
       const m = JSON.parse(ev('JSON.stringify(dpEvaluate())'));
       if (m.unsupported) { bad.push('unsupported: ' + m.text); win.executeOne(); continue; }
       rows.add(m.ctrl.row);
       if (m.ctrl.row === 'DP Reg' || m.ctrl.row === 'DP Imm') ops.add(m.ctrl.ALUControl);
       if (m.ctrl.row === 'branch') branches.add(m.f3 + ':' + m.pcSrc);
       win.executeOne();
-      const pcNow = ev('pc') >>> 0;
+      const pcNow = ev('cpu.pc') >>> 0;
       if (pcNow !== m.pcIn) bad.push(`${m.text}: PC ${pcNow.toString(16)}, model ${m.pcIn.toString(16)}`);
       if (m.ctrl.RegWrite === '1' && m.rd !== 0) {
-        const v = ev(`regs[${m.rd}]`) >>> 0;
+        const v = ev(`cpu.regs[${m.rd}]`) >>> 0;
         if (v !== m.result) bad.push(`${m.text}: x${m.rd} ${v.toString(16)}, model ${m.result.toString(16)}`);
       }
       if (m.ctrl.MemWrite === '1') {
@@ -160,7 +160,7 @@ setTimeout(async () => {
         if (w !== m.rd2) bad.push(`${m.text}: M ${w.toString(16)}, model ${m.rd2.toString(16)}`);
       }
     }
-    check('the program ran to halt', ev('pc') === halt);
+    check('the program ran to halt', ev('cpu.pc') === halt);
     check('every prediction matched: next PC, register write, memory write', bad.length === 0, bad.slice(0, 4).join('; '));
     check('all nine decoder rows exercised', rows.size === 9, Array.from(rows).join(', '));
     check('all ten ALU operations exercised', ops.size === 10, Array.from(ops).join(', '));
@@ -176,7 +176,7 @@ setTimeout(async () => {
       check(`${src}: button disabled, naming line 3`, viz.disabled && /line 3/.test(viz.title) && !doc.body.classList.contains('dp-open'), viz.title);
     }
     win.stepOnce(); win.stepOnce();
-    check('and the program still runs', ev('instructionCount') === 2);
+    check('and the program still runs', ev('cpu.instructionCount') === 2);
     assembleSrc('.text\nmain: li t0, 3\n    addi t0, t0, 4\nhalt: j halt\n');
     win.updateToolbarButtonStates();
     check('a drawable program re-enables it, and the strip comes back on its own', !viz.disabled &&
@@ -191,7 +191,7 @@ setTimeout(async () => {
     console.log('\n[4] Phases step forward and back, and the clock edge executes one instruction');
     assembleSrc('.text\nmain: li t0, 3\n    addi t0, t0, 4\n    addi t0, t0, 5\nhalt: j halt\n');
     if (!doc.body.classList.contains('dp-open')) win.toggleDpDock();
-    ev('statementStepping = true');
+    ev('run.statementStepping = true');
     const phase = () => doc.getElementById('dpPhase').textContent;
     check('a fresh instruction waits at phase 0', (ev('dpPhase') === 0 && phase() === ''), phase());
     const advance = async () => { win.dpNext(); win.dpNext(); await sleep(5); };
@@ -216,42 +216,42 @@ setTimeout(async () => {
       ev("dpSvg().querySelectorAll('.dp-edge').length") > 0);
     check('and there the clock\'s next rising edge is lit', doc.getElementById('dpClock').classList.contains('dp-clk-edge') &&
       clockSteps()[8].classList.contains('now') && clockSteps()[7].classList.contains('done'));
-    check('nothing has executed yet', ev('instructionCount') === 0 && ev('regs[5]') === 0);
+    check('nothing has executed yet', ev('cpu.instructionCount') === 0 && ev('cpu.regs[5]') === 0);
     win.dpPrev();
-    check('◀ goes back one phase without executing anything', /^8\/9/.test(phase()) && ev('instructionCount') === 0, phase());
+    check('◀ goes back one phase without executing anything', /^8\/9/.test(phase()) && ev('cpu.instructionCount') === 0, phase());
     await advance();
     win.dpNext();
-    check('▶ at the edge executes exactly one instruction', ev('instructionCount') === 1 && ev('regs[5]') === 3,
-      `count ${ev('instructionCount')}, t0 ${ev('regs[5]')}`);
+    check('▶ at the edge executes exactly one instruction', ev('cpu.instructionCount') === 1 && ev('cpu.regs[5]') === 3,
+      `count ${ev('cpu.instructionCount')}, t0 ${ev('cpu.regs[5]')}`);
     check('and the next instruction starts at phase 0', (ev('dpPhase') === 0 && phase() === '') &&
       /addi x5, x5, 4/.test(doc.getElementById('dpInstr').textContent), doc.getElementById('dpInstr').textContent);
-    ev('statementStepping = false');
+    ev('run.statementStepping = false');
 
     await win.dpPlay();
     await sleep(5);
-    check('▶▶ plays the phases and then executes', ev('instructionCount') === 2 && ev('regs[5]') === 7,
-      `count ${ev('instructionCount')}, t0 ${ev('regs[5]')}`);
+    check('▶▶ plays the phases and then executes', ev('cpu.instructionCount') === 2 && ev('cpu.regs[5]') === 7,
+      `count ${ev('cpu.instructionCount')}, t0 ${ev('cpu.regs[5]')}`);
 
     // [5] The toolbar and the panels keep it in step.
     console.log('\n[5] Step, Back and register edits reach the diagram');
     await advance(); await advance();
     win.stepOnce();
-    check('a toolbar Step resets to the new instruction', (ev('dpPhase') === 0 && phase() === '') && ev('dpModel.pc') === ev('pc'));
+    check('a toolbar Step resets to the new instruction', (ev('dpPhase') === 0 && phase() === '') && ev('dpModel.pc') === ev('cpu.pc'));
     win.stepBack();
-    check('a toolbar Back resets to the instruction before', ev('dpModel.pc') === ev('pc') && (ev('dpPhase') === 0 && phase() === ''));
+    check('a toolbar Back resets to the instruction before', ev('dpModel.pc') === ev('cpu.pc') && (ev('dpPhase') === 0 && phase() === ''));
     const arrow = k => { doc.dispatchEvent(new win.KeyboardEvent('keydown', { key: k, bubbles: true }));
                          doc.dispatchEvent(new win.KeyboardEvent('keyup', { key: k, bubbles: true })); };
-    const n0 = ev('instructionCount');
+    const n0 = ev('cpu.instructionCount');
     arrow('ArrowRight');
     check('with the datapath shown, → takes one phase, not an instruction',
-      ev('dpPhase') === 1 && ev('instructionCount') === n0, `phase ${ev('dpPhase')}`);
+      ev('dpPhase') === 1 && ev('cpu.instructionCount') === n0, `phase ${ev('dpPhase')}`);
     arrow('ArrowLeft');
     check('and ← one phase back', ev('dpPhase') === 0);
     win.stepOnce();
-    const pcAfter = ev('pc');
+    const pcAfter = ev('cpu.pc');
     arrow('ArrowLeft');
     check('← at the first phase goes back to the instruction before, at its last phase',
-      ev('pc') !== pcAfter && ev('dpPhase') === ev('dpPhaseList.length') && ev('instructionCount') === n0);
+      ev('cpu.pc') !== pcAfter && ev('dpPhase') === ev('dpPhaseList.length') && ev('cpu.instructionCount') === n0);
     win.stepOnce(); win.stepBack();
     await advance(); await advance(); await advance(); await advance();
     ev('commitRegEditModal')(5, '100');
@@ -356,7 +356,7 @@ setTimeout(async () => {
       const enc = doc.getElementById('dpEnc');
       const got = Array.from(enc.querySelectorAll('.dp-enc-name')).map(e => e.textContent);
       const bits = Array.from(enc.querySelectorAll('.dp-enc-bit')).map(e => e.textContent).join('');
-      const word = (ev('readMem(pc, 4, true)') >>> 0).toString(2).padStart(32, '0');
+      const word = (ev('readMem(cpu.pc, 4, true)') >>> 0).toString(2).padStart(32, '0');
       check(`${src}: ${type}, fields ${names.join(' ')}`,
         !enc.hidden && enc.textContent.includes(type) && JSON.stringify(got) === JSON.stringify(names),
         JSON.stringify(got));

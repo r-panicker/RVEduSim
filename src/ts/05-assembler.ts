@@ -2,11 +2,11 @@
 // The two-pass assembler, operand-count checks and the instruction
 // encoder, plus the helpers that render the Native instruction column.
 function resolveAddrRef(s, allowForward = false) {
-  if (labels[s] !== undefined) return labels[s];
-  if (symbolTable[s] !== undefined) return symbolTable[s];
+  if (program.labels[s] !== undefined) return program.labels[s];
+  if (program.symbolTable[s] !== undefined) return program.symbolTable[s];
   const low = s.toLowerCase();
-  if (labels[low] !== undefined) return labels[low];
-  if (symbolTable[low] !== undefined) return symbolTable[low];
+  if (program.labels[low] !== undefined) return program.labels[low];
+  if (program.symbolTable[low] !== undefined) return program.symbolTable[low];
 
   // Handle symbol offset arithmetic like symbol+96 or symbol-16
   const arithMatch = s.match(/^([a-zA-Z0-9_.$]+)\s*([+-])\s*([0-9a-fxX]+)$/);
@@ -223,11 +223,11 @@ function setSection(name) {
 }
 
 function assemble(source, startAddr) {
-  const base = (startAddr !== undefined) ? startAddr : baseAddress;
+  const base = (startAddr !== undefined) ? startAddr : layout.baseAddress;
   const lines = source.split('\n');
   const output = [];
-  labels = {};
-  symbolTable = {};
+  program.labels = {};
+  program.symbolTable = {};
 
   const splitLine = (line) => {
     let idx = line.indexOf('#');
@@ -248,12 +248,12 @@ function assemble(source, startAddr) {
     const m = main.match(/^\.(equ|eqv|set)\s+(\w+)\s*,?\s*(.+)$/i);
     if (m) {
       const val = parseImm(m[3].trim());
-      if (!isNaN(val)) symbolTable[m[2]] = val;
+      if (!isNaN(val)) program.symbolTable[m[2]] = val;
     }
   }
 
   // ---- Phase 1: assign addresses & collect labels ----
-  let textAddr = base, dataAddr = dataBase, section = 'text';
+  let textAddr = base, dataAddr = layout.dataBase, section = 'text';
   let activeDataDirPass1 = null;
   const getAddr = () => section === 'text' ? textAddr : dataAddr;
   const setAddr = (a) => { if (section === 'text') textAddr = a; else dataAddr = a; };
@@ -281,7 +281,7 @@ function assemble(source, startAddr) {
     if (newAddr === oldAddr) return;
     setAddr(newAddr);
     for (const name of pendingLabelNames) {
-      if (labels[name] === oldAddr) labels[name] = newAddr;
+      if (program.labels[name] === oldAddr) program.labels[name] = newAddr;
     }
   };
 
@@ -372,7 +372,7 @@ function assemble(source, startAddr) {
       // A duplicate label would silently win over the first, and a
       // label named after a register can never be reached (`j t0`
       // jumps to whatever x5 holds - parseReg wins).
-      if (labels[labelName] !== undefined) {
+      if (program.labels[labelName] !== undefined) {
         labelDiagnostics.push({ line: i + 1, text: lines[i],
           message: `Label '${labelName}' is defined more than once. Every reference ` +
             `to it resolves to the last definition, so rename one of them.` });
@@ -382,7 +382,7 @@ function assemble(source, startAddr) {
             `\u2014 \`j ${labelName}\` reads it as the register, not as this address. ` +
             `Rename the label.` });
       }
-      labels[labelName] = getAddr();
+      program.labels[labelName] = getAddr();
       pendingLabelNames.push(labelName);
       const rest = main.slice(first.length).trim();
       if (rest) sizeLine(rest);
@@ -392,7 +392,7 @@ function assemble(source, startAddr) {
   }
 
   // ---- Phase 2: emit encoded bytes ----
-  textAddr = base; dataAddr = dataBase; section = 'text';
+  textAddr = base; dataAddr = layout.dataBase; section = 'text';
 
   const push = (item) => { output.push(item); };
   asmAlignmentSink = misalignedAccesses;
@@ -671,8 +671,8 @@ function assemble(source, startAddr) {
   asmAlignmentSink = null;
 
   // `ecall` works here because the simulator implements the RARS syscall
-  // services. Nothing in the CG3207 hardware does: the processor has no
-  // trap support and there is no OS or ISR behind it. Say so once per
+  // services. A processor on the board does not: it has no trap support
+  // and there is no OS or ISR behind it. Say so once per
   // assemble, in assembly mode only - every compiled C program ends with
   // the CRT0 shim's exit ecall, which is ours, not the student's.
   if (editorLanguageMode !== 'c') {
@@ -680,8 +680,8 @@ function assemble(source, startAddr) {
       String(o.native || o.text || '').trim())).length;
     if (ecalls) {
       log(`ℹ️ This program uses ecall (${ecalls} site${ecalls === 1 ? '' : 's'}). ` +
-          `The simulator implements the RARS syscall services, but the CG3207 ` +
-          `hardware does not: it needs trap support in your processor and an OS or ` +
+          `The simulator implements the RARS syscall services, but a processor on ` +
+          `the board does not: it needs trap support in your processor and an OS or ` +
           `ISR to service the trap, and the Wrapper provides neither. Programs meant ` +
           `for the board should use the MMIO peripherals instead.`, 'info');
     }
@@ -702,22 +702,22 @@ function assemble(source, startAddr) {
         `misaligned word access reads or writes a different word than it does here.`, 'warn');
   }
 
-  lastCodeOverflowWords = 0;
+  program.codeOverflowWords = 0;
   const totalCodeBytes = Math.max(0, textAddr - base);
-  if (totalCodeBytes > codeSize) {
-    const overWords = Math.ceil((totalCodeBytes - codeSize) / 4);
-    log(`⚠️ Code is ${totalCodeBytes} bytes, ${totalCodeBytes - codeSize} over the ` +
-        `${codeSize}-byte Code segment — ${overWords} instruction` +
+  if (totalCodeBytes > layout.codeSize) {
+    const overWords = Math.ceil((totalCodeBytes - layout.codeSize) / 4);
+    log(`⚠️ Code is ${totalCodeBytes} bytes, ${totalCodeBytes - layout.codeSize} over the ` +
+        `${layout.codeSize}-byte Code segment — ${overWords} instruction` +
         `${overWords === 1 ? '' : 's'} that will not be loaded. Raise ` +
         `"Code (.text) size" in Settings → Linker, and IROM_DEPTH_BITS in Wrapper ` +
         `for HDL mode.`, 'warn');
-    lastCodeOverflowWords = overWords;
+    program.codeOverflowWords = overWords;
   }
 
-  const totalDataBytes = Math.max(0, dataAddr - dataBase);
-  if (totalDataBytes > dataSize && editorLanguageMode !== 'c') {
-    log(`⚠️ Data is ${totalDataBytes} bytes, ${totalDataBytes - dataSize} over the ` +
-        `${dataSize}-byte Data segment. Raise "Data (.data) size" in Settings → Linker, ` +
+  const totalDataBytes = Math.max(0, dataAddr - layout.dataBase);
+  if (totalDataBytes > layout.dataSize && editorLanguageMode !== 'c') {
+    log(`⚠️ Data is ${totalDataBytes} bytes, ${totalDataBytes - layout.dataSize} over the ` +
+        `${layout.dataSize}-byte Data segment. Raise "Data (.data) size" in Settings → Linker, ` +
         `and DMEM_DEPTH_BITS in Wrapper for HDL mode.`, 'warn');
   }
 
@@ -1097,14 +1097,14 @@ function encodeInstruction(mnemonic, args, address) {
 
       const targetStr = args[2];
       let targetAddr;
-      if (labels[targetStr] !== undefined) {
-        targetAddr = labels[targetStr];
-      } else if (symbolTable[targetStr] !== undefined) {
-        targetAddr = symbolTable[targetStr];
+      if (program.labels[targetStr] !== undefined) {
+        targetAddr = program.labels[targetStr];
+      } else if (program.symbolTable[targetStr] !== undefined) {
+        targetAddr = program.symbolTable[targetStr];
       } else {
         const val = parseImm(targetStr);
         if (isNaN(val)) throw new Error(`Unknown label: ${targetStr}`);
-        if (targetStr.startsWith('+') || targetStr.startsWith('-') || Math.abs(val) < baseAddress) {
+        if (targetStr.startsWith('+') || targetStr.startsWith('-') || Math.abs(val) < layout.baseAddress) {
           targetAddr = address + val;
         } else {
           targetAddr = val;
@@ -1154,14 +1154,14 @@ function encodeInstruction(mnemonic, args, address) {
       let targetStr = args.length >= 2 ? args[1] : args[0];
       let targetAddr;
 
-      if (labels[targetStr] !== undefined) {
-        targetAddr = labels[targetStr];
-      } else if (symbolTable[targetStr] !== undefined) {
-        targetAddr = symbolTable[targetStr];
+      if (program.labels[targetStr] !== undefined) {
+        targetAddr = program.labels[targetStr];
+      } else if (program.symbolTable[targetStr] !== undefined) {
+        targetAddr = program.symbolTable[targetStr];
       } else {
         const val = parseImm(targetStr);
         if (isNaN(val)) throw new Error(`Unknown label: ${targetStr}`);
-        if (targetStr.startsWith('+') || targetStr.startsWith('-') || Math.abs(val) < baseAddress) {
+        if (targetStr.startsWith('+') || targetStr.startsWith('-') || Math.abs(val) < layout.baseAddress) {
           targetAddr = address + val;
         } else {
           targetAddr = val;

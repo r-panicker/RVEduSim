@@ -1,12 +1,10 @@
 // Operand parsing shared by the assembler: register names, immediates
 // (with %hi/%lo and character literals) and memory operands.
 
-import { INSTRUCTIONS, REG_NAMES } from './02-isa';
+import { INSTRUCTIONS, REG_NAMES } from '../isa/instructions';
+import { program } from '../machine/state';
 
-// Read when an operand is parsed: the symbol tables (03-state.ts) and the
-// label resolver (05-assembler.ts).
-declare let symbolTable: Record<string, number>;
-declare let labels: Record<string, number>;
+// The label resolver (05-assembler.ts).
 declare function resolveAddrRef(s: string, allowForward?: boolean): number;
 
 // Registers are named `x0`-`x31` or by their ABI name. A bare number is
@@ -120,10 +118,10 @@ export function parseImm(input: unknown, allowForward = false): number {
   if (binM) return sign * parseInt(binM[1], 2);
   if (/^\d+$/.test(body)) return sign * parseInt(body, 10);
   // Symbolic constant (.equ) or label used as an immediate (case-insensitive)
-  if (symbolTable[body] !== undefined) return sign * symbolTable[body];
-  if (symbolTable[low] !== undefined) return sign * symbolTable[low];
-  if (labels[body] !== undefined) return sign * labels[body];
-  if (labels[low] !== undefined) return sign * labels[low];
+  if (program.symbolTable[body] !== undefined) return sign * program.symbolTable[body];
+  if (program.symbolTable[low] !== undefined) return sign * program.symbolTable[low];
+  if (program.labels[body] !== undefined) return sign * program.labels[body];
+  if (program.labels[low] !== undefined) return sign * program.labels[low];
   if (allowForward) return 0;
   return NaN;
 }
