@@ -391,8 +391,10 @@ function createVerilator({ root, cacheDir }) {
       early.delete(id);
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
-      child.stdout.on('data', onData);
-      child.stderr.on('data', onData);
+      // On Windows the model's C runtime writes CRLF; the page reads lines.
+      const plain = d => onData(d.indexOf('\r') < 0 ? d : d.replace(/\r/g, ''));
+      child.stdout.on('data', plain);
+      child.stderr.on('data', plain);
       child.stdin.on('error', () => {});
       const code = await new Promise(resolve => {
         child.on('error', e => resolve('error: ' + e.message));

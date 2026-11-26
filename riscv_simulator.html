@@ -15584,7 +15584,7 @@ self.onmessage = async ({ data: job }) => {
     // testbench's own are left out.
     function hdlReportVerilator(log) {
       const errs = [], warn = new Map();
-      for (const line of String(log || '').split('\n')) {
+      for (const line of String(log || '').split(/\r?\n/)) {
         const m = /^%(Error|Warning)(?:-([A-Z0-9_]+))?: (.*)$/.exec(line);
         if (!m) continue;
         if (m[1] === 'Error') { if (!/^Exiting due to/.test(m[3])) errs.push(m[3]); continue; }
@@ -15614,7 +15614,7 @@ self.onmessage = async ({ data: job }) => {
         if (s[0] !== 's') continue;
         const c = ck[s];
         delete ck[s];
-        const k = parseInt(c.txt.split('\n')[HDL_CK_CYC_LINE] || '', 2);
+        const k = parseInt(c.txt.split(/\r?\n/)[HDL_CK_CYC_LINE] || '', 2);
         if (k > 0) ck[k] = c;
       }
       return ck;

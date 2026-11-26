@@ -384,6 +384,10 @@ if (process.argv[2] === '--checkpoints') {
 
     console.log('\n[5] Errors and Reset');
     doc.getElementById('console').innerHTML = '';
+    // On Windows Verilator's log arrives with CRLF line ends.
+    win.hdlReportVerilator('%Error: x.v:1:2: crlf check\r\n%Error: Exiting due to 1 error(s)\r\n');
+    check('An error in a CRLF log is reported', consoleText(doc).some(l => /x\.v:1:2: crlf check$/.test(l)));
+    doc.getElementById('console').innerHTML = '';
     fs.writeFileSync(path.join(dir, EDIT), fs.readFileSync(path.join(RV, EDIT), 'utf8').replace(/endmodule/, 'endmodul'));
     const bad = await win.hdlStartTrace(2000);
     check('A syntax error is reported with its file and line, and nothing runs',
