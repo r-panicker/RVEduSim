@@ -40,7 +40,7 @@ Download the installer for your OS from [Releases](https://github.com/r-panicker
 |---|---|
 | Windows | `RVEduSim-<version>-win-x64.exe` |
 | macOS | `RVEduSim-<version>-mac-arm64.dmg` (Apple Silicon) or `RVEduSim-<version>-mac-x64.dmg` (Intel) |
-| Linux | `RVEduSim-<version>-linux-x64.AppImage` |
+| Linux | `RVEduSim-<version>-linux-x86_64.AppImage` |
 
 The builds are not code-signed yet, so the first launch needs one extra step:
 
@@ -68,7 +68,7 @@ Both run the same simulator. The desktop app runs the Verilog tools natively ins
 |---|---|---|
 | Install | none | installer |
 | Icarus Verilog | WebAssembly | native, faster |
-| Verilator | no | yes: compiles your design and simulates it 15 to 20 times faster than Icarus |
+| Verilator | no | yes: compiles your design and simulates it 20 to 100 times faster than Icarus |
 | Speed of a long run | about 8,000 cycles a second | hundreds of thousands to millions a second with Verilator |
 
 ## For CG3207

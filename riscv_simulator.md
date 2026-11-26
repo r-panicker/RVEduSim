@@ -258,7 +258,8 @@ like the page, with these differences:
   Simulation**; in the browser the setting is shown but disabled. Verilator compiles your
   design to C++ before running it, which takes several seconds after each change to your
   Verilog (not after a change of program, a Reset or an input change), and then simulates
-  15 to 20 times faster than Icarus.
+  about 20 times as fast as Icarus, or about 100 times without the architectural trace
+  (*Detail: Fastest*).
 - Verilator is two-state: a signal that Icarus shows as `x`, such as a register that has
   never been written, is 0. Use Icarus when looking for uninitialised state. Post-synthesis
   simulation is only available with Icarus.
@@ -269,7 +270,8 @@ like the page, with these differences:
   running* it follows the simulation, which is useful at a slow clock.
 - Verilator needs a C++ compiler. On a computer without one (`g++` on Linux, the Xcode
   command line tools on macOS), the first build downloads one, about 60 MB (100 MB on
-  Windows), and takes about a minute. Later builds use it offline.
+  Windows), and prepares it, which can take several minutes (about 7 on Windows in testing).
+  Later builds use it offline.
 - The installers are not signed. On macOS the app is refused the first time it is opened;
   allow it in System Settings → Privacy & Security → *Open Anyway*. On Windows, choose
   *More info* → *Run anyway*. On Linux, make the AppImage executable.

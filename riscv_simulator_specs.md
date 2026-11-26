@@ -893,8 +893,8 @@ the last 50,000 cycles when the run stops.
 installer). Each is checked by compiling a C++20 coroutine. If none works, Zig 0.17.1 is
 downloaded from ziglang.org into the data folder, its SHA-256 checked, and `zig c++` used: about
 57 MB (100 MB on Windows), about 400 MB unpacked, plus Zig's own cache. Zig's first compile builds its C++
-library (about 30 s, once), so a first build from nothing takes about 45 s and later ones about
-5 s. Offline, the build fails with a message naming the alternatives and the next build retries.
+library (about 30 s, once), so a first build from nothing takes about 45 s on Linux (about 7 minutes on a
+Windows GitHub runner) and later ones about 5 s. Offline, the build fails with a message naming the alternatives and the next build retries.
 Zig is not bundled with any installer.
 
 ---

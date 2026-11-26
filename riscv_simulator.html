@@ -15519,7 +15519,7 @@ self.onmessage = async ({ data: job }) => {
     let hdlVerilatorNoted = false;
     let hdlZigNoted = false;
 
-    // A first build can take a minute: on a computer with no C++ compiler,
+    // A first build can take several minutes: on a computer with no C++ compiler,
     // one is downloaded and prepared before Verilator's own runtime is
     // compiled. Each step goes to the status line, so it is never a silent
     // wait.
@@ -15530,7 +15530,7 @@ self.onmessage = async ({ data: job }) => {
         if (!hdlZigNoted) {
           hdlZigNoted = true;
           hdlLog('No C++ compiler was found on this computer, so the one Verilator needs (Zig, about ' +
-            '55 MB, 100 MB on Windows) is being downloaded. This happens once.', 'sys');
+            '55 MB, 100 MB on Windows) is being downloaded and prepared. This takes several minutes, once.', 'sys');
         }
         hdlStatus('downloading the C++ compiler for Verilator' +
           (e.total ? ': ' + mb(e.received) + ' of ' + mb(e.total) + ' MB' : '...'), 'busy');
@@ -20315,7 +20315,7 @@ endmodule
       row.title = hdlVerilatorAvail
         ? 'Icarus Verilog simulates four-state logic (x and z) and starts at once. Verilator first compiles ' +
           'your design to C++, which takes several seconds each time the sources change, and then runs ' +
-          'tens of times faster; it is two-state, so what Icarus shows as x is 0. Post-synthesis ' +
+          '20 to 100 times faster; it is two-state, so what Icarus shows as x is 0. Post-synthesis ' +
           'simulation needs Icarus.'
         : window.rvNative ? 'This build of the desktop app has no Verilator.'
         : 'Verilator is available only in the desktop app.';
