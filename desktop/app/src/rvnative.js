@@ -34,6 +34,7 @@
   const channel = fn => { const ch = new (core().Channel)(); ch.onmessage = fn; return ch; };
 
   const progressCbs = [], liveCbs = [];
+  let sendChain = Promise.resolve();
   window.rvNative = {
     icarus: !!info.icarus, icarusVersion: info.icarusVersion || null, platform: info.platform,
     verilator: !!info.verilator, verilatorVersion: info.verilatorVersion || null,
@@ -45,7 +46,10 @@
     onVlProgress: cb => { progressCbs.push(cb); },
     vlLive: async (id, key, files, args, opts) =>
       unframe(await invoke('vl_live', { id, key, files: wire(files), args, opts, onData: channel(t => liveCbs.forEach(cb => cb(id, t))) })),
-    vlLiveSend: (id, line) => invoke('vl_live_send', { id, line: String(line) }),
+    // Each command waits for the one before: two UART bytes must reach the
+    // model in the order they were typed, and separate IPC calls need not
+    // arrive in the order they were made.
+    vlLiveSend: (id, line) => (sendChain = sendChain.then(() => invoke('vl_live_send', { id, line: String(line) })).catch(() => {})),
     vlLiveRead: async (id, name, max) => {
       const r = unframe(await invoke('vl_live_read', { id, name, max: max || 0 }));
       if (r.none) return null;

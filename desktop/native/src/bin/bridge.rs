@@ -141,15 +141,22 @@ fn main() {
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else { break };
         if line.trim().is_empty() { continue; }
-        let b = b.clone();
-        thread::spawn(move || {
-            let req: Value = match serde_json::from_str(&line) { Ok(v) => v, Err(e) => { b.send(json!({ "id": null, "error": e.to_string() })); return; } };
-            let id = req.get("id").cloned().unwrap_or(Value::Null);
-            match handle(&b, req["cmd"].as_str().unwrap_or(""), req.get("args").unwrap_or(&Value::Null)) {
-                Ok(r) => b.send(json!({ "id": id, "result": r })),
-                Err(e) => b.send(json!({ "id": id, "error": e })),
+        let req: Value = match serde_json::from_str(&line) { Ok(v) => v, Err(e) => { b.send(json!({ "id": null, "error": e.to_string() })); continue; } };
+        let quick = matches!(req["cmd"].as_str(), Some("vlLiveSend" | "hdlKill" | "vlLiveRead" | "info"));
+        let run = {
+            let b = b.clone();
+            move || {
+                let id = req.get("id").cloned().unwrap_or(Value::Null);
+                match handle(&b, req["cmd"].as_str().unwrap_or(""), req.get("args").unwrap_or(&Value::Null)) {
+                    Ok(r) => b.send(json!({ "id": id, "result": r })),
+                    Err(e) => b.send(json!({ "id": id, "error": e })),
+                }
             }
-        });
+        };
+        // What returns at once is answered here, in the order it was sent: a
+        // live run's commands (two UART bytes, say) must reach the model in
+        // that order. Runs and builds each get a thread.
+        if quick { run() } else { thread::spawn(run); }
     }
     // stdin closed: the test is done with us.
     if let Some(i) = &b.icarus { i.kill_all(); }

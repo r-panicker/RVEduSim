@@ -574,8 +574,13 @@ if (process.argv[2] === '--checkpoints') {
     doc.getElementById('uartInputText').value = 'A\\r';
     win.sendUartInput();
     const termEl = doc.getElementById('uartTerminal');
-    await until(() => /Welcome|Hello/.test(String(termEl.innerText || termEl.textContent || '')), 5000);
-    win.toggleRunPause();
+    // The reply is a couple of hundred thousand cycles of UART at its baud
+    // rate, so how long it takes depends on the machine; the run's own
+    // cycle limit bounds it.
+    let urDone = false;
+    ur.then(() => { urDone = true; });
+    await until(() => urDone || /Welcome/.test(String(termEl.innerText || termEl.textContent || '')), 120000);
+    if (!urDone) win.toggleRunPause();
     await ur;
     const term = String(termEl.innerText || termEl.textContent || '');
     check('Typing into the UART console reaches the running model (' + JSON.stringify(term.slice(0, 40)) + ')', /Welcome|Hello|A/.test(term) && term.length > 5);
