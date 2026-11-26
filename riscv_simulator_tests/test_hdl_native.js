@@ -440,8 +440,12 @@ setTimeout(async () => {
       for (let i = 0; i < 30; i++) { await sleep(50); pcsSlow.add(win.eval('cpu.pc') >>> 0); }
       win.toggleRunPause();
       await r7;
-      check('…and at a clock slow enough to watch, the PC LEDs show every instruction (' + pcsSlow.size + ' PCs in 1.5 s)',
-        pcsSlow.size >= 4 && win.getHdlTrace().pre.some(e => e[0] === 'C' && parseInt(e[1][0], 10) < win.getHdlTrace().budget - 1));
+      // Every PC change is reported, so the program's first instructions each
+      // have their own record; sampling what is shown would catch them only if
+      // it started within their first 100 ms.
+      const pcEarly = new Set(win.getHdlTrace().pre.filter(e => e[0] === 'C' && parseInt(e[1][0], 10) < 20).map(e => e[1][1]));
+      check('…and at a clock slow enough to watch, the PC LEDs show every instruction (' + pcEarly.size +
+        ' PCs in the first 20 cycles; ' + pcsSlow.size + ' shown in 1.5 s)', pcEarly.size >= 6 && pcsSlow.size >= 2);
       win.setRunPace('max');
       win.setClkDivBits(5);
       win.setHdlTrace(true);
