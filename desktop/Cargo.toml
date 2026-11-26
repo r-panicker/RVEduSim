@@ -1,0 +1,17 @@
+# The desktop app: native (the Rust behind window.rvNative, usable without
+# a GUI, and the bridge the tests drive it through) and app (the Tauri shell).
+[workspace]
+members = ["native", "app"]
+resolver = "2"
+
+[workspace.package]
+version = "24.143.0"
+edition = "2021"
+license = "MIT"
+
+# Small over fast: the work is done by Icarus, Verilator and the compiler.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,5 @@
+target/
+iverilog/
+verilator/
+web/
+app/gen/

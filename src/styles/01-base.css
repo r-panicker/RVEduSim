@@ -1,4 +1,8 @@
 /* General Reset & Layout */
+/* The page is dark throughout; native controls (checkboxes, number spinners,
+   dropdowns and their popups) are drawn to match. */
+:root { color-scheme: dark; }
+
 * {
   box-sizing: border-box;
   margin: 0;

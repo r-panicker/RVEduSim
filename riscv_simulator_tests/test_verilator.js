@@ -26,11 +26,10 @@ const { dir: RV, prebuilt: PREBUILT } = require('./core_dir').coreOrPrebuilt();
 const EDIT = PREBUILT ? 'RV_reference.v' : 'ALU.v';
 const EDIT_RE = EDIT.replace(/\./g, '\\.');
 const ENGINE = process.env.HDL_ENGINE_DIR || path.join(ROOT, 'vendor', 'verisim');
-const { createRunner, findBinDir, readFolder } = require(path.join(ROOT, 'electron', 'hdl_native.js'));
-const { createVerilator, findVerilator } = require(path.join(ROOT, 'electron', 'verilator_native.js'));
+const { createRunner, createVerilator, findBinDir, findVerilator, readFolder, icarusDirs, verilatorDirs } = require('./native_bridge');
 const OS = { darwin: 'mac', win32: 'win' }[process.platform] || process.platform;
-const NATIVE = findBinDir([process.env.HDL_NATIVE_DIR, path.join(ROOT, 'electron', 'iverilog', OS + '-' + process.arch)]);
-const VL_ROOT = findVerilator([process.env.HDL_VERILATOR_DIR, path.join(ROOT, 'electron', 'verilator', OS + '-' + process.arch)]);
+const NATIVE = findBinDir(icarusDirs());
+const VL_ROOT = findVerilator(verilatorDirs());
 
 const html = require('./page').html();
 const CM6 = fs.readFileSync(path.join(__dirname, 'cm6_bundle.min.js'), 'utf8');
@@ -572,10 +571,10 @@ if (process.argv[2] === '--checkpoints') {
     doc.getElementById('uartInputMode').value = 'ascii';
     doc.getElementById('uartInputText').value = 'A\\r';
     win.sendUartInput();
-    await sleep(800);
+    const termEl = doc.getElementById('uartTerminal');
+    await until(() => /Welcome|Hello/.test(String(termEl.innerText || termEl.textContent || '')), 5000);
     win.toggleRunPause();
     await ur;
-    const termEl = doc.getElementById('uartTerminal');
     const term = String(termEl.innerText || termEl.textContent || '');
     check('Typing into the UART console reaches the running model (' + JSON.stringify(term.slice(0, 40)) + ')', /Welcome|Hello|A/.test(term) && term.length > 5);
     check('…and the bytes are on the timeline', win.getHdlTrace().timeline.rx.length >= 2);

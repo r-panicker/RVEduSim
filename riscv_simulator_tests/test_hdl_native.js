@@ -25,9 +25,9 @@ const ROOT = path.resolve(__dirname, '..');
 // The RTL core, or the prebuilt one in examples/hdl (see core_dir.js).
 const { dir: RV, prebuilt: PREBUILT } = require('./core_dir').coreOrPrebuilt();
 const ENGINE = process.env.HDL_ENGINE_DIR || path.join(ROOT, 'vendor', 'verisim');
-const { createRunner, findBinDir, readFolder } = require(path.join(ROOT, 'electron', 'hdl_native.js'));
+const { createRunner, createVerilator, findBinDir, findVerilator, readFolder, icarusDirs, verilatorDirs } = require('./native_bridge');
 const OS = { darwin: 'mac', win32: 'win' }[process.platform] || process.platform;
-const NATIVE = findBinDir([process.env.HDL_NATIVE_DIR, path.join(ROOT, 'electron', 'iverilog', OS + '-' + process.arch)]);
+const NATIVE = findBinDir(icarusDirs());
 
 const html = require('./page').html();
 const CM6 = fs.readFileSync(path.join(__dirname, 'cm6_bundle.min.js'), 'utf8');

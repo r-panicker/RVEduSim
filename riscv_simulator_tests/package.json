@@ -36,6 +36,7 @@
     "test:native": "node test_hdl_native.js",
     "test:folder": "node test_hdl_folder_browser.js",
     "test:app": "node test_electron_app.js",
+    "test:desktop": "node test_desktop_app.js",
     "test:verilator": "node test_verilator.js"
   },
   "dependencies": {
