@@ -75,7 +75,8 @@ export async function hdlRunChunked() {
       if (text) hdlLog(text, 'out');
     };
     let size = 1000, first = !resume, stop = 'end', preApplied = resume ? hdlRecording().pre.length : 0;
-    const wall0 = performance.now(), cyc0 = resume ? hdlCurrentCycle() : 0;
+    let wall0 = performance.now();
+    const cyc0 = resume ? hdlCurrentCycle() : 0;
     // Without the trace, Real time holds what is shown to the paced clock:
     // each event, and the PC, is applied as the clock reaches it, and a
     // chunk is about HDL_CHUNK_MS of the clock, so the recording stays
@@ -159,6 +160,8 @@ export async function hdlRunChunked() {
         size = cap(Math.max(200, Math.min(200000, Math.round((target - at) * HDL_CHUNK_MS / Math.max(1, performance.now() - t0)))));
         if (first) {
           first = false;
+          // The paced clock starts with the run, not with the compile before it.
+          wall0 = performance.now();
           if (clock.pace === 'real') { hdlSeek(0); if (hdlActivity.paced) preApplied = hdlActivity.paced.applied; }
         }
         else said(t);

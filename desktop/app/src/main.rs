@@ -31,6 +31,16 @@ fn target() -> &'static str {
     }
 }
 
+/// A path without Windows' verbatim prefix (\\?\C:\...), which make, the
+/// C++ compiler and Verilator's scripts do not understand.
+fn plain(p: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(rest) = p.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        if !rest.starts_with("UNC\\") { return PathBuf::from(rest); }
+    }
+    p
+}
+
 /// The platform as the page names it (Node's process.platform).
 fn platform() -> &'static str {
     match std::env::consts::OS { "windows" => "win32", "macos" => "darwin", o => o }
@@ -231,8 +241,9 @@ fn main() {
             // RVSIM_USER_DATA keeps an instance's settings and caches apart
             // from the installed app's (the tests use it).
             let data = std::env::var_os("RVSIM_USER_DATA").map(PathBuf::from).unwrap_or(app.path().app_data_dir()?);
+            let data = plain(data);
             std::fs::create_dir_all(&data)?;
-            let res = app.path().resource_dir().ok();
+            let res = app.path().resource_dir().ok().map(plain);
             let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
             let icarus = Icarus::find(&[res.clone().map(|r| r.join("iverilog")), Some(dev.join("iverilog").join(target()))].into_iter().flatten().collect::<Vec<_>>());
             let vl_root = Verilator::find(&[res.map(|r| r.join("verilator")), Some(dev.join("verilator").join(target()))].into_iter().flatten().collect::<Vec<_>>());

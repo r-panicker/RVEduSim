@@ -171,6 +171,7 @@ async function launch(userData) {
     const vb = /Verilator build ([\d.?]+) s \(([^)]+)\)|Reusing the Verilator model/.exec(vlLog);
     console.log('    ' + (vb ? vb[0] : 'no build line'));
     check('Run builds with Verilator and lights the LEDs', vlLit && !!vb);
+    if (!vlLit || !vb) console.log(vlLog.split('\n').slice(-25).map(l => '    | ' + l).join('\n'));
     await page.eval(() => { resetAll(); setHdlCycles(50000000); });
     await page.click('#runPauseBtn');
     await page.until(() => /running live/.test(document.getElementById('statusBar').textContent), 60000);
