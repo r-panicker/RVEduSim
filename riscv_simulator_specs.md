@@ -834,7 +834,7 @@ these differences:
   opened with `window.open` or navigated to, open in the system browser.
 - **Data folder.** `settings.json` (the remembered folder) and `verilator/` (models, runtime
   objects, Zig) are in the app's data folder, `io.github.r-panicker.rvedusim` in the platform's
-  application-data location. `RVSIM_USER_DATA` names another, which the tests use. Paths are
+  application-data location. `RVSIM_USER_DATA` names another, which the tests use; the webview's own data (`localStorage`) then goes there too, under `webview/` (except on macOS, where the webview keeps one store per app). Paths are
   passed to the tools without Windows' verbatim `\\?\` prefix, which make and the compiler do
   not understand.
 - **No menu bar** on Windows and Linux. macOS keeps the standard menu, which copy and paste

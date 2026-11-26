@@ -398,10 +398,13 @@ if (process.argv[2] === '--checkpoints') {
     win.hdlStopWorker();
     const ended = await pending;
     check('Reset during a build cancels it', !!ended.e && ended.e.cancelled === true);
-    await sleep(300);
-    const left = process.platform === 'win32' ? [] : execSync('ps -eo args', { encoding: 'utf8' }).split('\n')
+    // The page is told at once; the processes are killed beside it.
+    const compilers = () => process.platform === 'win32' ? [] : execSync('ps -eo args', { encoding: 'utf8' }).split('\n')
       .filter(l => /verilator_bin|cc1plus|rvsim-vl-/.test(l) && !/ps -eo/.test(l));
-    check('…and leaves no compiler running (' + left.length + ')', left.length === 0);
+    const k0 = Date.now();
+    await until(() => compilers().length === 0, 20000);
+    const left = compilers();
+    check('…and leaves no compiler running (' + left.length + ' after ' + (Date.now() - k0) + ' ms)', left.length === 0);
     fs.copyFileSync(path.join(RV, EDIT), path.join(dir, EDIT));
 
     console.log('\n[6] Live runs');

@@ -240,7 +240,8 @@ fn main() {
         .setup(|app| {
             // RVSIM_USER_DATA keeps an instance's settings and caches apart
             // from the installed app's (the tests use it).
-            let data = std::env::var_os("RVSIM_USER_DATA").map(PathBuf::from).unwrap_or(app.path().app_data_dir()?);
+            let own = std::env::var_os("RVSIM_USER_DATA").map(PathBuf::from);
+            let data = own.clone().unwrap_or(app.path().app_data_dir()?);
             let data = plain(data);
             std::fs::create_dir_all(&data)?;
             let res = app.path().resource_dir().ok().map(plain);
@@ -265,7 +266,12 @@ fn main() {
             app.manage(state);
 
             let handle = app.handle().clone();
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let mut win = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()));
+            // The page's own settings (localStorage) go with the rest, so an
+            // instance started with RVSIM_USER_DATA shares nothing with the
+            // installed app. (macOS's webview keeps one store per app.)
+            if own.is_some() { win = win.data_directory(data.join("webview")); }
+            win
                 .title("RVEduSim")
                 .inner_size(1440.0, 920.0)
                 .background_color(tauri::window::Color(0x1e, 0x1e, 0x2e, 0xff))

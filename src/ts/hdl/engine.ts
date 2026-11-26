@@ -186,6 +186,18 @@ export function hdlWorkerGet() {
   return w;
 }
 
+// A native job, failed at once by hdlStopWorker as a worker job is, not
+// when the killed process has been reaped: until then the page would still
+// be busy, and a Run straight after a Reset would be dropped.
+const hdlNativeCancels = new Map<number, (e: Error) => void>();
+export function hdlNativeJob<T>(id: number, call: Promise<T>): Promise<T> {
+  hdlNativeJobs.add(id);
+  return new Promise<T>((resolve, reject) => {
+    hdlNativeCancels.set(id, reject);
+    call.then(resolve, reject);
+  }).finally(() => { hdlNativeJobs.delete(id); hdlNativeCancels.delete(id); });
+}
+
 // Ends the worker and fails whatever it was running. With no error
 // given, that is a cancellation: the run was discarded mid-flight.
 export function hdlStopWorker(err?: Error) {
@@ -195,6 +207,7 @@ export function hdlStopWorker(err?: Error) {
   hdlWorker = null;
   hdlWorkerUrl = null;
   const e = err || Object.assign(new Error('cancelled'), { cancelled: true });
+  for (const cancel of hdlNativeCancels.values()) cancel(e);
   for (const job of hdlWorkerJobs.values()) job.reject(e);
   hdlWorkerJobs.clear();
 }
@@ -206,15 +219,10 @@ export async function hdlTool(tool: HdlToolName, files: HdlToolFiles, args: stri
                               opts: { keep?: RegExp; merge?: boolean } = {}): Promise<HdlToolResult> {
   if (hdlNative) {
     const id = ++hdlActivity.jobSeq;
-    hdlNativeJobs.add(id);
-    try {
-      const r = await hdlNative.hdlRun(id, tool, files, args,
-        { merge: !!opts.merge, keep: opts.keep ? opts.keep.source : null });
-      if (r.cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
-      return r;
-    } finally {
-      hdlNativeJobs.delete(id);
-    }
+    const r = await hdlNativeJob(id, hdlNative.hdlRun(id, tool, files, args,
+      { merge: !!opts.merge, keep: opts.keep ? opts.keep.source : null }));
+    if (r.cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
+    return r;
   }
   await loadHdlEngine();
   if (!hdlWorkerFailed) {
@@ -293,13 +301,7 @@ export async function hdlSimulate(vvpBytes: Uint8Array, memFiles: HdlToolFiles, 
 // A Verilator model takes the same plusargs and files as vvp does.
 export async function hdlRunModel(model: unknown, files: HdlToolFiles, plusargs: string[]) {
   const id = ++hdlActivity.jobSeq;
-  hdlNativeJobs.add(id);
-  let r: RvNativeRun;
-  try {
-    r = await hdlBridge().vlRun(id, model, files, plusargs || [], { merge: true, keep: HDL_RUN_KEEP.source });
-  } finally {
-    hdlNativeJobs.delete(id);
-  }
+  const r = await hdlNativeJob(id, hdlBridge().vlRun(id, model, files, plusargs || [], { merge: true, keep: HDL_RUN_KEEP.source }));
   if (r.cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
   return hdlDecodeRun(r);
 }
@@ -354,13 +356,7 @@ export async function hdlVerilate(tb: string, gen: string, ck: string) {
   }
   hdlStatus('building with Verilator...', 'busy');
   const id = ++hdlActivity.jobSeq;
-  hdlNativeJobs.add(id);
-  let r: RvNativeBuild;
-  try {
-    r = await hdlBridge().vlBuild(id, files, { language, headers, waveTop: hdlConfig.waveTop });
-  } finally {
-    hdlNativeJobs.delete(id);
-  }
+  const r = await hdlNativeJob(id, hdlBridge().vlBuild(id, files, { language, headers, waveTop: hdlConfig.waveTop }));
   if (r.cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
   if (r.ok) {
     hdlLog(r.cached ? 'Reusing the Verilator model built earlier for these sources.'

@@ -11,7 +11,7 @@
 import { HDL_CK_VERIFY, HDL_VL_CK_EVERY, type HdlCheckpoint, hdlCheckFrom, hdlJoinCheck, hdlJoinSplit, hdlRecordList, hdlShiftVcd, hdlVcdFromBytes, hdlVlCkFailed, hdlVlCkMerge, hdlVlCkPick } from './checkpoints';
 import { hdlCompareWithJs } from './compare';
 import { hdlRxFile, hdlStimFile, hdlSyncRx } from './compile';
-import { HDL_LIVE_PRE_KEEP, HDL_LIVE_VCD_MAX, HDL_RUN_KEEP, HDL_VCD_WINDOW, type HdlToolFiles, hdlClearConsole, hdlDecodeCk, hdlDecodeRun, hdlLog, hdlNativeJobs, hdlRunModel, hdlStatus, hdlBridge } from './engine';
+import { HDL_LIVE_PRE_KEEP, HDL_LIVE_VCD_MAX, HDL_RUN_KEEP, HDL_VCD_WINDOW, type HdlToolFiles, hdlClearConsole, hdlDecodeCk, hdlDecodeRun, hdlLog, hdlNativeJob, hdlRunModel, hdlStatus, hdlBridge } from './engine';
 import { hdlBreakAt, hdlCaptureBaseInputs, hdlWithBusy } from './run';
 import { hdlApplyPer, hdlCaptureBase, hdlCutTrace, hdlSeek, hdlTrimTrace } from './seek';
 import { hdlReadFolder } from './sources';
@@ -128,7 +128,6 @@ export async function hdlRunLive() {
     // before `from` has been checked against the recording.
     const launch = (c: HdlCheckpoint | null): Promise<{ cancelled?: boolean; files: Record<string, Uint8Array> }> => {
       const id = live.id = ++hdlActivity.jobSeq;
-      hdlNativeJobs.add(id);
       const p = plus.concat('+TRACEFROM=' + (c ? c.k : from), ckOn() ? ['+CKEVERY=' + HDL_VL_CK_EVERY] : []);
       const f: HdlToolFiles = Object.assign({}, files);
       if (c) {
@@ -140,9 +139,9 @@ export async function hdlRunLive() {
       live.split = c ? hdlJoinSplit(from) : null;
       live.over = [];
       live.held = [];
-      const run = hdlBridge().vlLive(id, compiled.model, f, p, { keep: HDL_RUN_KEEP.source });
+      const run = hdlNativeJob(id, hdlBridge().vlLive(id, compiled.model, f, p, { keep: HDL_RUN_KEEP.source }));
       if (live.stopSent) hdlLiveSend('stop');
-      return run.finally(() => hdlNativeJobs.delete(id));
+      return run;
     };
     const check = live.check = () => {
       const ok = hdlJoinCheck(oldRecs, live.over.join(''), checkLo, from - 2);
