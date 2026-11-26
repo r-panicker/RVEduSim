@@ -8,9 +8,11 @@
  * In a browser the setting is shown and disabled. Also times Icarus against
  * Verilator through the page, waveform on and off.
  *
- * Needs native builds of both: cd electron && npm run build:iverilog &&
- * npm run build:verilator, and a C++20 compiler (or RVSIM_FORCE_ZIG=1 with
- * the network, which fetches Zig into the test's cache).
+ * Needs Rust (cargo builds rvnative-bridge, which it runs through), native
+ * builds of both (desktop/scripts/build-iverilog.sh and build-verilator.sh,
+ * into desktop/iverilog/<os>-<arch> and desktop/verilator/<os>-<arch>), and
+ * a C++20 compiler (or RVSIM_FORCE_ZIG=1 with the network, which fetches Zig
+ * into the test's cache).
  */
 const fs = require('fs');
 const os = require('os');
@@ -288,7 +290,7 @@ if (process.argv[2] === '--checkpoints') {
     console.log('⚡ VERILATOR (the desktop app) THROUGH THE PAGE');
     console.log('===========================================================');
     if (!NATIVE || !VL_ROOT) {
-      check('Native Icarus and Verilator builds are present (npm run build:iverilog / build:verilator in electron/)', false);
+      check('Native Icarus and Verilator builds are present (desktop/scripts/build-iverilog.sh and build-verilator.sh)', false);
       throw new Error('no native builds');
     }
     console.log('  ' + fs.readFileSync(path.join(VL_ROOT, 'VERSION'), 'utf8').trim());

@@ -38,9 +38,10 @@ Download the installer for your OS from [Releases](https://github.com/r-panicker
 
 | OS | File |
 |---|---|
-| Windows | `RVEduSim-<version>-win-x64.exe` |
-| macOS (Apple silicon) | `RVEduSim-<version>-mac-arm64.dmg` |
-| Linux | `RVEduSim-<version>-linux-x86_64.AppImage` |
+| Windows | `RVEduSim_<version>_x64-setup.exe` |
+| macOS (Apple silicon) | `RVEduSim_<version>_aarch64.dmg` |
+| Ubuntu 24.04 or later | `RVEduSim_<version>_amd64.deb` |
+| Other Linux | `RVEduSim_<version>_amd64.AppImage` |
 
 The builds are not code-signed yet, so the first launch needs one extra step:
 
@@ -48,7 +49,8 @@ The builds are not code-signed yet, so the first launch needs one extra step:
 |---|---|
 | Windows | On the SmartScreen warning, click **More info → Run anyway**. |
 | macOS | Open the `.dmg` and drag RVEduSim to Applications. Open it once and dismiss the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway**. |
-| Linux | `chmod +x RVEduSim-*.AppImage`, then run it. |
+| Ubuntu | `sudo apt install ./RVEduSim_*_amd64.deb`, which also installs `g++` for Verilator. |
+| Other Linux | `chmod +x RVEduSim_*.AppImage`, then run it. |
 
 Verilator compiles your design to C++, so it needs a C++ compiler: `g++` on Linux, the Xcode command line tools on macOS. Where there is none, the app downloads one (Zig) the first time.
 
@@ -78,13 +80,13 @@ RVEduSim was written for [CG3207](https://nus-cg3207.github.io/), the computer a
 
 ## Build from source
 
-The simulator is one HTML file with no build step; `examples/` and `vendor/` sit beside it. The desktop app is in `electron/`, and [electron/README.md](electron/README.md) explains how to build Icarus Verilog and Verilator for it and package installers.
+The page is built from `src/` by `npm run build` (see *Browser* above). The desktop app is in `desktop/`, a Tauri app with its native parts in Rust, and [desktop/README.md](desktop/README.md) explains how to build Icarus Verilog and Verilator for it, run it and package installers:
 
 ```bash
-cd electron
 npm install
-npm run build:iverilog && npm run build:verilator
-npm start
+bash desktop/scripts/build-iverilog.sh desktop/iverilog/linux-x64
+bash desktop/scripts/build-verilator.sh desktop/verilator/linux-x64
+npm run desktop:build && desktop/target/release/rvedusim
 ```
 
 ### Tests

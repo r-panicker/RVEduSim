@@ -94,9 +94,9 @@ function findVerilator(candidates) {
   return null;
 }
 
-// Where a local build of each toolchain is: desktop/, then the old electron/.
-const icarusDirs = () => [process.env.HDL_NATIVE_DIR, path.join(ROOT, 'desktop', 'iverilog', TARGET), path.join(ROOT, 'electron', 'iverilog', TARGET)];
-const verilatorDirs = () => [process.env.HDL_VERILATOR_DIR, path.join(ROOT, 'desktop', 'verilator', TARGET), path.join(ROOT, 'electron', 'verilator', TARGET)];
+// Where a local build of each toolchain is.
+const icarusDirs = () => [process.env.HDL_NATIVE_DIR, path.join(ROOT, 'desktop', 'iverilog', TARGET)];
+const verilatorDirs = () => [process.env.HDL_VERILATOR_DIR, path.join(ROOT, 'desktop', 'verilator', TARGET)];
 
 function createRunner(binDir) {
   const b = connect(['--icarus', binDir]);

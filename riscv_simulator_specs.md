@@ -9,8 +9,7 @@
 | [`examples/`](examples/) | All other examples: `asm/*.asm`, `c/*.c`, fetched when selected. `examples/hdl/` holds `Wrapper.v` and `RV_reference.v`, a prebuilt gate-level netlist of a reference core. |
 | [`examples/index.txt`](examples/index.txt) | The Example menu: one markdown-style table row per example, giving its key, language, label, file, the `IROM`/`DMEM` depth bits it needs, and a description. Adding a row and a file adds an example; the HTML is not edited. The file is `.txt` so static site generators serve it verbatim rather than render it. |
 | [`vendor/`](vendor/README.md) | Local copies of the external engines: the CodeMirror 6 bundle, Icarus Verilog compiled to WebAssembly, and Yosys (`@yowasp/yosys`). |
-| [`electron/`](electron/README.md) | The desktop app: this page in an Electron window, with Icarus Verilog and Verilator built natively for each platform. See [§5.18](#518-the-desktop-app). |
-| `desktop/` | The same app in Tauri, which the Desktop app workflow builds into a `.deb` and an AppImage, an NSIS installer and a dmg: `native/` is the Rust engine behind `window.rvNative` (Icarus runs, Verilator builds and live runs, folder reading), with `rvnative-bridge`, a JSON-lines front end the HDL suites drive it through; `app/` is the Tauri shell, which carries the page staged by `tools/stage_desktop.js` (`npm run desktop:build`) and looks for the toolchains in `desktop/iverilog/<os>-<arch>` and `desktop/verilator/<os>-<arch>` when they are not among its resources. |
+| [`desktop/`](desktop/README.md) | The desktop app: this page in a Tauri window, with Icarus Verilog and Verilator built natively for each platform. `native/` is the Rust engine behind `window.rvNative`, also reachable as `rvnative-bridge` (JSON lines), which the HDL suites drive; `app/` is the Tauri shell. See [§5.18](#518-the-desktop-app). |
 
 **Live:** <https://r-panicker.github.io/RVEduSim/>. Desktop installers: <https://github.com/r-panicker/RVEduSim/releases>. Vibe coded by Rajesh Panicker.
 
@@ -59,7 +58,7 @@ them by name.
 
 `npm run typecheck` runs `tsc` over all of `src/ts` under `strict`. `src/ts/globals.d.ts`
 declares what is on `window` besides the modules' exports: the desktop app's bridge
-(`RvNative`, mirroring `electron/preload.js`), the folder handle of the File System Access API
+(`RvNative`, mirroring `desktop/app/src/rvnative.js`), the folder handle of the File System Access API
 (`DirHandle`), Compiler Explorer's response (`GodboltResponse`) and the test hooks. `CM6`, the
 CodeMirror bundle, is typed from the `@codemirror/*` and `@lezer/highlight` packages that
 `package.json` pins, the same ones `npm run build:cm6` builds the bundle from
@@ -791,7 +790,7 @@ the loaded files are left as they were.
 
 | Where | How | Remembered | Re-read |
 |---|---|---|---|
-| Desktop app | `rvNative.pickFolder()` / `readFolder()`; the main process reads only a folder the user chose | across restarts, in the app's `settings.json` | yes |
+| Desktop app | `rvNative.pickFolder()` / `readFolder()`; the app reads only a folder the user chose | across restarts, in the app's `settings.json` | yes |
 | Chromium browsers | `showDirectoryPicker()`; the handle is kept in IndexedDB (`rvsim` / `kv` / `hdlFolder`) | across reloads; a later visit may need permission again, and the button then reads *↻ name* | yes |
 | Firefox, Safari | `<input webkitdirectory>` | no | no: the browser supplies a copy, so the folder must be picked again after editing |
 
@@ -799,36 +798,52 @@ the loaded files are left as they were.
 
 ### 5.18 The desktop app
 
-[`electron/`](electron/README.md) packages the page with Electron and a native build of
-Icarus Verilog for each platform (Linux AppImage, Windows NSIS installer, macOS dmg for Apple
-silicon; Intel Macs are not supported). The page is the build in `dist/`, served from the app's resources over an `app://`
-scheme, since a `file://` page cannot fetch its own `.wasm` or examples. It behaves as in a
-browser, with these differences:
+[`desktop/`](desktop/README.md) packages the page with Tauri, in the system's webview (WebKitGTK
+on Linux, WebView2 on Windows, WKWebView on macOS), with native builds of Icarus Verilog and
+Verilator for each platform: a `.deb` (Ubuntu 24.04 and later) and an AppImage on Linux, an NSIS
+installer on Windows, a dmg for Apple silicon (Intel Macs are not supported). The page is the
+build in `dist/`, staged by `tools/stage_desktop.js` with CodeMirror and the examples but
+without the WASM engines, and carried inside the app binary, which serves it from
+`tauri://localhost` (`http://tauri.localhost` on Windows). It behaves as in a browser, with
+these differences:
 
-- **Icarus runs natively.** `electron/hdl_native.js` writes the files a stage would have had in
-  the Emscripten file system into a temporary directory, rewrites `ivl.conf` to point at the
-  bundled `vvp.tgt` and VPI modules, runs `ivlpp`, `ivl` or `vvp` there with the same
-  arguments, and returns the output and the files the page asked to keep. Reset kills the
-  process. The native build is pinned to the same Icarus commit as the WASM engine (`c7530db`,
-  14.0-devel). `test_hdl_native.js` checks that both record the same instructions, the same
-  waveform and the same checkpoint replay. A dump is read through `hdlVcdFromBytes`, which turns
-  the CRLF line ends vvp writes on Windows into LF. It runs on an RTL core when there is one
+- **Icarus runs natively.** `desktop/native` (`icarus.rs`) writes the files a stage would have
+  had in the Emscripten file system into a temporary directory, points `ivl` at the bundled
+  `vvp.tgt` and VPI modules, runs `ivlpp`, `ivl` or `vvp` there with the same arguments, and
+  returns the output and the files the page asked to keep. Reset kills the process. The native
+  build is pinned to the same Icarus commit as the WASM engine (`c7530db`, 14.0-devel).
+  `test_hdl_native.js` checks that both record the same instructions, the same waveform and the
+  same checkpoint replay. A dump is read through `hdlVcdFromBytes`, which turns the CRLF line
+  ends vvp writes on Windows into LF. It runs on an RTL core when there is one
   (`RVSIM_CORE_DIR`, or `RV/` beside the tests), and otherwise on the prebuilt core in
   `examples/hdl/`.
 - **Speed.** 40,000 cycles of a DIP-switch-to-LED program on an RTL core, with trace, VCD and
   checkpoints on: preprocess and compile 40 ms native against 180 ms in WASM, simulation 5.2 s
   against 8.6 s; replaying an input change near the end, 0.65 s. With all three off, native
   `vvp` runs about 18,000 cycles a second: the cost is Icarus's event-driven evaluation.
-- **Offline.** Local copies of CodeMirror, Icarus and Yosys are tried before the CDN.
-- **The bridge** (`electron/preload.js`, `window.rvNative`) is the page's only access to the
-  machine: run one of the three Icarus tools in a fresh temporary directory, pick a folder, and
-  read a folder the user picked. The page has no Node access (`contextIsolation`, `sandbox`),
-  and links open in the system browser.
+- **Network.** HDL simulation, CodeMirror and the examples need none. Yosys, used only by
+  post-synthesis simulation, is not carried: it is fetched from the CDN when first used, as in a
+  browser, and kept in the webview's cache. C compilation uses Compiler Explorer, as in a browser.
+- **The bridge** (`desktop/app/src/rvnative.js`, `window.rvNative`) is set up before the page
+  loads and calls the app's commands (`desktop/app/src/main.rs`) over Tauri's IPC: run one of the
+  three Icarus tools, build and run a Verilator model, send a live run a command, pick a folder,
+  and read a folder the user picked (any other is refused). A run's result, waveforms included,
+  comes back as one binary frame: a 4-byte length, a JSON header naming the kept files and their
+  sizes, then their bytes. Build progress and live output come over channels, live output every
+  50 ms. The page has no other access to the machine, and links to the web, whether clicked,
+  opened with `window.open` or navigated to, open in the system browser.
+- **Data folder.** `settings.json` (the remembered folder) and `verilator/` (models, runtime
+  objects, Zig) are in the app's data folder, `io.github.r-panicker.rvedusim` in the platform's
+  application-data location. `RVSIM_USER_DATA` names another, which the tests use. Paths are
+  passed to the tools without Windows' verbatim `\\?\` prefix, which make and the compiler do
+  not understand.
 - **No menu bar** on Windows and Linux. macOS keeps the standard menu, which copy and paste
   depend on.
+- **Linux.** WebKitGTK's DMA-BUF renderer is turned off (`WEBKIT_DISABLE_DMABUF_RENDERER=1`)
+  unless the variable is set, since it leaves the window blank with some graphics drivers.
 - **Verilator** can be chosen instead of Icarus ([§5.19](#519-verilator-desktop-app)).
 
-Building, packaging and signing are described in [`electron/README.md`](electron/README.md).
+Building, packaging, signing and testing are described in [`desktop/README.md`](desktop/README.md).
 
 ### 5.19 Verilator (desktop app)
 
@@ -836,9 +851,9 @@ Building, packaging and signing are described in [`electron/README.md`](electron
 setting is shown disabled, with a tooltip saying it needs the desktop app. The choice is kept
 in `localStorage`.
 
-Verilator 5.054, built by `electron/scripts/build-verilator.sh`, translates the sources and the
+Verilator 5.054, built by `desktop/scripts/build-verilator.sh`, translates the sources and the
 same generated testbench to C++ (`--cc --exe --main --timing --trace`, `-Wno-fatal`, lint and
-style warnings off). `electron/verilator_native.js` compiles the result with `-O3` in parallel and
+style warnings off). `desktop/native` (`verilator.rs`) compiles the result with `-O3` in parallel and
 links a model, which takes the same plusargs and files as `vvp`. The trace, stepping,
 peripherals, input changes and the waveform work as with Icarus.
 
@@ -1298,11 +1313,11 @@ Global shortcuts do not fire while a form field (UART input, address box, find f
 
 ## 12. Automated test suite
 
-The Node/jsdom harness is in [`riscv_simulator_tests/`](riscv_simulator_tests). Every suite loads the page built from `src/` (`page.js`, through `tools/page.js`, with its script and styles inline), so the tests exercise the shipped code rather than a copy of its logic; there is no separate build before testing. The build is not minified unless `RVSIM_TEST_MINIFIED=1`. `test_hdl_folder_browser.js` serves the minified build to Chrome, and `test_electron_app.js` runs the packaged app, which carries `dist/`. `npm test` runs 28 suites; five more need tools `npm test` cannot assume and are run on their own (`npm run test:native`, `test:verilator`, `test:folder`, `test:app`, `test:desktop`).
+The Node/jsdom harness is in [`riscv_simulator_tests/`](riscv_simulator_tests). Every suite loads the page built from `src/` (`page.js`, through `tools/page.js`, with its script and styles inline), so the tests exercise the shipped code rather than a copy of its logic; there is no separate build before testing. The build is not minified unless `RVSIM_TEST_MINIFIED=1`. `test_hdl_folder_browser.js` serves the minified build to Chrome, and `test_desktop_app.js` runs the built app, which carries `dist/`. `npm test` runs 28 suites; four more need tools `npm test` cannot assume and are run on their own (`npm run test:native`, `test:verilator`, `test:folder`, `test:desktop`).
 
 Shared infrastructure, not suites: `godbolt_cache.js` with `godbolt_cache*.json` answers the Godbolt compile requests for the examples, and `examples_fetch.js` serves `examples/` from disk. Both stand in for network access that jsdom does not have. `cm6_bundle.min.js` is the CodeMirror bundle injected into each page.
 
-**RTL and engines.** Suites that simulate a processor need its Verilog sources (a Wrapper and core with the standard module names). They read them from the folder named by the environment variable `RVSIM_CORE_DIR`, or from `RV/` beside `riscv_simulator_tests/` when there is one (`core_dir.js`), and skip themselves when there is neither. `test_hdl_native.js`, `test_verilator.js` and `test_electron_app.js` run on the prebuilt core in `examples/hdl/` instead (`coreOrPrebuilt()`; `RVSIM_PREBUILT=1` chooses it even when there is RTL), leaving out only the checks that edit a particular RTL module. The prebuilt gate-level core in `examples/hdl/` (`RV_reference.v`, with `Wrapper.v`) needs no sources. The WASM Icarus engine is read from `HDL_ENGINE_DIR`, default `vendor/verisim/` (`ivlpp`, `ivl`, `vvp`, each `.js` plus `.wasm`). The Emscripten modules are ES modules that use `import.meta`, so Node 20 or later is required.
+**RTL and engines.** Suites that simulate a processor need its Verilog sources (a Wrapper and core with the standard module names). They read them from the folder named by the environment variable `RVSIM_CORE_DIR`, or from `RV/` beside `riscv_simulator_tests/` when there is one (`core_dir.js`), and skip themselves when there is neither. `test_hdl_native.js`, `test_verilator.js` and `test_desktop_app.js` run on the prebuilt core in `examples/hdl/` instead (`coreOrPrebuilt()`; `RVSIM_PREBUILT=1` chooses it even when there is RTL), leaving out only the checks that edit a particular RTL module. The prebuilt gate-level core in `examples/hdl/` (`RV_reference.v`, with `Wrapper.v`) needs no sources. The WASM Icarus engine is read from `HDL_ENGINE_DIR`, default `vendor/verisim/` (`ivlpp`, `ivl`, `vvp`, each `.js` plus `.wasm`). The Emscripten modules are ES modules that use `import.meta`, so Node 20 or later is required.
 
 ### Suites run by `npm test`
 
@@ -1341,11 +1356,10 @@ Shared infrastructure, not suites: `godbolt_cache.js` with `godbolt_cache*.json`
 
 | Test script | Needs | What it checks |
 |---|---|---|
-| `test_hdl_native.js` | Rust, and a native Icarus build (`npm run build:iverilog` in `electron/`, found in `desktop/iverilog/` or `electron/iverilog/`, or `HDL_NATIVE_DIR`); `RVSIM_CORE_DIR` optional | Two pages, one bridged to native Icarus through `rvnative-bridge` (built by cargo, or `RVSIM_BRIDGE`) and one to `vendor/verisim/` run in Node, load the same sources as a folder, run 40,000 cycles of DIP to LED and replay a switch change from a checkpoint; recordings and waveforms must be identical. Also folder selection (testbenches, a Vivado `.runs` copy, a duplicate module), re-reading on focus, a compile error, and Reset killing `vvp`. On the native page, chunked runs: a switch moved mid-run, Pause and Run, a breakpoint, *Real time*, no trace, the waveform, the mid-run display against the same point shown from scratch, and a 90,000-cycle run's waveform window against a run from reset. |
-| `test_verilator.js` | Rust, native Icarus and Verilator builds (`npm run build:verilator`), run through `rvnative-bridge`, a C++20 compiler (or `RVSIM_FORCE_ZIG=1` with network access, which fetches Zig); `RVSIM_CORE_DIR` optional | The Simulator setting (disabled with a tooltip in a browser); a build reported on the status line and cached by content; a 40,000-cycle run recording what Icarus records; an input change, Resume, the Wrapper-only waveform, a compile error, Reset during a build; live runs (a switch moved mid-run checked against a replay, Pause under real-time pacing, Resume, a breakpoint, typed UART input, the per-simulator cycle defaults, a 5,000,000-cycle run trimmed to its last 2,000,000, a live dump stopping at 20 MB); 200,000 cycles timed on both simulators with the waveform on and off; and, in a separate process, checkpoints (Resume, an input change and both waveforms from one, each equal to a run from reset; a corrupted checkpoint and an `initial` block with `<=` falling back to reset). |
+| `test_hdl_native.js` | Rust, and a native Icarus build (`desktop/scripts/build-iverilog.sh` into `desktop/iverilog/<os>-<arch>`, or `HDL_NATIVE_DIR`); `RVSIM_CORE_DIR` optional | Two pages, one bridged to native Icarus through `rvnative-bridge` (built by cargo, or `RVSIM_BRIDGE`) and one to `vendor/verisim/` run in Node, load the same sources as a folder, run 40,000 cycles of DIP to LED and replay a switch change from a checkpoint; recordings and waveforms must be identical. Also folder selection (testbenches, a Vivado `.runs` copy, a duplicate module), re-reading on focus, a compile error, and Reset killing `vvp`. On the native page, chunked runs: a switch moved mid-run, Pause and Run, a breakpoint, *Real time*, no trace, the waveform, the mid-run display against the same point shown from scratch, and a 90,000-cycle run's waveform window against a run from reset. |
+| `test_verilator.js` | Rust, native Icarus and Verilator builds (`desktop/scripts/build-verilator.sh`), run through `rvnative-bridge`, a C++20 compiler (or `RVSIM_FORCE_ZIG=1` with network access, which fetches Zig); `RVSIM_CORE_DIR` optional | The Simulator setting (disabled with a tooltip in a browser); a build reported on the status line and cached by content; a 40,000-cycle run recording what Icarus records; an input change, Resume, the Wrapper-only waveform, a compile error, Reset during a build; live runs (a switch moved mid-run checked against a replay, Pause under real-time pacing, Resume, a breakpoint, typed UART input, the per-simulator cycle defaults, a 5,000,000-cycle run trimmed to its last 2,000,000, a live dump stopping at 20 MB); 200,000 cycles timed on both simulators with the waveform on and off; and, in a separate process, checkpoints (Resume, an input change and both waveforms from one, each equal to a run from reset; a corrupted checkpoint and an `initial` block with `<=` falling back to reset). |
 | `test_hdl_folder_browser.js` | Chrome (`CHROME_CHANNEL` selects another); `RVSIM_CORE_DIR` | The folder picker in headless Chrome, using an origin-private folder in place of a picked one: what loads, re-reading on focus, the handle surviving a reload, *Clear files* forgetting it, and the `webkitdirectory` fallback. |
-| `test_electron_app.js` | The desktop app (`npm install` and `npm run build:iverilog` in `electron/`), a display; `RVSIM_CORE_DIR` optional | Launches `electron/` through Playwright, or a packaged build named by `RVSIM_APP_EXE`: `app://` loading, no Node in the page, the folder button with the dialog stubbed, Run lighting the LEDs, Verilator selected in Settings and run, a switch flipped during a live run showing on the LEDs before Pause, nothing fetched for the engines, and the folder remembered across a restart. |
-| `test_desktop_app.js` | The Tauri app (`npm run desktop:build`, or `RVSIM_APP_EXE`), `tauri-driver` and the platform's WebDriver (`WebKitWebDriver` on Linux), a display; `RVSIM_CORE_DIR` optional | The same checks as `test_electron_app.js` through WebDriver, the folder dialog's answer given by `RVSIM_TEST_FOLDER`, plus links to the web reaching the system browser (on Linux, a stand-in `xdg-open` records them) while the window stays on the page. |
+| `test_desktop_app.js` | The Tauri app (`npm run desktop:build`, or `RVSIM_APP_EXE`), `tauri-driver` and the platform's WebDriver (`WebKitWebDriver` on Linux), a display; `RVSIM_CORE_DIR` optional | Launches the app through WebDriver: loading from the app, no Node in the page, the folder button with the dialog's answer given by `RVSIM_TEST_FOLDER`, Run lighting the LEDs, an Icarus run taking a switch while it runs and pausing part-way, Verilator selected in Settings, built and run live with a switch flipped mid-run, nothing fetched for the engines, the folder remembered across a restart, and links to the web reaching the system browser (on Linux, a stand-in `xdg-open` records them) while the window stays on the page. |
 
 `oneoff_oled_modes.js` is not a suite. It runs the same programs on the JS model and on the RTL's Wrapper through Icarus and compares the two 96×64 frame buffers pixel by pixel, covering 16- and 24-bit colour, `vary_col`/`vary_row`, both auto-advance directions with wrap and repositioning, and the byte-lane rules of each colour format.
 

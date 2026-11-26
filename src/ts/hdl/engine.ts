@@ -39,10 +39,9 @@ export const HDL_ENGINE_SOURCES = [
   'verisim/'
 ];
 
-// In the desktop app (electron/) Icarus runs natively, and the stages get
+// In the desktop app Icarus runs natively, and the stages get
 // the same files and arguments the WASM build would.
 export const hdlNative = (window.rvNative && window.rvNative.icarus) ? window.rvNative : null;
-// The app carries vendor/ beside the page, so the local copies come first.
 export const hdlNativeJobs = new Set<number>();
 // The desktop app's bridge, for code only reached in the app.
 export function hdlBridge(): RvNative {
@@ -428,8 +427,5 @@ export function hdlFilterNoise(text: string) {
 
 // Run once the page has loaded every module (main.ts), in page order.
 export function onEngineLoad() {
-  if (window.rvNative) {
-    HDL_ENGINE_SOURCES.sort((a, b) => Number(/^https?:/.test(a)) - Number(/^https?:/.test(b)));
-  }
   if (window.rvNative && window.rvNative.onVlProgress) window.rvNative.onVlProgress(hdlOnVerilatorProgress);
 }

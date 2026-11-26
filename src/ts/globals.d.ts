@@ -1,6 +1,6 @@
 // What is on window besides the modules' exports: the CodeMirror 6 bundle
-// (ui/cm6-loader.ts loads it), the desktop app's bridge (electron/
-// preload.js), the hooks the test suites set before the page loads, and
+// (ui/cm6-loader.ts loads it), the desktop app's bridge (desktop/app/src/
+// rvnative.js), the hooks the test suites set before the page loads, and
 // the editor objects the page leaves there for them.
 
 // The CodeMirror 6 bundle (riscv_simulator_tests/cm6_entry.js): every export of
@@ -11,7 +11,7 @@ type CM6Bundle = typeof import('@codemirror/state') & typeof import('@codemirror
   { tags: typeof import('@lezer/highlight').tags };
 declare var CM6: CM6Bundle;
 
-// The desktop app's bridge (electron/preload.js). A run the page stopped
+// The desktop app's bridge (desktop/app/src/rvnative.js). A run the page stopped
 // comes back as { cancelled: true }.
 interface RvNativeRun { out: string[]; err: string[]; files: Record<string, Uint8Array>; code?: number | string; cancelled?: boolean }
 interface RvNativeBuild { ok?: boolean; key?: string; log?: string; compiler?: string | null; cached?: boolean; cancelled?: boolean; ms?: { verilate: number; cxx: number } }

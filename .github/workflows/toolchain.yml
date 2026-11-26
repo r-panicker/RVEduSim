@@ -1,7 +1,7 @@
 # Builds Icarus Verilog and Verilator for each platform the desktop app ships
 # on, and keeps them as a prerelease that the desktop workflow downloads
 # instead of building them. The release is named after a hash of the two build
-# scripts, which pin the versions (electron/scripts/toolchain-key.js), so it
+# scripts, which pin the versions (desktop/scripts/toolchain-key.js), so it
 # is needed again only when a build script changes. Run it from the Actions
 # tab; a release that already exists for these scripts is replaced.
 name: Toolchain
@@ -45,25 +45,25 @@ jobs:
 
       - name: Build Icarus Verilog
         if: runner.os != 'Windows'
-        run: bash electron/scripts/build-iverilog.sh electron/iverilog/${{ matrix.target }}
+        run: bash desktop/scripts/build-iverilog.sh desktop/iverilog/${{ matrix.target }}
 
       - name: Build Icarus Verilog (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: bash electron/scripts/build-iverilog.sh electron/iverilog/${{ matrix.target }}
+        run: bash desktop/scripts/build-iverilog.sh desktop/iverilog/${{ matrix.target }}
 
       - name: Build Verilator
         if: runner.os != 'Windows'
-        run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
+        run: bash desktop/scripts/build-verilator.sh desktop/verilator/${{ matrix.target }}
 
       - name: Build Verilator (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
+        run: bash desktop/scripts/build-verilator.sh desktop/verilator/${{ matrix.target }}
 
       - name: Pack
         shell: bash
-        run: tar -czf toolchain-${{ matrix.target }}.tar.gz -C electron iverilog/${{ matrix.target }} verilator/${{ matrix.target }}
+        run: tar -czf toolchain-${{ matrix.target }}.tar.gz -C desktop iverilog/${{ matrix.target }} verilator/${{ matrix.target }}
 
       - uses: actions/upload-artifact@v7
         with:
@@ -88,7 +88,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=$(node electron/scripts/toolchain-key.js)
+          tag=$(node desktop/scripts/toolchain-key.js)
           gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$tag" dist/toolchain-*.tar.gz --prerelease --latest=false --target "$GITHUB_SHA" \
             --title "Toolchain $tag" \

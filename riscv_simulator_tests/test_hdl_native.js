@@ -1,17 +1,18 @@
 /*
  * The desktop app's native Icarus, through the page's own HDL flow.
  *
- * Two copies of the page run side by side in jsdom, each given the
- * window.rvNative bridge that electron/preload.js provides. One bridge runs
- * the native build (electron/hdl_native.js, the module the app's main process
- * uses); the other runs the vendored WASM build in Node, the way the page's
- * worker does. Both pages then do the same things - load the RV/ folder,
+ * Two copies of the page run side by side in jsdom, each given a
+ * window.rvNative bridge like the one the desktop app provides. One bridge
+ * runs the native build through rvnative-bridge (desktop/native, the engine
+ * the app uses); the other runs the vendored WASM build in Node, the way the
+ * page's worker does. Both pages then do the same things - load the RV/ folder,
  * run, change a switch mid-recording - and their recordings and waveforms
  * must be identical. The folder picker's selection and re-reading are
  * checked on the native page, and so are runs recorded in chunks, which
  * take input while they run.
  *
- * Needs a native build: cd electron && npm run build:iverilog
+ * Needs Rust (cargo builds the bridge) and a native Icarus build:
+ * bash desktop/scripts/build-iverilog.sh desktop/iverilog/<os>-<arch>
  * (or HDL_NATIVE_DIR pointing at one).
  */
 const fs = require('fs');
@@ -132,7 +133,7 @@ setTimeout(async () => {
     console.log('🖥  NATIVE ICARUS (the desktop app) AGAINST ICARUS/WASM');
     console.log('===========================================================');
     if (!NATIVE) {
-      check('A native Icarus build is present (cd electron && npm run build:iverilog, or set HDL_NATIVE_DIR)', false);
+      check('A native Icarus build is present (desktop/scripts/build-iverilog.sh, or set HDL_NATIVE_DIR)', false);
       throw new Error('no native build');
     }
     console.log('  native build: ' + NATIVE + ' (' + fs.readFileSync(path.join(NATIVE, 'VERSION'), 'utf8').trim() + ')');

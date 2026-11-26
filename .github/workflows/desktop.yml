@@ -61,7 +61,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=$(node electron/scripts/toolchain-key.js)
+          tag=$(node desktop/scripts/toolchain-key.js)
           if gh release download "$tag" -p "toolchain-${{ matrix.target }}.tar.gz" -D .toolchain; then
             tar -xzf ".toolchain/toolchain-${{ matrix.target }}.tar.gz" -C desktop
             echo "Using $tag:"; cat desktop/iverilog/${{ matrix.target }}/VERSION desktop/verilator/${{ matrix.target }}/VERSION
@@ -93,21 +93,21 @@ jobs:
 
       - name: Build Icarus Verilog
         if: runner.os != 'Windows' && steps.toolchain.outputs.hit != 'true'
-        run: bash electron/scripts/build-iverilog.sh desktop/iverilog/${{ matrix.target }}
+        run: bash desktop/scripts/build-iverilog.sh desktop/iverilog/${{ matrix.target }}
 
       - name: Build Icarus Verilog (Windows)
         if: runner.os == 'Windows' && steps.toolchain.outputs.hit != 'true'
         shell: msys2 {0}
-        run: bash electron/scripts/build-iverilog.sh desktop/iverilog/${{ matrix.target }}
+        run: bash desktop/scripts/build-iverilog.sh desktop/iverilog/${{ matrix.target }}
 
       - name: Build Verilator
         if: runner.os != 'Windows' && steps.toolchain.outputs.hit != 'true'
-        run: bash electron/scripts/build-verilator.sh desktop/verilator/${{ matrix.target }}
+        run: bash desktop/scripts/build-verilator.sh desktop/verilator/${{ matrix.target }}
 
       - name: Build Verilator (Windows)
         if: runner.os == 'Windows' && steps.toolchain.outputs.hit != 'true'
         shell: msys2 {0}
-        run: bash electron/scripts/build-verilator.sh desktop/verilator/${{ matrix.target }}
+        run: bash desktop/scripts/build-verilator.sh desktop/verilator/${{ matrix.target }}
 
       - name: Install
         run: npm ci && cd riscv_simulator_tests && npm ci
@@ -225,4 +225,8 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           draft: true
-          files: dist/*
+          files: |
+            dist/**/*.deb
+            dist/**/*.AppImage
+            dist/**/*.exe
+            dist/**/*.dmg

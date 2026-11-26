@@ -10,7 +10,7 @@ To keep the repository clean and lightweight, `node_modules/` is **not** committ
 
 ### 1. Test Dependencies (Required for Running Tests)
 - **`jsdom`** (`^24.0.0`): Headless DOM & HTML5 Canvas environment for executing browser scripts and testing CodeMirror 6 in Node.js.
-- **`playwright-core`**: drives Chrome for `test_hdl_folder_browser.js` and the desktop app for `test_electron_app.js`. It downloads no browser; the first uses the installed Chrome.
+- **`playwright-core`**: drives Chrome for `test_hdl_folder_browser.js`. It downloads no browser; it uses the installed Chrome.
 
 ```bash
 # Install test dependencies
@@ -44,9 +44,9 @@ Every suite in this directory is wired into `npm test` except four that need som
 it cannot assume, run on their own:
 
 ```bash
-npm run test:native    # test_hdl_native.js: a native Icarus build (cd ../electron && npm run build:iverilog)
+npm run test:native    # test_hdl_native.js: Rust and a native Icarus build (see desktop/README.md)
 npm run test:folder    # test_hdl_folder_browser.js: Chrome
-npm run test:app       # test_electron_app.js: the desktop app; opens a window
+npm run test:desktop   # test_desktop_app.js: the built app, tauri-driver and WebDriver; opens a window
 npm run test:verilator # test_verilator.js: native Icarus and Verilator builds, and a C++ compiler
 ```
 

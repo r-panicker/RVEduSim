@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit -p .",
     "build:cm6": "esbuild riscv_simulator_tests/cm6_entry.js --bundle --minify --outfile=vendor/codemirror/cm6_bundle.min.js && cp vendor/codemirror/cm6_bundle.min.js riscv_simulator_tests/cm6_bundle.min.js",
     "desktop:stage": "npm run build && node tools/stage_desktop.js",
-    "desktop:build": "npm run desktop:stage && cargo build --release --manifest-path desktop/Cargo.toml -p rvedusim"
+    "desktop:build": "npm run desktop:stage && cargo build --release --manifest-path desktop/Cargo.toml -p rvedusim",
+    "desktop:bundle": "tauri build"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "6.20.3",

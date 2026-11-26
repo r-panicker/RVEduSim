@@ -253,7 +253,8 @@ RVEduSim is also a desktop app for Linux, Windows and macOS (Apple silicon), dow
 like the page, with these differences:
 
 - Icarus Verilog runs as a native program, so HDL mode works offline. It is about one and a
-  half times as fast as in the browser.
+  half times as fast as in the browser. The exception is post-synthesis simulation: the app
+  does not include Yosys, so turning it on for the first time downloads it, as in the browser.
 - **Verilator** can be chosen instead of Icarus under *Simulator* in **Settings →
   Simulation**; in the browser the setting is shown but disabled. Verilator compiles your
   design to C++ before running it, which takes several seconds after each change to your
@@ -272,9 +273,12 @@ like the page, with these differences:
   command line tools on macOS), the first build downloads one, about 60 MB (100 MB on
   Windows), and prepares it, which can take several minutes (about 7 on Windows in testing).
   Later builds use it offline.
+- On Ubuntu 24.04 or later, install the `.deb` with `sudo apt install ./RVEduSim_*_amd64.deb`,
+  which also installs `g++` for Verilator. On other Linux systems, use the AppImage and make it
+  executable.
 - The installers are not signed. On macOS the app is refused the first time it is opened;
   allow it in System Settings → Privacy & Security → *Open Anyway*. On Windows, choose
-  *More info* → *Run anyway*. On Linux, make the AppImage executable.
+  *More info* → *Run anyway*.
 
 ## 7. Running locally, and the full reference
 
