@@ -583,7 +583,7 @@ Breakpoints are source lines, found in the recording by mapping each recorded PC
 * **Resume** goes to the next breakpoint; a breakpoint already inside the recording is reached without simulating. At the end of the recording, Resume records another *Cycles per Run / Resume* cycles, continuing from the last checkpoint (§5.11) rather than from reset.
 * **Reset** (⟲) discards the recording, so the next Run starts from reset. During a run it stops the simulation.
 
-With Icarus, a Run is recorded in chunks of about 300 ms of simulation (`HDL_CHUNK_MS`), each started from the checkpoint at the end of the previous one, and the page follows each chunk as it arrives. Pause and breakpoints take effect between chunks. An input changed during the run is placed on the timeline at the cycle shown, and the recording is replayed from there before the next chunk.
+With Icarus, a Run is recorded in chunks of about 300 ms of simulation (`HDL_CHUNK_MS`), each started from the checkpoint at the end of the previous one, and the page follows each chunk as it arrives. Pause and breakpoints take effect between chunks. An input changed during the run is placed on the timeline at the cycle shown, and the recording is replayed from there before the next chunk. Without the architectural trace, the PC shown (and `LED[15:9]`) is the one each chunk ends at, from its `@@N` record.
 
 **Statement Stepping** applies: one Step covers every machine instruction the current source line expands to (a `la` pseudo-instruction, or a C statement), and Back covers the same distance in reverse.
 
@@ -1061,7 +1061,7 @@ A write to a read-only register, from a program or from the Memory view, has no 
 
 The Peripherals panel models a Nexys 4 / 4 DDR / A7 board with a Pmod OLED. Its foldable sections, top to bottom:
 
-- **LEDs and DIP switches.** `LED[15:9]` show `PC[8:2]`. `LED[8]` is the divided clock: lit when nothing runs; during a run it blinks at the clock's own rate when *Real time* pacing sets a clock of 8 Hz or less, and otherwise flickers every 125 ms. `LED[7:0]` are driven by `PERIPH_LED`. Sixteen clickable DIP switches feed `PERIPH_DIP`.
+- **LEDs and DIP switches.** `LED[15:9]` show `PC[8:2]`. `LED[8]` is the divided clock: lit after Reset, and holding its level while the clock is stopped (paused, or between steps); during a run it blinks at the clock's own rate when *Real time* pacing sets a clock of 8 Hz or less, and otherwise flickers every 125 ms. `LED[7:0]` are driven by `PERIPH_LED`. Sixteen clickable DIP switches feed `PERIPH_DIP`.
 - **Push buttons** BTNL, BTNC, BTNR: click to toggle, or hold J, K or L. **7-segment display**: 8 hex digits.
 - **Cycle counter**: `CYCLECOUNT`.
 - **UART console** (§8.3), **accelerometer** (§8.2), **OLED** (§8.1).

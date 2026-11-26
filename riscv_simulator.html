@@ -10687,18 +10687,18 @@
     // nothing about the clock, so while a run is in progress (in either
     // engine) it is drawn from the wall clock: at the clock's own rate when
     // Real time paces one slow enough to see, otherwise flickering, which is
-    // how a fast clock looks. Lit when nothing runs.
+    // how a fast clock looks. A stopped clock holds its level; lit after Reset.
     let clockLedTimer = null;
+    let clockLedLit = true;
     function updateClockLed() {
       const led = document.getElementById('led8');
       const busy = running || !!(hdlLive || hdlChunked || hdlPlay);
-      let on = true;
       if (busy) {
         const hz = runPace === 'real' ? cpuHz() : Infinity;
-        on = hz <= 8 ? Math.floor(performance.now() / 1000 * hz * 2) % 2 === 0
-                     : Math.floor(performance.now() / 125) % 2 === 0;
+        clockLedLit = hz <= 8 ? Math.floor(performance.now() / 1000 * hz * 2) % 2 === 0
+                              : Math.floor(performance.now() / 125) % 2 === 0;
       }
-      if (led) led.classList.toggle('on', on);
+      if (led) led.classList.toggle('on', clockLedLit);
       if (busy && !clockLedTimer) clockLedTimer = setTimeout(() => { clockLedTimer = null; updateClockLed(); }, 60);
     }
 
@@ -14624,6 +14624,7 @@ int main()
       stepPixelLog = [];
       // Reset all peripheral state
       ledState = 0;
+      clockLedLit = true;
       sevsegState = '00000000';
       dipSwitches = 0;
       pbState = 0;
@@ -18825,6 +18826,8 @@ endmodule
           for (let i = preApplied; i < t.pre.length; i++) hdlApplyPer(t.pre[i][0], t.pre[i][1]);
           preApplied = t.pre.length;
           totalCycles = t.budget;
+          // The PC is known only where each chunk ends (@@N).
+          if (t.next !== null && t.next !== undefined) pc = t.next;
           renderUartTerminal();
           updatePeripherals();
           if (typeof updateOledCanvas === 'function') updateOledCanvas();

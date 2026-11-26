@@ -348,14 +348,16 @@ setTimeout(async () => {
       await fresh();
       const r2 = win.runHdlSimulation();
       await until(() => win.getHdlTrace() && win.getHdlTrace().budget > 25000, 60000);
-      // LED[8], the divided clock, blinks while it runs and is lit when not.
+      // LED[8], the divided clock, blinks while it runs and holds its level
+      // when the clock stops.
       const clk = () => doc.getElementById('led8').classList.contains('on');
       const blink = new Set();
       for (let i = 0; i < 40; i++) { blink.add(clk()); await sleep(20); }
       win.toggleRunPause();
       await r2;
-      await sleep(100);
-      check('The divided-clock LED blinks while it runs, and is lit once paused', blink.size === 2 && clk());
+      const held = new Set();
+      for (let i = 0; i < 20; i++) { win.updatePeripherals(); held.add(clk()); await sleep(20); }
+      check('The divided-clock LED blinks while it runs, and holds its level once paused', blink.size === 2 && held.size === 1);
       const b1 = win.getHdlTrace().budget;
       check('Pause stops it part-way (' + b1 + ')', b1 < 100000 && /paused/.test(st()));
       await win.runHdlSimulation();
@@ -387,14 +389,25 @@ setTimeout(async () => {
       win.setRunPace('max');
       win.setClkDivBits(5);
 
+      check('…and is lit after Reset', (win.resetAll(), win.updatePeripherals(), clk()));
+
       await fresh();
       win.setHdlTrace(false);
       const r4 = win.runHdlSimulation();
-      await until(() => win.getHdlTrace() && win.getHdlTrace().budget > 33000, 60000);
+      // LED[15:9] show PC[8:2], which without the trace is the PC each chunk ends at.
+      const pcLeds = () => [15, 14, 13, 12, 11, 10, 9].map(b => doc.getElementById('led' + b).classList.contains('on') ? 1 : 0).join('');
+      const pcsSeen = new Set(), ledsMatch = [];
+      while (!(win.getHdlTrace() && win.getHdlTrace().budget > 33000) && pcsSeen.size < 50) {
+        await sleep(30);
+        const pcNow = win.eval('pc') >>> 0;
+        if (win.getHdlTrace() && win.getHdlTrace().budget) { pcsSeen.add(pcNow); ledsMatch.push(pcLeds() === ((pcNow >>> 2) & 0x7F).toString(2).padStart(7, '0')); }
+      }
       win.setDipSwitches(0x33);
       const ledNt = await until(() => win.getLedState() === 0x33, 5000);
       await r4;
       check('Without the trace too', ledNt);
+      check('…and the PC LEDs follow the run (' + [...pcsSeen].map(x => x.toString(16)).join(' ') + ')',
+        pcsSeen.size >= 2 && ledsMatch.every(Boolean));
       check('…and the summary leaves out an instruction count it does not have', !/0 instructions/.test(st()) && /100,000 cycles/.test(doc.body.textContent));
       win.setHdlTrace(true);
 
