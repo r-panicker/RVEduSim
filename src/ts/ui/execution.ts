@@ -556,10 +556,12 @@ export function highlightCurrentLine() {
 // CodeMirror's scrollIntoView also scrolls every scrollable ancestor, so
 // on a phone each step would drag the page back up to the editor.
 export function centreEditorLine(pos: number) {
-  const sc: HTMLElement = editorState.cm.scrollDOM;
+  const cm = editorState.cm;
+  if (!cm) return;
+  const sc = cm.scrollDOM;
   if (!sc.clientHeight) return;
-  const blk: CmBlockInfo = editorState.cm.lineBlockAt(pos);
-  const docTop: number = editorState.cm.documentTop - sc.getBoundingClientRect().top + sc.scrollTop;
+  const blk = cm.lineBlockAt(pos);
+  const docTop = cm.documentTop - sc.getBoundingClientRect().top + sc.scrollTop;
   sc.scrollTop = Math.max(0, docTop + blk.top + blk.height / 2 - sc.clientHeight / 2);
   sc.scrollLeft = 0;
 }

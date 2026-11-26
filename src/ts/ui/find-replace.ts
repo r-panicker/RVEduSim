@@ -14,6 +14,8 @@ import { updateEditor } from './panels';
 import { bumpAccelAxis, pbSetState } from './peripherals';
 import { assembleOnly, stepBack, stepOnce, toggleRunPause } from './run-control';
 import { byId, targetEl } from './dom';
+import type { EditorState, Line, SelectionRange } from '@codemirror/state';
+import type { BlockInfo, EditorView, ViewUpdate } from '@codemirror/view';
 
 export function openFindReplace(focusReplace = false) {
   const panel = byId('findReplacePanel');
@@ -209,12 +211,12 @@ export function initCodeMirrorEditor() {
   // reference to BAKED_ASM_EXAMPLE rather than a second copy of it.
   const initialText = BAKED_ASM_EXAMPLE;
 
-  const startState: CmState = CM6.EditorState.create({
+  const startState: EditorState = CM6.EditorState.create({
     doc: initialText,
     extensions: [
       CM6.lineNumbers({
         domEventHandlers: {
-          mousedown(view: CmView, line: CmBlockInfo, _event: MouseEvent) {
+          mousedown(view: EditorView, line: BlockInfo) {
             const lineNo: number = view.state.doc.lineAt(line.from).number;
             toggleBreakpoint(lineNo);
             return true;
@@ -224,15 +226,15 @@ export function initCodeMirrorEditor() {
       breakpointGutter,
       execLineField,
       pipeStagesField,
-      CM6.gutter({ class: 'cm-pipe-gutter', markers: (v: CmView) => v.state.field(pipeStagesField) }),
+      CM6.gutter({ class: 'cm-pipe-gutter', markers: (v: EditorView) => v.state.field(pipeStagesField) }),
       signatureHelpField,
       riscvHoverTooltip,
       CM6.EditorView.domEventHandlers({
-        click(event: MouseEvent, view: CmView) {
+        click(event: MouseEvent, view: EditorView) {
           if (editorState.language !== 'c') return false;
           const pos: number | null = view.posAtCoords({ x: event.clientX, y: event.clientY });
           if (pos == null) return false;
-          const line: CmLine = view.state.doc.lineAt(pos);
+          const line: Line = view.state.doc.lineAt(pos);
           const col = pos - line.from;
           const lineText = line.text;
           const commentIdx = lineText.indexOf('//');
@@ -270,11 +272,11 @@ export function initCodeMirrorEditor() {
         ...CM6.completionKeymap,
         {
           key: "Tab",
-          run: (view: CmView) => {
+          run: (view: EditorView) => {
             if (CM6.acceptCompletion && CM6.acceptCompletion(view)) return true;
             const { state, dispatch } = view;
-            if (state.selection.ranges.every((r: CmSelectionRange) => r.empty)) {
-              dispatch(state.changeByRange((range: CmSelectionRange) => ({
+            if (state.selection.ranges.every((r: SelectionRange) => r.empty)) {
+              dispatch(state.changeByRange((range: SelectionRange) => ({
                 changes: { from: range.from, insert: '	' },
                 range: CM6.EditorSelection.cursor(range.from + 1)
               })));
@@ -321,7 +323,7 @@ export function initCodeMirrorEditor() {
         },
         {
           key: "F9",
-          run: (view: CmView) => {
+          run: (view: EditorView) => {
             const lineNo: number = view.state.doc.lineAt(view.state.selection.main.head).number;
             toggleBreakpoint(lineNo);
             return true;
@@ -336,7 +338,7 @@ export function initCodeMirrorEditor() {
           run: () => { saveFile(); return true; }
         }
       ]),
-      CM6.EditorView.updateListener.of((update: CmViewUpdate) => {
+      CM6.EditorView.updateListener.of((update: ViewUpdate) => {
         if (update.docChanged) {
           updateEditor();
         }

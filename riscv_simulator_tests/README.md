@@ -19,18 +19,8 @@ npm --prefix riscv_simulator_tests install
 cd riscv_simulator_tests && npm install
 ```
 
-### 2. Build Dependencies (Optional — only if recompiling the CodeMirror 6 bundle from scratch)
-- **`esbuild`** (`^0.20.0`): Fast bundler used to compile `cm6_entry.js` into `cm6_bundle.min.js`.
-- **CodeMirror 6 Packages**:
-  - `@codemirror/state`
-  - `@codemirror/view`
-  - `@codemirror/language`
-  - `@codemirror/commands`
-  - `@codemirror/search`
-  - `@codemirror/autocomplete`
-  - `@lezer/highlight`
-
-> **Note**: `cm6_bundle.min.js` is already bundled and committed here, so `esbuild` and the `@codemirror/*` packages are **not** needed to run the tests.
+### 2. Rebuilding the CodeMirror bundle (optional)
+`npm run build:cm6` at the repository root rebuilds `cm6_bundle.min.js` from `cm6_entry.js`, using `esbuild` and the `@codemirror/*` and `@lezer/highlight` versions pinned in the root `package.json` (`npm install` there first). The bundle is committed, so the tests do not need them.
 
 ---
 
@@ -238,7 +228,7 @@ build. The root `package.json` provides esbuild for it (`npm install` there once
 
 ### `cm6_bundle.min.js` & `cm6_entry.js`
 - **`cm6_entry.js`**: Source entrypoint that imports CodeMirror 6 and Lezer modules and attaches them to `window.CM6`.
-- **`cm6_bundle.min.js`**: Minified single-file IIFE bundle created with esbuild (`esbuild cm6_entry.js --bundle --minify --outfile=cm6_bundle.min.js`). Contains zero external dependencies and runs 100% offline.
+- **`cm6_bundle.min.js`**: Minified single-file IIFE bundle, built by `npm run build:cm6` at the repository root from the CodeMirror versions pinned in the root `package.json` (the same pins the page's type check uses). Contains zero external dependencies and runs 100% offline.
 
 
 ---

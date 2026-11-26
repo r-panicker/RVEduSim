@@ -54,9 +54,14 @@ for f in bundle.js yosys.core.wasm yosys.core2.wasm yosys.core3.wasm \
   curl -fsSL -o "yosys/$f" "https://cdn.jsdelivr.net/npm/@yowasp/yosys@$V/gen/$f"
 done
 
-# CodeMirror — built from riscv_simulator_tests/cm6_entry.js, see that folder's README
-cp ../riscv_simulator_tests/cm6_bundle.min.js codemirror/
 ```
+
+CodeMirror is built rather than downloaded: `npm run build:cm6` (from the
+repository root) bundles `riscv_simulator_tests/cm6_entry.js` from the
+`@codemirror/*` and `@lezer/highlight` versions pinned in `package.json` and
+writes the bundle here and to `riscv_simulator_tests/`. The same pins give the
+page's TypeScript its CodeMirror types, so the bundle and the type check cannot
+drift apart; upgrade by changing the pins and running it again.
 
 All six Yosys files are required: `bundle.js` resolves the `.wasm` cores and the
 resource tar relative to its own URL, so the folder has to stay intact.

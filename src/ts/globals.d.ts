@@ -3,33 +3,13 @@
 // preload.js), the hooks the test suites set before the page loads, and
 // the editor objects the page leaves there for them.
 
-// CodeMirror 6's objects. The bundle is loaded at run time and ships no
-// declarations, so they are any; the names say which object is meant.
-type CmView = any;
-type CmState = any;
-type CmTransaction = any;
-type CmViewUpdate = any;
-type CmStringStream = any;
-type CmCompletionContext = any;
-type CmBlockInfo = any;
-type CmTooltip = any;
-type CmStateEffectType = any;
-type CmStateField = any;
-type CmExtension = any;
-type CmCompartment = any;
-type CmGutterMarker = any;
-type CmRangeSet = any;
-type CmDecorationSet = any;
-type CmStateEffect = any;
-
-// The plain data CodeMirror hands back, declared as far as the page reads it.
-interface CmLine { from: number; to: number; number: number; text: string }
-interface CmSelectionRange { from: number; to: number; head: number; anchor: number; empty: boolean }
-interface CmWordMatch { from: number; to: number; text: string }
-// A completion the page offers: CodeMirror's Completion, as far as the page fills it in.
-interface CmCompletion { label: string; type?: string; detail?: string; info?: string | (() => Node); apply?: string; boost?: number }
-
-declare var CM6: any;
+// The CodeMirror 6 bundle (riscv_simulator_tests/cm6_entry.js): every export of
+// the packages it is built from, at the versions package.json pins, on one object.
+type CM6Bundle = typeof import('@codemirror/state') & typeof import('@codemirror/view') &
+  typeof import('@codemirror/language') & typeof import('@codemirror/commands') &
+  typeof import('@codemirror/search') & typeof import('@codemirror/autocomplete') &
+  { tags: typeof import('@lezer/highlight').tags };
+declare var CM6: CM6Bundle;
 
 // The desktop app's bridge (electron/preload.js). A run the page stopped
 // comes back as { cancelled: true }.
@@ -72,13 +52,13 @@ interface GodboltResponse {
 }
 
 interface Window {
-  CM6?: any;
+  CM6?: CM6Bundle;
   rvNative?: RvNative;
   __CM6_DISABLE_CDN?: boolean;
   // A test's stand-in for Compiler Explorer: a response, or a function of the source.
   __mockGodboltResponse?: GodboltResponse | ((source: string) => GodboltResponse);
   // The File System Access API, in Chromium.
   showDirectoryPicker?: (opts?: { id?: string; mode?: 'read' | 'readwrite' }) => Promise<DirHandle>;
-  cmEditor?: CmView;
-  languageCompartment?: CmCompartment;
+  cmEditor?: import('@codemirror/view').EditorView;
+  languageCompartment?: import('@codemirror/state').Compartment;
 }

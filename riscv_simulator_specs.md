@@ -59,11 +59,11 @@ them by name.
 `npm run typecheck` runs `tsc` over all of `src/ts` under `strict`. `src/ts/globals.d.ts`
 declares what is on `window` besides the modules' exports: the desktop app's bridge
 (`RvNative`, mirroring `electron/preload.js`), the folder handle of the File System Access API
-(`DirHandle`), Compiler Explorer's response (`GodboltResponse`) and the test hooks. The
-CodeMirror bundle ships no declarations, so its objects are `any` under names that say which
-object is meant (`CmView`, `CmState`, `CmTransaction`, …); the plain data it hands back (a
-line, a selection range, a matched word, a completion) has declared shapes (`CmLine`,
-`CmSelectionRange`, `CmWordMatch`, `CmCompletion`). Nothing else in the page is `any`.
+(`DirHandle`), Compiler Explorer's response (`GodboltResponse`) and the test hooks. `CM6`, the
+CodeMirror bundle, is typed from the `@codemirror/*` and `@lezer/highlight` packages that
+`package.json` pins, the same ones `npm run build:cm6` builds the bundle from
+(`vendor/codemirror/`), and the editor code imports their types with `import type`, which the
+build drops. Nothing in the page is `any`.
 `ui/dom.ts` has `byId<T>()`, an element lookup typed by what the id names in `index.html`, and
 `targetEl()`, the element an event happened on; `errors.ts` has `errorMessage()` for whatever a
 `catch` receives. The styles are joined in the order of

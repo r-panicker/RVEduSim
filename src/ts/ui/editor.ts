@@ -14,6 +14,10 @@ import { updateMemoryView } from './memory-register-views';
 import { RISCV_AUTOCOMPLETE_DOCS, clampGridRowWidths, escapeHtml, extractEditorSymbols, getAssemblyLineContext, updateRegisters } from './panels';
 import { updateToolbarButtonStates } from './run-control';
 import { byId } from './dom';
+import type { StringStream, HighlightStyle } from '@codemirror/language';
+import type { EditorState, Extension, Line, RangeSet, SelectionRange, StateEffect, StateEffectType, StateField, Transaction } from '@codemirror/state';
+import type { BlockInfo, DecorationSet, EditorView, GutterMarker, Tooltip } from '@codemirror/view';
+import type { Completion, CompletionContext } from '@codemirror/autocomplete';
 
 
 export const consoleEl = byId('console');
@@ -64,7 +68,7 @@ export const RISCV_CSRS_SET = new Set([
 
 // RISC-V Custom Stream Parser for CodeMirror 6
 export const riscvStreamParser = {
-  token(stream: CmStringStream, _state: unknown) {
+  token(stream: StringStream, _state: unknown) {
     if (stream.eatSpace()) return null;
 
     // Comments, as splitLine() in the assembler recognises them
@@ -104,7 +108,7 @@ export const riscvStreamParser = {
     }
 
     // Words: Instructions, Registers, CSRs, Identifiers
-    const wordMatch: RegExpMatchArray | null = stream.match(/^[a-zA-Z_.$][\w.$]*/);
+    const wordMatch = stream.match(/^[a-zA-Z_.$][\w.$]*/) as RegExpMatchArray | null;
     if (wordMatch) {
       const word = wordMatch[0].toLowerCase();
       if (RISCV_INSTRUCTIONS_SET.has(word)) {
@@ -136,11 +140,14 @@ export const riscvStreamParser = {
 // and the window-exposed helpers reference them.
 // CodeMirror's objects are typed any: the bundle is loaded at run time and
 // ships no declarations.
-export let riscvLanguage: CmExtension = null, cLanguage: CmExtension = null, riscvHighlightStyle: CmExtension = null, riscvEditorTheme: CmExtension = null,
-    setBreakpointsEffect: CmStateEffectType = null, setExecLineEffect: CmStateEffectType = null, breakpointGutterMarker: CmGutterMarker = null,
-    breakpointLineNumberMarker: CmGutterMarker = null, breakpointStateField: CmStateField = null, breakpointGutter: CmExtension = null,
-    execLineField: CmStateField = null, signatureHelpField: CmStateField = null, riscvHoverTooltip: CmExtension = null,
-    setPipeStagesEffect: CmStateEffectType = null, pipeStagesField: CmStateField = null;
+// What the gutters hold: breakpoint markers for the gutter and for the line numbers.
+export interface BreakpointMarks { gutter: RangeSet<GutterMarker>; lineNumbers: RangeSet<GutterMarker> }
+export let riscvLanguage!: Extension, cLanguage!: Extension, riscvHighlightStyle!: HighlightStyle, riscvEditorTheme!: Extension,
+    setBreakpointsEffect!: StateEffectType<Set<number>>, setExecLineEffect!: StateEffectType<number>,
+    breakpointGutterMarker!: GutterMarker, breakpointLineNumberMarker!: GutterMarker,
+    breakpointStateField!: StateField<BreakpointMarks>, breakpointGutter!: Extension,
+    execLineField!: StateField<DecorationSet>, signatureHelpField!: StateField<Tooltip | null>, riscvHoverTooltip!: Extension,
+    setPipeStagesEffect!: StateEffectType<[number, string][]>, pipeStagesField!: StateField<RangeSet<GutterMarker>>;
 
 // Helper: format instruction signature with active operand parameter highlighted
 export function formatActiveInstructionSignature(formatStr: string, operandIndex: number) {
@@ -184,7 +191,7 @@ const cStreamParser = {
   startState() {
     return { inBlockComment: false };
   },
-  token(stream: CmStringStream, state: { inBlockComment: boolean }) {
+  token(stream: StringStream, state: { inBlockComment: boolean }) {
     if (state.inBlockComment) {
       if (stream.match(/^.*?\*\//)) {
         state.inBlockComment = false;
@@ -238,7 +245,7 @@ const cStreamParser = {
     }
 
     // Identifiers, Keywords, Types
-    const wordMatch: RegExpMatchArray | null = stream.match(/^[a-zA-Z_]\w*/);
+    const wordMatch = stream.match(/^[a-zA-Z_]\w*/) as RegExpMatchArray | null;
     if (wordMatch) {
       const word = wordMatch[0];
       if (C_KEYWORDS_SET.has(word)) {
@@ -403,8 +410,8 @@ riscvEditorTheme = CM6.EditorView.theme({
 }, { dark: true });
 
 // Breakpoint & Execution Line Effects & Fields
-setBreakpointsEffect = CM6.StateEffect.define();
-setExecLineEffect = CM6.StateEffect.define();
+setBreakpointsEffect = CM6.StateEffect.define<Set<number>>();
+setExecLineEffect = CM6.StateEffect.define<number>();
 
 breakpointGutterMarker = new class extends CM6.GutterMarker {
   toDOM() {
@@ -417,31 +424,29 @@ breakpointGutterMarker = new class extends CM6.GutterMarker {
 };
 
 breakpointLineNumberMarker = new class extends CM6.GutterMarker {
-  get elementClass() {
-    return 'cm-breakpoint-line-number';
-  }
+  elementClass = 'cm-breakpoint-line-number';
 };
 
-breakpointStateField = CM6.StateField.define({
+breakpointStateField = CM6.StateField.define<BreakpointMarks>({
   create() {
     return {
       gutter: CM6.RangeSet.empty,
       lineNumbers: CM6.RangeSet.empty
     };
   },
-  update(value: { gutter: CmRangeSet; lineNumbers: CmRangeSet }, tr: CmTransaction) {
+  update(value: { gutter: RangeSet<GutterMarker>; lineNumbers: RangeSet<GutterMarker> }, tr: Transaction) {
     let gutter = value.gutter.map(tr.changes);
     let lineNumbers = value.lineNumbers.map(tr.changes);
 
-    for (const e of tr.effects as CmStateEffect[]) {
+    for (const e of tr.effects as StateEffect<unknown>[]) {
       if (e.is(setBreakpointsEffect)) {
-        const gutterBuilder = new CM6.RangeSetBuilder();
-        const lnBuilder = new CM6.RangeSetBuilder();
+        const gutterBuilder = new CM6.RangeSetBuilder<GutterMarker>();
+        const lnBuilder = new CM6.RangeSetBuilder<GutterMarker>();
 
-        const sortedLines = [...(e.value as Set<number>)].sort((a, b) => a - b);
+        const sortedLines = [...e.value].sort((a, b) => a - b);
         for (const lineNo of sortedLines) {
           if (lineNo >= 1 && lineNo <= tr.state.doc.lines) {
-            const line: CmLine = tr.state.doc.line(lineNo);
+            const line: Line = tr.state.doc.line(lineNo);
             gutterBuilder.add(line.from, line.from, breakpointGutterMarker);
             lnBuilder.add(line.from, line.from, breakpointLineNumberMarker);
           }
@@ -452,8 +457,8 @@ breakpointStateField = CM6.StateField.define({
     }
     return { gutter, lineNumbers };
   },
-  provide: (f: CmStateField) => [
-    CM6.lineNumberMarkers.from(f, (v: { lineNumbers: CmRangeSet }) => v.lineNumbers)
+  provide: (f: StateField<BreakpointMarks>) => [
+    CM6.lineNumberMarkers.from(f, (v: { lineNumbers: RangeSet<GutterMarker> }) => v.lineNumbers)
   ]
 });
 
@@ -461,10 +466,10 @@ breakpointGutter = [
   breakpointStateField,
   CM6.gutter({
     class: 'cm-breakpoint-gutter',
-    markers: (v: CmView) => v.state.field(breakpointStateField).gutter,
+    markers: (v: EditorView) => v.state.field(breakpointStateField).gutter,
     initialSpacer: () => breakpointGutterMarker,
     domEventHandlers: {
-      mousedown(view: CmView, line: CmBlockInfo, _event: MouseEvent) {
+      mousedown(view: EditorView, line: BlockInfo) {
         const lineNo: number = view.state.doc.lineAt(line.from).number;
         toggleBreakpoint(lineNo);
         return true;
@@ -473,17 +478,17 @@ breakpointGutter = [
   })
 ];
 
-execLineField = CM6.StateField.define({
+execLineField = CM6.StateField.define<DecorationSet>({
   create() { return CM6.Decoration.none; },
-  update(execLines: CmDecorationSet, tr: CmTransaction) {
+  update(execLines: DecorationSet, tr: Transaction) {
     execLines = execLines.map(tr.changes);
-    for (const e of tr.effects as CmStateEffect[]) {
+    for (const e of tr.effects as StateEffect<unknown>[]) {
       if (e.is(setExecLineEffect)) {
         const lineNo: number = e.value;
         if (lineNo < 1 || lineNo > tr.state.doc.lines) {
           execLines = CM6.Decoration.none;
         } else {
-          const line: CmLine = tr.state.doc.line(lineNo);
+          const line: Line = tr.state.doc.line(lineNo);
           const dec = CM6.Decoration.line({
             attributes: { class: 'cm-execLine' }
           });
@@ -493,7 +498,7 @@ execLineField = CM6.StateField.define({
     }
     return execLines;
   },
-  provide: (f: CmStateField) => CM6.EditorView.decorations.from(f)
+  provide: (f: StateField<DecorationSet>) => CM6.EditorView.decorations.from(f)
 });
 
 // Which pipeline stage holds each line's instruction, as letters in a
@@ -514,17 +519,17 @@ class PipeStageMarker extends CM6.GutterMarker {
     return el;
   }
 }
-setPipeStagesEffect = CM6.StateEffect.define();
-pipeStagesField = CM6.StateField.define({
+setPipeStagesEffect = CM6.StateEffect.define<[number, string][]>();
+pipeStagesField = CM6.StateField.define<RangeSet<GutterMarker>>({
   create() { return CM6.RangeSet.empty; },
-  update(marks: CmRangeSet, tr: CmTransaction) {
+  update(marks: RangeSet<GutterMarker>, tr: Transaction) {
     marks = marks.map(tr.changes);
-    for (const e of tr.effects as CmStateEffect[]) {
+    for (const e of tr.effects as StateEffect<unknown>[]) {
       if (!e.is(setPipeStagesEffect)) continue;
-      const b = new CM6.RangeSetBuilder();
-      for (const [lineNo, text] of e.value as [number, string][]) {
+      const b = new CM6.RangeSetBuilder<GutterMarker>();
+      for (const [lineNo, text] of e.value) {
         if (lineNo < 1 || lineNo > tr.state.doc.lines) continue;
-        const line: CmLine = tr.state.doc.line(lineNo);
+        const line: Line = tr.state.doc.line(lineNo);
         b.add(line.from, line.from, new PipeStageMarker(text));
       }
       marks = b.finish();
@@ -534,11 +539,11 @@ pipeStagesField = CM6.StateField.define({
 });
 
 // Live Signature Helper Tooltip (shows active instruction format while typing operands)
-function getSignatureTooltip(state: CmState) {
-  const sel: CmSelectionRange = state.selection.main;
+function getSignatureTooltip(state: EditorState) {
+  const sel: SelectionRange = state.selection.main;
   if (!sel.empty) return null;
   
-  const line: CmLine = state.doc.lineAt(sel.head);
+  const line: Line = state.doc.lineAt(sel.head);
   const textBefore = line.text.slice(0, sel.head - line.from);
   
   if (textBefore.includes('#') || textBefore.includes(';')) return null;
@@ -573,25 +578,25 @@ function getSignatureTooltip(state: CmState) {
   };
 }
 
-signatureHelpField = CM6.StateField.define({
-  create(state: CmState) {
+signatureHelpField = CM6.StateField.define<Tooltip | null>({
+  create(state: EditorState) {
     return getSignatureTooltip(state);
   },
-  update(tooltip: CmTooltip | null, tr: CmTransaction) {
+  update(tooltip: Tooltip | null, tr: Transaction) {
     if (tr.docChanged || tr.selection) {
       return getSignatureTooltip(tr.state);
     }
     return tooltip;
   },
-  provide: (f: CmStateField) => CM6.showTooltip.computeN([f], (state: CmState) => {
-    const val: CmTooltip | null = state.field(f);
+  provide: (f: StateField<Tooltip | null>) => CM6.showTooltip.computeN([f], (state: EditorState) => {
+    const val: Tooltip | null = state.field(f);
     return val ? [val] : [];
   })
 });
 
 // Hover Tooltip for Instructions, Registers, Directives, and Symbols
-riscvHoverTooltip = CM6.hoverTooltip((view: CmView, pos: number, _side: number) => {
-  const line: CmLine = view.state.doc.lineAt(pos);
+riscvHoverTooltip = CM6.hoverTooltip((view: EditorView, pos: number, _side: number) => {
+  const line: Line = view.state.doc.lineAt(pos);
   const lineText = line.text;
   const col = pos - line.from;
 
@@ -653,7 +658,7 @@ riscvHoverTooltip = CM6.hoverTooltip((view: CmView, pos: number, _side: number) 
   const word = lineText.slice(wordStart, wordEnd);
   const wordLower = word.toLowerCase();
   
-  const userSymbols = extractEditorSymbols(String(view.state.doc.toString()));
+  const userSymbols = extractEditorSymbols(view.state.doc.toString());
   const allCandidates = [...userSymbols, ...(typeof RISCV_AUTOCOMPLETE_DOCS !== 'undefined' ? RISCV_AUTOCOMPLETE_DOCS : [])];
   const docItem = allCandidates.find(d => d.name.toLowerCase() === wordLower);
   if (!docItem) return null;
@@ -662,7 +667,7 @@ riscvHoverTooltip = CM6.hoverTooltip((view: CmView, pos: number, _side: number) 
     pos: line.from + wordStart,
     end: line.from + wordEnd,
     above: true,
-    create(_view: CmView) {
+    create(_view: EditorView) {
       const dom = document.createElement('div');
       dom.className = 'cm-hover-tooltip';
       dom.style.cssText = 'padding:6px 10px;font-size:12px;max-width:360px;background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.4);line-height:1.45;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
@@ -685,19 +690,19 @@ riscvHoverTooltip = CM6.hoverTooltip((view: CmView, pos: number, _side: number) 
 } // end buildEditorExtensions()
 
 // Autocomplete Source for C Language in CodeMirror 6
-export function cAutocomplete(context: CmCompletionContext) {
-  const line: CmLine = context.state.doc.lineAt(context.pos);
+export function cAutocomplete(context: CompletionContext) {
+  const line: Line = context.state.doc.lineAt(context.pos);
   const textBefore = line.text.slice(0, context.pos - line.from);
 
   if (textBefore.includes('//')) return null;
   const quoteCount = (textBefore.match(/"/g) || []).length;
   if (quoteCount % 2 !== 0) return null;
 
-  const word: CmWordMatch | null = context.matchBefore(/[\w#]+/);
+  const word: { from: number; to: number; text: string } | null = context.matchBefore(/[\w#]+/);
   if (!word && !context.explicit) return null;
 
   const wordStr = word ? word.text.toLowerCase() : '';
-  const options: CmCompletion[] = [];
+  const options: Completion[] = [];
 
   const types = [
     { name: 'int', desc: '32-bit signed integer' },
@@ -767,40 +772,40 @@ export function cAutocomplete(context: CmCompletionContext) {
   }
 
   return {
-    from: word ? word.from : context.pos as number,
+    from: word ? word.from : context.pos,
     options: options,
     validFor: /^[\w#]*$/
   };
 }
 
 // Autocomplete Source for CodeMirror 6 with Active Instruction Format Info
-export function riscvAutocomplete(context: CmCompletionContext) {
+export function riscvAutocomplete(context: CompletionContext) {
   if (editorState.language === 'c') {
     return cAutocomplete(context);
   }
 
-  const line: CmLine = context.state.doc.lineAt(context.pos);
+  const line: Line = context.state.doc.lineAt(context.pos);
   const textBefore = line.text.slice(0, context.pos - line.from);
 
   if (textBefore.includes('#') || textBefore.includes(';')) return null;
   const quoteCount = (textBefore.match(/"/g) || []).length;
   if (quoteCount % 2 !== 0) return null;
 
-  const word: CmWordMatch | null = context.matchBefore(/[.\w]+/);
+  const word: { from: number; to: number; text: string } | null = context.matchBefore(/[.\w]+/);
   const lineCtx = getAssemblyLineContext(textBefore);
 
   if (!word && !context.explicit) {
     return null;
   }
 
-  const userSymbols = extractEditorSymbols(String(context.state.doc.toString()));
+  const userSymbols = extractEditorSymbols(context.state.doc.toString());
   const allCandidates = [...userSymbols, ...(typeof RISCV_AUTOCOMPLETE_DOCS !== 'undefined' ? RISCV_AUTOCOMPLETE_DOCS : [])];
 
   const activeInstDoc = (lineCtx.context === 'OPERAND' && lineCtx.activeMnemonic && typeof RISCV_AUTOCOMPLETE_DOCS !== 'undefined') ? 
     RISCV_AUTOCOMPLETE_DOCS.find(d => (d.type === 'inst' || d.type === 'pseudo' || d.type === 'directive') && d.name.toLowerCase() === lineCtx.activeMnemonic) : null;
 
   const wordStr = word ? word.text.toLowerCase() : '';
-  const options: CmCompletion[] = [];
+  const options: Completion[] = [];
   const seen = new Set<string>();
 
   for (const item of allCandidates) {
@@ -877,7 +882,7 @@ export function riscvAutocomplete(context: CmCompletionContext) {
   }
 
   return {
-    from: word ? word.from : context.pos as number,
+    from: word ? word.from : context.pos,
     options: options,
     validFor: /^[.\w]*$/
   };
