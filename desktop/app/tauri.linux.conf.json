@@ -1,0 +1,20 @@
+{
+  "bundle": {
+    "targets": [
+      "deb",
+      "appimage"
+    ],
+    "resources": {
+      "../iverilog/linux-x64/": "iverilog/",
+      "../verilator/linux-x64/": "verilator/"
+    },
+    "linux": {
+      "deb": {
+        "recommends": [
+          "g++"
+        ],
+        "section": "education"
+      }
+    }
+  }
+}

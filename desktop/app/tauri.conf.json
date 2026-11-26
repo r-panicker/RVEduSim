@@ -4,7 +4,11 @@
   "version": "24.143.0",
   "identifier": "io.github.r-panicker.rvedusim",
   "build": {
-    "frontendDist": "../web"
+    "frontendDist": "../web",
+    "beforeBuildCommand": {
+      "script": "npm run desktop:stage",
+      "cwd": ".."
+    }
   },
   "app": {
     "withGlobalTauri": true,
@@ -26,10 +30,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "linux": {
-      "deb": {
-        "depends": []
-      }
-    }
+    "publisher": "Rajesh Panicker",
+    "homepage": "https://github.com/r-panicker/RVEduSim",
+    "copyright": "Copyright (c) Rajesh Panicker. MIT License."
   }
 }

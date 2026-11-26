@@ -1,0 +1,15 @@
+{
+  "bundle": {
+    "targets": [
+      "dmg"
+    ],
+    "resources": {
+      "../iverilog/mac-arm64/": "iverilog/",
+      "../verilator/mac-arm64/": "verilator/"
+    },
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "hardenedRuntime": true
+    }
+  }
+}

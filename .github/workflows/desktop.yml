@@ -1,9 +1,11 @@
-# Builds the desktop app (electron/) for Linux, Windows and macOS. Every
-# installer carries native Icarus Verilog and Verilator for its own platform,
-# taken from the Toolchain workflow's release for the current build scripts,
-# or built from source on the runner when there is none. (Zig, Verilator's
-# fallback C++ compiler, is not bundled: the app downloads it on first use
-# where the computer has no compiler.)
+# Builds the desktop app (desktop/, Tauri) for Linux (.deb and AppImage),
+# Windows (NSIS installer) and macOS (dmg). Every installer carries native
+# Icarus Verilog and Verilator for its own platform, taken from the Toolchain
+# workflow's release for the current build scripts, or built from source on
+# the runner when there is none. (Zig, Verilator's fallback C++ compiler, is
+# not bundled: the app downloads it on first use where the computer has no
+# compiler.) Linux builds on Ubuntu 22.04, so that the AppImage runs on older
+# systems too; the .deb is for Ubuntu 24.04 and later.
 #
 # Run it from the Actions tab, or push a tag named desktop-v*. The installers
 # are attached to the run as artifacts; a desktop-v* tag also gets a draft
@@ -12,10 +14,11 @@
 # Signing is optional. Without secrets the macOS app is signed ad hoc (users
 # open it once with right-click > Open, or System Settings > Privacy &
 # Security > Open Anyway) and the Windows installer is unsigned (SmartScreen
-# shows "More info > Run anyway"). With these secrets set, electron-builder
-# signs, and on macOS notarizes:
-#   macOS:   CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
-#   Windows: WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD
+# shows "More info > Run anyway"). With these secrets set, the app is signed,
+# and on macOS notarized:
+#   macOS:   CSC_LINK (a base64 .p12), CSC_KEY_PASSWORD, APPLE_SIGNING_IDENTITY,
+#            APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
+#   Windows: WIN_CSC_LINK (a base64 .pfx), WIN_CSC_KEY_PASSWORD
 name: Desktop app
 
 on:
@@ -29,9 +32,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04,    target: linux-x64, builder: --linux --x64 }
-          - { os: windows-2022,    target: win-x64,   builder: --win --x64 }
-          - { os: macos-15,        target: mac-arm64, builder: --mac --arm64 }
+          - { os: ubuntu-22.04, target: linux-x64 }
+          - { os: windows-2022, target: win-x64 }
+          - { os: macos-15,     target: mac-arm64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -39,6 +42,16 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+
+      - name: Webview and test tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb
 
       # Icarus and Verilator come prebuilt from the Toolchain workflow's release
       # for these build scripts; without one they are built here.
@@ -50,8 +63,8 @@ jobs:
         run: |
           tag=$(node electron/scripts/toolchain-key.js)
           if gh release download "$tag" -p "toolchain-${{ matrix.target }}.tar.gz" -D .toolchain; then
-            tar -xzf ".toolchain/toolchain-${{ matrix.target }}.tar.gz" -C electron
-            echo "Using $tag:"; cat electron/iverilog/${{ matrix.target }}/VERSION electron/verilator/${{ matrix.target }}/VERSION
+            tar -xzf ".toolchain/toolchain-${{ matrix.target }}.tar.gz" -C desktop
+            echo "Using $tag:"; cat desktop/iverilog/${{ matrix.target }}/VERSION desktop/verilator/${{ matrix.target }}/VERSION
             echo "hit=true" >> "$GITHUB_OUTPUT"
           else
             echo "No $tag release for ${{ matrix.target }}: building the toolchain (run the Toolchain workflow to keep one)"
@@ -59,7 +72,7 @@ jobs:
 
       - name: Icarus build tools (Linux)
         if: runner.os == 'Linux' && steps.toolchain.outputs.hit != 'true'
-        run: sudo apt-get update && sudo apt-get install -y autoconf gperf flex bison zlib1g-dev libbz2-dev libfl-dev help2man perl python3
+        run: sudo apt-get install -y autoconf gperf flex bison zlib1g-dev libbz2-dev libfl-dev help2man perl python3
 
       - name: Icarus build tools (macOS)
         if: runner.os == 'macOS' && steps.toolchain.outputs.hit != 'true'
@@ -80,34 +93,30 @@ jobs:
 
       - name: Build Icarus Verilog
         if: runner.os != 'Windows' && steps.toolchain.outputs.hit != 'true'
-        run: bash electron/scripts/build-iverilog.sh electron/iverilog/${{ matrix.target }}
+        run: bash electron/scripts/build-iverilog.sh desktop/iverilog/${{ matrix.target }}
 
       - name: Build Icarus Verilog (Windows)
         if: runner.os == 'Windows' && steps.toolchain.outputs.hit != 'true'
         shell: msys2 {0}
-        run: bash electron/scripts/build-iverilog.sh electron/iverilog/${{ matrix.target }}
+        run: bash electron/scripts/build-iverilog.sh desktop/iverilog/${{ matrix.target }}
 
       - name: Build Verilator
         if: runner.os != 'Windows' && steps.toolchain.outputs.hit != 'true'
-        run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
+        run: bash electron/scripts/build-verilator.sh desktop/verilator/${{ matrix.target }}
 
       - name: Build Verilator (Windows)
         if: runner.os == 'Windows' && steps.toolchain.outputs.hit != 'true'
         shell: msys2 {0}
-        run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
-
-      # The page, built from src/ into dist/, which the tests and the app load.
-      - name: Build the page
-        run: npm ci && npm run build
+        run: bash electron/scripts/build-verilator.sh desktop/verilator/${{ matrix.target }}
 
       - name: Install
-        working-directory: electron
-        run: npm ci
+        run: npm ci && cd riscv_simulator_tests && npm ci
 
-      # The same checks as on a developer's machine, against this runner's build.
+      # The same checks as on a developer's machine, against this runner's
+      # toolchain, through the Rust engine's bridge (built by cargo).
       - name: Native engine against WASM
         working-directory: riscv_simulator_tests
-        run: npm ci && node test_hdl_native.js
+        run: node test_hdl_native.js
 
       # Verilator against Icarus. The runners have a C++ compiler; on Windows
       # it is MSYS2's, put on the PATH for this step.
@@ -127,31 +136,79 @@ jobs:
           RVSIM_FORCE_ZIG: '1'
         run: node test_verilator.js
 
+      - name: Windows certificate
+        id: wincert
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if (-not $env:WIN_CSC_LINK) { exit 0 }
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WIN_CSC_LINK))
+          $pw = ConvertTo-SecureString $env:WIN_CSC_KEY_PASSWORD -AsPlainText -Force
+          $c = Import-PfxCertificate -FilePath "$env:RUNNER_TEMP\cert.pfx" -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          "thumbprint=$($c.Thumbprint)" >> $env:GITHUB_OUTPUT
+
+      # npx tauri build stages the page (npm run desktop:stage), builds the app
+      # and bundles it.
       - name: Package
-        working-directory: electron
         shell: bash
         env:
-          CSC_LINK: ${{ runner.os == 'Windows' && secrets.WIN_CSC_LINK || secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || secrets.CSC_KEY_PASSWORD }}
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          APPLE_CERTIFICATE: ${{ secrets.CSC_LINK }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_THUMBPRINT: ${{ steps.wincert.outputs.thumbprint }}
         run: |
-          extra=""
-          if [ "$RUNNER_OS" = "macOS" ] && [ -z "$CSC_LINK" ]; then extra="-c.mac.identity=- -c.mac.notarize=false"; fi
-          # A secret that is not set arrives as an empty variable, which
-          # electron-builder would take for a certificate path.
-          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
-          for v in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do [ -n "${!v}" ] || unset "$v"; done
-          npx electron-builder ${{ matrix.builder }} --publish never $extra
+          # A secret that is not set arrives as an empty variable, which the
+          # bundler would take for a value.
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!v}" ] || unset "$v"
+          done
+          config='{}'
+          if [ "$RUNNER_OS" = "macOS" ] && [ -z "$APPLE_SIGNING_IDENTITY" ]; then
+            config='{"bundle":{"macOS":{"signingIdentity":"-"}}}'
+          fi
+          if [ -n "$WIN_THUMBPRINT" ]; then
+            config='{"bundle":{"windows":{"certificateThumbprint":"'"$WIN_THUMBPRINT"'","timestampUrl":"http://timestamp.digicert.com"}}}'
+          fi
+          npx tauri build --config "$config"
+
+      # The built app itself, driven through WebDriver. macOS has no WebDriver
+      # for its webview.
+      - name: tauri-driver
+        if: runner.os != 'macOS'
+        run: cargo install tauri-driver --locked
+
+      - name: The app (Linux)
+        if: runner.os == 'Linux'
+        working-directory: riscv_simulator_tests
+        run: xvfb-run -a node test_desktop_app.js
+
+      # msedgedriver has to match the runner's WebView2.
+      - name: The app (Windows)
+        if: runner.os == 'Windows'
+        working-directory: riscv_simulator_tests
+        shell: bash
+        run: |
+          export PATH="/c/msys64/mingw64/bin:$PATH"
+          cargo install --git https://github.com/chippers/msedgedriver-tool --locked
+          (mkdir -p "$RUNNER_TEMP/edge" && cd "$RUNNER_TEMP/edge" && msedgedriver-tool)
+          export PATH="$RUNNER_TEMP/edge:$PATH"
+          node test_desktop_app.js
 
       - uses: actions/upload-artifact@v7
         with:
           name: rvedusim-${{ matrix.target }}
           path: |
-            electron/dist/*.AppImage
-            electron/dist/*.exe
-            electron/dist/*.dmg
+            desktop/target/release/bundle/deb/*.deb
+            desktop/target/release/bundle/appimage/*.AppImage
+            desktop/target/release/bundle/nsis/*.exe
+            desktop/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
   release:
