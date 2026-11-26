@@ -14,13 +14,14 @@ import { hideExecMarker, toggleBreakpoint, updateStats } from './execution';
 import { updateMemoryView } from './memory-register-views';
 import { RISCV_AUTOCOMPLETE_DOCS, clampGridRowWidths, escapeHtml, extractEditorSymbols, getAssemblyLineContext, updateRegisters } from './panels';
 import { updateToolbarButtonStates } from './run-control';
+import { byId } from './dom';
 
 
-export const consoleEl = document.getElementById('console');
-export const regBody = document.getElementById('regBody');
-export const memView = document.getElementById('memView');
-export const disassemblyDisplay = document.getElementById('disassemblyDisplay');
-export const statusBar = document.getElementById('statusBar');
+export const consoleEl = byId('console');
+export const regBody = byId<HTMLTableSectionElement>('regBody');
+export const memView = byId('memView');
+export const disassemblyDisplay = byId('disassemblyDisplay');
+export const statusBar = byId('statusBar');
 
 // The editor's shared state (language, file name, Find & Replace) is
 // editorState in ui/editor-state.ts. EXAMPLE_FILENAMES and EXAMPLE_MENU are
@@ -64,7 +65,7 @@ export const RISCV_CSRS_SET = new Set([
 
 // RISC-V Custom Stream Parser for CodeMirror 6
 export const riscvStreamParser = {
-  token(stream, state) {
+  token(stream: { eatSpace: () => any; match: (arg0: RegExp) => any; eat: (arg0: RegExp) => any; next: () => void; }, state: any) {
     if (stream.eatSpace()) return null;
 
     // Comments, as splitLine() in the assembler recognises them
@@ -134,14 +135,16 @@ export const riscvStreamParser = {
 // (CDN-loaded with a local fallback; the app boots only when CM6 exists).
 // Declared at the top level because initCodeMirrorEditor(), setLanguageMode()
 // and the window-exposed helpers reference them.
-export let riscvLanguage = null, cLanguage = null, riscvHighlightStyle = null, riscvEditorTheme = null,
-    setBreakpointsEffect = null, setExecLineEffect = null, breakpointGutterMarker = null,
-    breakpointLineNumberMarker = null, breakpointStateField = null, breakpointGutter = null,
-    execLineField = null, signatureHelpField = null, riscvHoverTooltip = null,
-    setPipeStagesEffect = null, pipeStagesField = null;
+// CodeMirror's objects are typed any: the bundle is loaded at run time and
+// ships no declarations.
+export let riscvLanguage: any = null, cLanguage: any = null, riscvHighlightStyle: any = null, riscvEditorTheme: any = null,
+    setBreakpointsEffect: any = null, setExecLineEffect: any = null, breakpointGutterMarker: any = null,
+    breakpointLineNumberMarker: any = null, breakpointStateField: any = null, breakpointGutter: any = null,
+    execLineField: any = null, signatureHelpField: any = null, riscvHoverTooltip: any = null,
+    setPipeStagesEffect: any = null, pipeStagesField: any = null;
 
 // Helper: format instruction signature with active operand parameter highlighted
-export function formatActiveInstructionSignature(formatStr, operandIndex) {
+export function formatActiveInstructionSignature(formatStr: string | string[], operandIndex: any) {
   if (!formatStr) return '';
   const spaceIdx = formatStr.indexOf(' ');
   if (spaceIdx === -1) {
@@ -151,7 +154,7 @@ export function formatActiveInstructionSignature(formatStr, operandIndex) {
   const operandPart = formatStr.slice(spaceIdx + 1);
   
   const operands = operandPart.split(',');
-  const formattedOperands = operands.map((op, idx) => {
+  const formattedOperands = operands.map((op: string, idx: any) => {
     const trimmed = op.trim();
     if (idx === operandIndex) {
       return `<span style="color:#fab387;font-weight:bold;text-decoration:underline;background:rgba(250,179,135,0.2);padding:1px 4px;border-radius:3px;">${escapeHtml(trimmed)}</span>`;
@@ -182,7 +185,7 @@ const cStreamParser = {
   startState() {
     return { inBlockComment: false };
   },
-  token(stream, state) {
+  token(stream: { match: (arg0: RegExp) => any; skipToEnd: () => void; eatSpace: () => any; eat: (arg0: RegExp) => any; next: () => void; }, state: { inBlockComment: boolean; }) {
     if (state.inBlockComment) {
       if (stream.match(/^.*?\*\//)) {
         state.inBlockComment = false;
@@ -427,7 +430,7 @@ breakpointStateField = CM6.StateField.define({
       lineNumbers: CM6.RangeSet.empty
     };
   },
-  update(value, tr) {
+  update(value: { gutter: any[]; lineNumbers: any[]; }, tr: { changes: any; effects: any; state: { doc: { lines: number; line: (arg0: any) => any; }; }; }) {
     let gutter = value.gutter.map(tr.changes);
     let lineNumbers = value.lineNumbers.map(tr.changes);
 
@@ -450,8 +453,8 @@ breakpointStateField = CM6.StateField.define({
     }
     return { gutter, lineNumbers };
   },
-  provide: f => [
-    CM6.lineNumberMarkers.from(f, v => v.lineNumbers)
+  provide: (f: any) => [
+    CM6.lineNumberMarkers.from(f, (v: { lineNumbers: { lineNumbers: any; }; }) => v.lineNumbers)
   ]
 });
 
@@ -459,10 +462,10 @@ breakpointGutter = [
   breakpointStateField,
   CM6.gutter({
     class: 'cm-breakpoint-gutter',
-    markers: v => v.state.field(breakpointStateField).gutter,
+    markers: (v: { state: { field: (arg0: null) => { (): any; new(): any; gutter: { state: { field: (arg0: null) => { (): any; new(): any; gutter: any; }; }; }; }; }; }) => v.state.field(breakpointStateField).gutter,
     initialSpacer: () => breakpointGutterMarker,
     domEventHandlers: {
-      mousedown(view, line, event) {
+      mousedown(view: { state: { doc: { lineAt: (arg0: any) => { (): any; new(): any; number: any; }; }; }; }, line: { from: any; }, event: any) {
         const lineNo = view.state.doc.lineAt(line.from).number;
         toggleBreakpoint(lineNo);
         return true;
@@ -473,7 +476,7 @@ breakpointGutter = [
 
 execLineField = CM6.StateField.define({
   create() { return CM6.Decoration.none; },
-  update(execLines, tr) {
+  update(execLines: any[], tr: { changes: any; effects: any; state: { doc: { lines: number; line: (arg0: any) => any; }; }; }) {
     execLines = execLines.map(tr.changes);
     for (const e of tr.effects) {
       if (e.is(setExecLineEffect)) {
@@ -491,14 +494,14 @@ execLineField = CM6.StateField.define({
     }
     return execLines;
   },
-  provide: f => CM6.EditorView.decorations.from(f)
+  provide: (f: any) => CM6.EditorView.decorations.from(f)
 });
 
 // Which pipeline stage holds each line's instruction, as letters in a
 // gutter of their own. Effect value: [[lineNo, 'F D'], ...].
 class PipeStageMarker extends CM6.GutterMarker {
-  constructor(text) { super(); this.text = text; }
-  eq(other) { return other.text === this.text; }
+  constructor(text: any) { super(); this.text = text; }
+  eq(other: { text: any; }) { return other.text === this.text; }
   toDOM() {
     const el = document.createElement('span');
     el.className = 'cm-pipe-stage';
@@ -514,7 +517,7 @@ class PipeStageMarker extends CM6.GutterMarker {
 setPipeStagesEffect = CM6.StateEffect.define();
 pipeStagesField = CM6.StateField.define({
   create() { return CM6.RangeSet.empty; },
-  update(marks, tr) {
+  update(marks: any[], tr: { changes: any; effects: any; state: { doc: { lines: number; line: (arg0: any) => any; }; }; }) {
     marks = marks.map(tr.changes);
     for (const e of tr.effects) {
       if (!e.is(setPipeStagesEffect)) continue;
@@ -531,7 +534,7 @@ pipeStagesField = CM6.StateField.define({
 });
 
 // Live Signature Helper Tooltip (shows active instruction format while typing operands)
-function getSignatureTooltip(state) {
+function getSignatureTooltip(state: { selection: { main: any; }; doc: { lineAt: (arg0: any) => any; }; }) {
   const sel = state.selection.main;
   if (!sel.empty) return null;
   
@@ -571,23 +574,23 @@ function getSignatureTooltip(state) {
 }
 
 signatureHelpField = CM6.StateField.define({
-  create(state) {
+  create(state: any) {
     return getSignatureTooltip(state);
   },
-  update(tooltip, tr) {
+  update(tooltip: any, tr: { docChanged: any; selection: any; state: any; }) {
     if (tr.docChanged || tr.selection) {
       return getSignatureTooltip(tr.state);
     }
     return tooltip;
   },
-  provide: f => CM6.showTooltip.computeN([f], state => {
+  provide: (f: any) => CM6.showTooltip.computeN([f], (state: { field: (arg0: any) => any; }) => {
     const val = state.field(f);
     return val ? [val] : [];
   })
 });
 
 // Hover Tooltip for Instructions, Registers, Directives, and Symbols
-riscvHoverTooltip = CM6.hoverTooltip((view, pos, side) => {
+riscvHoverTooltip = CM6.hoverTooltip((view: { state: { doc: { lineAt: (arg0: any) => any; toString: () => any; }; }; }, pos: number, side: any) => {
   const line = view.state.doc.lineAt(pos);
   const lineText = line.text;
   const col = pos - line.from;
@@ -659,7 +662,7 @@ riscvHoverTooltip = CM6.hoverTooltip((view, pos, side) => {
     pos: line.from + wordStart,
     end: line.from + wordEnd,
     above: true,
-    create(view) {
+    create(view: any) {
       const dom = document.createElement('div');
       dom.className = 'cm-hover-tooltip';
       dom.style.cssText = 'padding:6px 10px;font-size:12px;max-width:360px;background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.4);line-height:1.45;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
@@ -682,7 +685,7 @@ riscvHoverTooltip = CM6.hoverTooltip((view, pos, side) => {
 } // end buildEditorExtensions()
 
 // Autocomplete Source for C Language in CodeMirror 6
-export function cAutocomplete(context) {
+export function cAutocomplete(context: { state: { doc: { lineAt: (arg0: any) => any; }; }; pos: number; matchBefore: (arg0: RegExp) => any; explicit: any; }) {
   const line = context.state.doc.lineAt(context.pos);
   const textBefore = line.text.slice(0, context.pos - line.from);
 
@@ -771,7 +774,7 @@ export function cAutocomplete(context) {
 }
 
 // Autocomplete Source for CodeMirror 6 with Active Instruction Format Info
-export function riscvAutocomplete(context) {
+export function riscvAutocomplete(context: { state: { doc: { lineAt: (arg0: any) => any; toString: () => any; }; }; pos: number; matchBefore: (arg0: RegExp) => any; explicit: any; }) {
   if (editorState.language === 'c') {
     return cAutocomplete(context);
   }
@@ -933,7 +936,7 @@ export const editor = {
   focus() {
     if (editorState.cm) editorState.cm.focus();
   },
-  setSelectionRange(start, end) {
+  setSelectionRange(start: number, end: number) {
     if (!editorState.cm) return;
     const maxPos = editorState.cm.state.doc.length;
     const s = Math.max(0, Math.min(start, maxPos));
@@ -975,7 +978,7 @@ export const editorHistory = {
 };
 
 
-export function log(msg, type = 'info') {
+export function log(msg: string | null, type = 'info') {
   const div = document.createElement('div');
   div.className = type;
   div.textContent = msg;
@@ -987,7 +990,7 @@ export function clearLog() {
   consoleEl.innerHTML = '';
 }
 
-export function setStatus(msg, type = '') {
+export function setStatus(msg: string | null, type = '') {
   statusBar.textContent = msg;
   statusBar.style.color = type === 'error' ? '#f38ba8' : type === 'success' ? '#a6e3a1' : '#a6adc8';
 }
@@ -1015,7 +1018,7 @@ export function resetExecutionForSourceChange() {
 }
 
 export function initSplitter() {
-  const splitter = document.getElementById('mainSplitter');
+  const splitter = byId('mainSplitter');
   const rightPanel = document.querySelector('.right-panel');
   if (!splitter || !rightPanel) return;
   let dragging = false;
@@ -1024,7 +1027,7 @@ export function initSplitter() {
   // the splitter (6px) is accounted for so the dock never pushes the editor
   // out of view / creates blank space on the right.
   const LEFT_MIN = 360;
-  const clamp = (w) => Math.max(220, Math.min(w, Math.max(360, (window.innerWidth || 1200) - LEFT_MIN - 6)));
+  const clamp = (w: number) => Math.max(220, Math.min(w, Math.max(360, (window.innerWidth || 1200) - LEFT_MIN - 6)));
 
   splitter.addEventListener('pointerdown', (e) => {
     dragging = true;

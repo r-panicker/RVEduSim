@@ -1,4 +1,3 @@
-// @ts-nocheck
 // HDL mode's run plumbing: breakpoint search, discarding a recording,
 // the inputs a run starts from and starting a fresh trace.
 
@@ -20,7 +19,7 @@ import { updateWaveView } from '../ui/waveform';
 // the recording is searched by mapping each recorded PC back to its line.
 // Position k means "about to execute steps[k]", which is where execution
 // should come to rest when steps[k] is on a breakpoint line.
-export function hdlBreakAt(from) {
+export function hdlBreakAt(from: number) {
   if (!hdlRec.trace || !run.breakpoints || !run.breakpoints.size) return -1;
   const steps = hdlRec.trace.steps;
   for (let k = Math.max(0, from); k < steps.length; k++) {
@@ -61,7 +60,7 @@ export function hdlCaptureBaseInputs() {
   hdlRec.base = hdlCurrentInputs();
 }
 
-export async function hdlWithBusy(fn) {
+export async function hdlWithBusy<T>(fn: () => Promise<T> | T): Promise<T | null> {
   if (hdlActivity.running) return null;
   hdlStopPlay();
   hdlActivity.running = true;
@@ -71,8 +70,9 @@ export async function hdlWithBusy(fn) {
   try {
     return await fn();
   } catch (e) {
-    if (e && e.cancelled) { hdlStatus('stopped', 'ok'); return null; }
-    hdlLog(String(e && e.message ? e.message : e), 'err');
+    const err = e as { cancelled?: boolean; message?: string } | null;
+    if (err && err.cancelled) { hdlStatus('stopped', 'ok'); return null; }
+    hdlLog(String(err && err.message ? err.message : e), 'err');
     hdlStatus('error', 'err');
     setStatus('HDL simulation failed - see the console below the editor', 'error');
     return null;
@@ -88,7 +88,7 @@ export async function hdlWithBusy(fn) {
 // middle of a run that was given the old one. Once the run is done the
 // change goes on the timeline where the recording now stands, and the
 // run is replayed with it.
-export function hdlCatchUpInputs(before) {
+export function hdlCatchUpInputs(before: { [x: string]: any; dip?: number; pb?: number; accel?: number; adrdy?: boolean; }) {
   if (ui.engine !== 'hdl' || hdlActivity.running) return;
   let again = hdlRec.pendingResim;
   hdlRec.pendingResim = false;
@@ -96,10 +96,10 @@ export function hdlCatchUpInputs(before) {
   hdlRec.stimmedInRun = new Set();
   if (hdlRec.trace) {
     const now = hdlCurrentInputs(), cyc = hdlCurrentCycle();
-    const moved = [[HDL_STIM_DIP, 'dip'], [HDL_STIM_PB, 'pb'], [HDL_STIM_ACCEL, 'accel'], [HDL_STIM_ADRDY, 'adrdy']]
-      .filter(([code, f]) => now[f] !== before[f] && !stimmed.has(code));
+    const fields: [number, 'dip' | 'pb' | 'accel' | 'adrdy'][] = [[HDL_STIM_DIP, 'dip'], [HDL_STIM_PB, 'pb'], [HDL_STIM_ACCEL, 'accel'], [HDL_STIM_ADRDY, 'adrdy']];
+    const moved = fields.filter(([code, f]) => now[f] !== before[f] && !stimmed.has(code));
     for (const [code, f] of moved) {
-      const value = f === 'adrdy' ? (now[f] ? 1 : 0) : now[f] >>> 0;
+      const value = f === 'adrdy' ? (now[f] ? 1 : 0) : Number(now[f]) >>> 0;
       hdlRec.stim = hdlRec.stim.filter(e => !(e.cycle === cyc && e.code === code));
       hdlRec.stim.push({ cycle: cyc, code: code, value: value });
     }
@@ -110,7 +110,7 @@ export function hdlCatchUpInputs(before) {
 
 // A fresh trace: the current switch positions become the starting
 // environment and the timeline of later changes starts empty.
-export async function hdlStartTrace(budget, opts) {
+export async function hdlStartTrace(budget: number, opts?: { chunk: boolean; } | undefined) {
   await hdlReadFolder();
   hdlRec.stim = [];
   hdlRec.rx = [];

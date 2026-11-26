@@ -9,18 +9,19 @@ import { cpu, layout, memory, program, ui } from '../machine/state';
 import { memView, setStatus } from './editor';
 import { REPLAYED_STATE_TITLE, TEXT_RO_TITLE, applyPanelColLayout, escapeHtml, measureMemHexNatural, panelFindMatch, setPanelFindCount, stateIsReplayed, updateRegisters } from './panels';
 import { updatePeripherals } from './peripherals';
+import { byId } from './dom';
 
 export let activeMemRegion = 'code';
 export let memViewMode = 'word'; // 'word' = one whole 32-bit word per 4-byte group (default), 'bytes' = separate editable bytes
 export let memDecSigned = true; // sign of the Word-mode Content(DEC) column; irrelevant in Byte mode (always ASCII)
 
-export function isCodeSegmentAddress(addr) {
+export function isCodeSegmentAddress(addr: number) {
   return (addr >= layout.baseAddress && addr < layout.dataBase) || (activeMemRegion === 'code' && addr < layout.dataBase);
 }
 
 export function updateMemoryView() {
-  const addrEl = document.getElementById('memAddr');
-  const rowsEl = document.getElementById('memRows');
+  const addrEl = byId<HTMLInputElement>('memAddr');
+  const rowsEl = byId<HTMLInputElement>('memRows');
   // Guard against being invoked before the memory-view DOM is parsed
   // (e.g. CodeMirror's very first editor dispatch on document load).
   if (!addrEl || !rowsEl) return;
@@ -53,9 +54,9 @@ export function updateMemoryView() {
   // carries the rendered cell(s) so they sit directly under the label.
   // When a label is NOT word-aligned, a title tooltip reveals the exact
   // byte address (hover only — zero visual clutter).
-  const labelAnnotationHtml = (wordStart, inner) => {
-    const names = [];
-    const offsets = [];
+  const labelAnnotationHtml = (wordStart: number, inner: string) => {
+    const names: (string | any[] | null)[] = [];
+    const offsets: number[] = [];
     for (let c = 0; c < 4; c++) {
       const offset = isStackView ? ((wordStart - c) >>> 0) : ((wordStart + c) >>> 0);
       if (labelsByAddr[offset]) {
@@ -78,7 +79,7 @@ export function updateMemoryView() {
   // MMIO register's own name instead of a user symbol - "UART RX VALID
   // (RO):", no address (the register IS the address). One register per
   // word, so this is a straight lookup rather than a byte scan.
-  const mmioLabelAnnotationHtml = (wordStart, inner) => {
+  const mmioLabelAnnotationHtml = (wordStart: number, inner: string) => {
     const reg = mmioRegisterAt(wordStart);
     if (!reg) return inner;
     return '<span class="mem-row-label-anchor"><span class="mem-row-label mmio-row-label">' +
@@ -87,15 +88,15 @@ export function updateMemoryView() {
 
   // Content column header/toggle: Byte mode is always ASCII; Word mode
   // is decimal, with a signed/unsigned switch that only makes sense there.
-  const contentLabelEl = document.getElementById('memContentColLabel');
-  const signToggleWrap = document.getElementById('memDecSignToggleWrap');
-  const signToggleInput = document.getElementById('memDecSignToggle');
+  const contentLabelEl = byId('memContentColLabel');
+  const signToggleWrap = byId<HTMLLabelElement>('memDecSignToggleWrap');
+  const signToggleInput = byId<HTMLInputElement>('memDecSignToggle');
   if (contentLabelEl) contentLabelEl.textContent = wordMode ? 'Content (DEC)' : 'Content (ASCII)';
   if (signToggleWrap) signToggleWrap.hidden = !wordMode;
   if (signToggleInput) signToggleInput.checked = memDecSigned;
 
   // Update legend hint for the active view mode
-  const legendEl = document.getElementById('memLegendText');
+  const legendEl = byId('memLegendText');
   if (legendEl) {
     legendEl.innerHTML = wordMode
       ? '<span class="mem-legend-endian">Full word (LSB to the right)</span>'
@@ -112,8 +113,8 @@ export function updateMemoryView() {
   // The names a row displays above its word - user labels, or an MMIO
   // register's own name. Searching for `main` or `UART` is at least as
   // likely as searching for an address, so they join the row's text.
-  const memRowNames = (rowStart) => {
-    const names = [];
+  const memRowNames = (rowStart: number) => {
+    const names: string[] = [];
     for (let c = 0; c < 4; c++) {
       const offset = isStackView ? ((rowStart - c) >>> 0) : ((rowStart + c) >>> 0);
       for (const n of (labelsByAddr[offset] || [])) if (!names.includes(n)) names.push(n);
@@ -125,13 +126,13 @@ export function updateMemoryView() {
 
   // A byte can be read-only for either reason, and the tooltip should say
   // which; HDL replay wins because it applies to every segment.
-  const roByteTitle = (offset) => stateIsReplayed()
+  const roByteTitle = (offset: number) => stateIsReplayed()
     ? REPLAYED_STATE_TITLE
     : (isCodeSegmentAddress(offset) ? TEXT_RO_TITLE : '');
 
   // Every branch below emits the same row shape, so they share one exit
   // point - which is also where the panel's row filter gets applied.
-  const emitMemRow = (rowStart, hexVals, contentVals, text) => {
+  const emitMemRow = (rowStart: number, hexVals: any, contentVals: string, text: string) => {
     built++;
     if (!panelFindMatch('memory', text + ' ' + memRowNames(rowStart))) return;
     shown++;
@@ -274,22 +275,22 @@ export function updateMemoryView() {
   applyPanelColLayout('memory');
 }
 
-export function setMemViewMode(mode) {
+export function setMemViewMode(mode: string) {
   memViewMode = (mode === 'word') ? 'word' : 'bytes';
-  const bytesBtn = document.getElementById('memViewModeBytes');
-  const wordBtn = document.getElementById('memViewModeWord');
+  const bytesBtn = byId<HTMLButtonElement>('memViewModeBytes');
+  const wordBtn = byId<HTMLButtonElement>('memViewModeWord');
   if (bytesBtn) bytesBtn.classList.toggle('active', memViewMode === 'bytes');
   if (wordBtn) wordBtn.classList.toggle('active', memViewMode === 'word');
   updateMemoryView();
   setStatus(memViewMode === 'word' ? 'Memory view: 32-bit word display' : 'Memory view: separate byte display', 'info');
 }
 
-export function setMemDecSigned(signed) {
+export function setMemDecSigned(signed: any) {
   memDecSigned = !!signed;
   updateMemoryView();
 }
 
-export function editMemByte(addr) {
+export function editMemByte(addr: number) {
   if (isCodeSegmentAddress(addr)) {
     setStatus('Text segment is read-only in Memory View (edit in Code Editor and Assemble)', 'warning');
     return;
@@ -302,7 +303,7 @@ export function editMemByte(addr) {
   focusMemByte(addr);
 }
 
-export function startMemByteEdit(el) {
+export function startMemByteEdit(el: { dataset: { addr: string; old: any; }; blur: () => void; textContent: any; classList: { add: (arg0: string) => void; }; }) {
   if (stateIsReplayed()) { setStatus(REPLAYED_STATE_TITLE, 'warning'); return; }
 
   const addr = parseInt(el.dataset.addr, 10);
@@ -322,7 +323,7 @@ export function startMemByteEdit(el) {
   selectElementText(el);
 }
 
-export function handleMemByteEditKey(event, el) {
+export function handleMemByteEditKey(event: { key: string | any[]; preventDefault: () => void; ctrlKey: any; metaKey: any; altKey: any; }, el: { blur: () => void; contains: (arg0: Node | null) => any; textContent: any; }) {
   if (event.key === 'Enter') {
     event.preventDefault();
     el.blur();
@@ -345,12 +346,12 @@ export function handleMemByteEditKey(event, el) {
   if (currentLen - selected >= 2) event.preventDefault();
 }
 
-export function writeMemFromPanel(addr, val, size) {
+export function writeMemFromPanel(addr: number, val: number, size: number) {
   memory.panelEdit = true;
   try { writeMem(addr, val, size); } finally { memory.panelEdit = false; }
 }
 
-export function commitMemByteEdit(el) {
+export function commitMemByteEdit(el: { classList: { contains: (arg0: string) => any; remove: (arg0: string) => void; }; dataset: { addr: string; old: string; }; textContent: any; }) {
   if (!el || !el.classList || !el.classList.contains('editing')) return;
   const addr = parseInt(el.dataset.addr, 10);
   if (isCodeSegmentAddress(addr)) {
@@ -389,7 +390,7 @@ export function commitMemByteEdit(el) {
   setStatus('Memory updated at 0x' + addr.toString(16).padStart(8, '0'), 'success');
 }
 
-export function cancelMemByteEdit(el) {
+export function cancelMemByteEdit(el: { textContent: any; dataset: { old: string; }; classList: { remove: (arg0: string) => void; }; blur: () => void; }) {
   el.textContent = el.dataset.old || '00';
   el.classList.remove('editing');
   el.blur();
@@ -397,7 +398,7 @@ export function cancelMemByteEdit(el) {
 
 // ---- Word-level editing (4 bytes at a time) ----
 
-export function startMemWordEdit(event, wordStartAddr) {
+export function startMemWordEdit(event: { preventDefault: () => void; stopPropagation: () => void; }, wordStartAddr: number) {
   if (stateIsReplayed()) { setStatus(REPLAYED_STATE_TITLE, 'warning'); return; }
 
   event.preventDefault();
@@ -424,7 +425,7 @@ export function startMemWordEdit(event, wordStartAddr) {
 }
 
 // Word-cell click handler for the "word view" memory display mode.
-export function startMemWordCellEdit(event, wordStartAddr) {
+export function startMemWordCellEdit(event: { preventDefault: () => void; stopPropagation: () => void; }, wordStartAddr: number) {
   if (stateIsReplayed()) { setStatus(REPLAYED_STATE_TITLE, 'warning'); return; }
 
   event.preventDefault();
@@ -445,7 +446,7 @@ export function startMemWordCellEdit(event, wordStartAddr) {
 // typed as it reads in a decimal column means what it looks like. Hex
 // without the prefix is still taken once a letter makes it unambiguous.
 // Returns the 32-bit pattern, or null when the text is neither.
-export function parseEditedWord(text) {
+export function parseEditedWord(text: null) {
   const t = String(text == null ? '' : text).trim();
   let v = NaN;
   if (/^[+-]?0x[0-9a-f]+$/i.test(t)) v = parseInt(t, 16);
@@ -455,7 +456,7 @@ export function parseEditedWord(text) {
   return v >>> 0;
 }
 
-export function openMemWordOverlay(alignedAddr, spans) {
+export function openMemWordOverlay(alignedAddr: number, spans: string | any[] | null) {
   // Read current word value (little-endian)
   let wordVal = 0;
   if (spans && spans.length >= 4) {
@@ -493,7 +494,7 @@ export function openMemWordOverlay(alignedAddr, spans) {
   overlay._wordAddr = alignedAddr;
   overlay._spans = spans || [];
 
-  const handleKey = (e) => {
+  const handleKey = (e: { key: string; preventDefault: () => void; }) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       commitMemWordEdit(overlay);
@@ -512,7 +513,7 @@ export function openMemWordOverlay(alignedAddr, spans) {
   input.addEventListener('blur', handleBlur, { once: true });
 
   // Also handle clicks outside to cancel
-  const handleOutsideClick = (e) => {
+  const handleOutsideClick = (e: { target: Node | null; }) => {
     if (!overlay.contains(e.target)) {
       cancelMemWordEdit(overlay);
       document.removeEventListener('mousedown', handleOutsideClick);
@@ -521,7 +522,7 @@ export function openMemWordOverlay(alignedAddr, spans) {
   document.addEventListener('mousedown', handleOutsideClick);
 }
 
-export function commitMemWordEdit(overlay) {
+export function commitMemWordEdit(overlay: HTMLElement) {
   if (!overlay || !overlay._wordAddr) return;
   const input = document.getElementById('memWordEditInput');
   if (!input) return;
@@ -566,23 +567,23 @@ export function commitMemWordEdit(overlay) {
   setStatus(`Word updated at 0x${addr.toString(16).padStart(8, '0')}: 0x${(val >>> 0).toString(16).padStart(8, '0')}`, 'success');
 }
 
-export function cancelMemWordEdit(overlay) {
+export function cancelMemWordEdit(overlay: HTMLElement) {
   if (!overlay) return;
   // Clear spans changed class
   if (overlay._spans) {
-    overlay._spans.forEach(el => { if (el && el.classList) el.classList.remove('changed'); });
+    overlay._spans.forEach((el: { classList: { remove: (arg0: string) => void; }; }) => { if (el && el.classList) el.classList.remove('changed'); });
   }
   overlay.remove();
 }
 
-export function focusMemByte(addr) {
+export function focusMemByte(addr: any) {
   const el = memView.querySelector(`[data-addr="${addr}"]`);
   if (!el) return;
   el.focus();
   selectElementText(el);
 }
 
-export function selectElementText(el) {
+export function selectElementText(el: Node) {
   if (!window.getSelection || !document.createRange) return;
   const range = document.createRange();
   range.selectNodeContents(el);
@@ -591,7 +592,7 @@ export function selectElementText(el) {
   sel.addRange(range);
 }
 
-export function startRegEdit(el) {
+export function startRegEdit(el: { contentEditable: string; classList: { add: (arg0: string) => void; }; dataset: { old: any; }; textContent: string; focus: () => void; }) {
   if (stateIsReplayed()) { setStatus(REPLAYED_STATE_TITLE, 'warning'); return; }
 
   if (!el) return;
@@ -602,7 +603,7 @@ export function startRegEdit(el) {
   selectElementText(el);
 }
 
-export function commitRegEdit(el) {
+export function commitRegEdit(el: { classList: { contains: (arg0: string) => any; remove: (arg0: string) => void; }; contentEditable: string; dataset: { idx: string; type: any; old: any; }; textContent: any; }) {
   if (!el || !el.classList || !el.classList.contains('editing')) return;
   el.contentEditable = "false";
   el.classList.remove('editing');
@@ -637,14 +638,14 @@ export function commitRegEdit(el) {
   updateMemoryView();
 }
 
-export function cancelRegEdit(el) {
+export function cancelRegEdit(el: { classList: { contains: (arg0: string) => any; remove: (arg0: string) => void; }; contentEditable: string; textContent: any; dataset: { old: any; }; }) {
   if (!el || !el.classList || !el.classList.contains('editing')) return;
   el.contentEditable = "false";
   el.classList.remove('editing');
   el.textContent = el.dataset.old;
 }
 
-export function handleRegEditKey(event, el) {
+export function handleRegEditKey(event: { key: string | any[]; preventDefault: () => void; ctrlKey: any; metaKey: any; altKey: any; }, el: { blur: () => void; dataset: { type: string; }; }) {
   if (event.key === 'Enter') {
     event.preventDefault();
     commitRegEdit(el);
@@ -670,7 +671,7 @@ export function handleRegEditKey(event, el) {
   }
 }
 
-export function popRegEditModal(event, el) {
+export function popRegEditModal(event: { preventDefault: () => void; stopPropagation: () => void; }, el: { dataset: { idx: string; type: string; }; }) {
   if (stateIsReplayed()) { setStatus(REPLAYED_STATE_TITLE, 'warning'); return; }
 
   if (event) { event.preventDefault(); event.stopPropagation(); }
@@ -701,7 +702,7 @@ export function popRegEditModal(event, el) {
   input.focus();
   input.select();
 
-  const handleKey = (e) => {
+  const handleKey = (e: { key: string; preventDefault: () => void; }) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       commitRegEditModal(idx, input.value);
@@ -719,7 +720,7 @@ export function popRegEditModal(event, el) {
   input.addEventListener('keydown', handleKey);
   input.addEventListener('blur', handleBlur, { once: true });
 
-  const handleOutsideClick = (e) => {
+  const handleOutsideClick = (e: { target: Node | null; }) => {
     if (overlay && !overlay.contains(e.target)) {
       closeRegEditModal();
       document.removeEventListener('mousedown', handleOutsideClick);
@@ -728,7 +729,7 @@ export function popRegEditModal(event, el) {
   setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 10);
 }
 
-export function commitRegEditModal(idx, text) {
+export function commitRegEditModal(idx: number, text: any) {
   closeRegEditModal();
   if (idx < 0 || idx > 31) return;
   if (idx === 0) {
@@ -755,11 +756,11 @@ export function closeRegEditModal() {
   }
 }
 
-export function memGo(region) {
+export function memGo(region: string) {
   ui.memSegment = region;
   activeMemRegion = region;
-  const el = document.getElementById('memAddr');
-  const rowsEl = document.getElementById('memRows');
+  const el = byId<HTMLInputElement>('memAddr');
+  const rowsEl = byId<HTMLInputElement>('memRows');
   if (region === 'code') { if (el) el.value = '0x' + (layout.baseAddress >>> 0).toString(16); }
   else if (region === 'data') { if (el) el.value = '0x' + (layout.dataBase >>> 0).toString(16); }
   else if (region === 'stack') { if (el) el.value = '0x' + (layout.stackBase >>> 0).toString(16); }
@@ -778,12 +779,12 @@ export function updateMemSubTabs() {
     }
   });
   // Sync the segmented Byte/Word display-mode buttons
-  const bytesBtn = document.getElementById('memViewModeBytes');
-  const wordBtn = document.getElementById('memViewModeWord');
+  const bytesBtn = byId<HTMLButtonElement>('memViewModeBytes');
+  const wordBtn = byId<HTMLButtonElement>('memViewModeWord');
   if (bytesBtn) bytesBtn.classList.toggle('active', memViewMode === 'bytes');
   if (wordBtn) wordBtn.classList.toggle('active', memViewMode === 'word');
 
-  const editableEl = document.getElementById('memLegendEditable');
+  const editableEl = byId('memLegendEditable');
   if (editableEl) {
     // Nothing is editable while HDL state is replayed, so the whole
     // editability note goes rather than reading "Editable" over cells
@@ -793,7 +794,7 @@ export function updateMemSubTabs() {
       : ui.memSegment === 'mmio' ? 'Editable except RO'
       : 'Editable';
     editableEl.innerHTML = text ? `<span class="mem-legend-editable">${text}</span>` : '';
-    const sep = document.getElementById('memLegendSep');
+    const sep = byId('memLegendSep');
     if (sep) sep.hidden = !text;
   }
 }

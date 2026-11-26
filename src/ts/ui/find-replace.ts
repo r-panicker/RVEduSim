@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Find/replace in the editor, the global keyboard shortcuts, and the
 // CodeMirror editor's set-up.
 
@@ -14,14 +13,15 @@ import { focusLocalsVar } from './locals';
 import { updateEditor } from './panels';
 import { bumpAccelAxis, pbSetState } from './peripherals';
 import { assembleOnly, stepBack, stepOnce, toggleRunPause } from './run-control';
+import { byId, targetEl } from './dom';
 
 export function openFindReplace(focusReplace = false) {
-  const panel = document.getElementById('findReplacePanel');
+  const panel = byId('findReplacePanel');
   if (!panel) return;
   panel.style.display = 'flex';
-  const findInput = document.getElementById('findInput');
-  const replaceInput = document.getElementById('replaceInput');
-  const replaceRow = document.getElementById('replaceRow');
+  const findInput = byId<HTMLInputElement>('findInput');
+  const replaceInput = byId<HTMLInputElement>('replaceInput');
+  const replaceRow = byId('replaceRow');
   if (replaceRow) replaceRow.style.display = 'flex';
 
   // If text is selected on a single line, prefill find query
@@ -41,7 +41,7 @@ export function openFindReplace(focusReplace = false) {
 }
 
 export function closeFindReplace() {
-  const panel = document.getElementById('findReplacePanel');
+  const panel = byId('findReplacePanel');
   if (panel) panel.style.display = 'none';
   editorState.find.matches = [];
   editorState.find.activeIndex = -1;
@@ -50,14 +50,14 @@ export function closeFindReplace() {
 
 export function toggleFindCase() {
   editorState.find.caseSensitive = !editorState.find.caseSensitive;
-  const btn = document.getElementById('findCaseBtn');
+  const btn = byId<HTMLButtonElement>('findCaseBtn');
   if (btn) btn.classList.toggle('active', editorState.find.caseSensitive);
   updateFindMatches();
 }
 
 export function updateFindMatches() {
-  const findInput = document.getElementById('findInput');
-  const countEl = document.getElementById('findCount');
+  const findInput = byId<HTMLInputElement>('findInput');
+  const countEl = byId('findCount');
   if (!findInput || !countEl) return;
 
   const query = findInput.value;
@@ -99,7 +99,7 @@ export function updateFindMatches() {
   selectFindMatch(editorState.find.activeIndex, false);
 }
 
-export function selectFindMatch(idx, shouldFocusEditor = false) {
+export function selectFindMatch(idx: number, shouldFocusEditor = false) {
   if (idx < 0 || idx >= editorState.find.matches.length) return;
   editorState.find.activeIndex = idx;
   const m = editorState.find.matches[idx];
@@ -110,7 +110,7 @@ export function selectFindMatch(idx, shouldFocusEditor = false) {
   if (shouldFocusEditor) {
     editor.focus();
   }
-  const countEl = document.getElementById('findCount');
+  const countEl = byId('findCount');
   if (countEl) countEl.textContent = `${idx + 1}/${editorState.find.matches.length}`;
 }
 
@@ -132,7 +132,7 @@ export function findPrev() {
   selectFindMatch(editorState.find.activeIndex, false);
 }
 
-export function handleFindKey(e) {
+export function handleFindKey(e: { key: string; preventDefault: () => void; shiftKey: any; }) {
   if (e.key === 'Enter') {
     e.preventDefault();
     if (e.shiftKey) findPrev();
@@ -144,7 +144,7 @@ export function handleFindKey(e) {
 }
 
 export function replaceCurrent() {
-  const replaceInput = document.getElementById('replaceInput');
+  const replaceInput = byId<HTMLInputElement>('replaceInput');
   if (!replaceInput || editorState.find.activeIndex < 0 || editorState.find.activeIndex >= editorState.find.matches.length) return;
   const repVal = replaceInput.value;
   const m = editorState.find.matches[editorState.find.activeIndex];
@@ -158,8 +158,8 @@ export function replaceCurrent() {
 }
 
 export function replaceAll() {
-  const findInput = document.getElementById('findInput');
-  const replaceInput = document.getElementById('replaceInput');
+  const findInput = byId<HTMLInputElement>('findInput');
+  const replaceInput = byId<HTMLInputElement>('replaceInput');
   if (!findInput || !replaceInput || !findInput.value) return;
 
   const query = findInput.value;
@@ -180,7 +180,7 @@ export function replaceAll() {
   }
 }
 
-export function scrollToCursor(ed) {
+export function scrollToCursor(ed: { value: any; selectionStart: any; selectionEnd: any; scrollTop: any; scrollLeft: any; focus(): void; setSelectionRange(start: any, end: any): void; }) {
   if (editorState.cm) {
     const pos = editorState.cm.state.selection.main.head;
     editorState.cm.dispatch({
@@ -192,18 +192,7 @@ export function scrollToCursor(ed) {
 // Accelerometer axis keys currently held (X/Y/Z/T) - see the keydown
 // handler below.
 export let heldAxisKeys = new Set();
-export const PB_KEYS = { j: 2, k: 1, l: 0 };   // BTNL, BTNC, BTNR, left to right
-
-// --- Master Keyboard shortcuts for the Editor & Simulator ---
-
-// Releases whichever push-button key was held, and un-arms any released
-// accelerometer axis key. Not gated on focus like the keydown handler -
-// a key released after focus moved away (e.g. the user Tabbed elsewhere
-// mid-press) must still let go of the button / axis.
-
-// Safety net: if the window loses focus while a key is held down (alt-tab,
-// clicking into another app), no keyup ever arrives. Release all three
-// rather than leave a button stuck pressed.
+export const PB_KEYS: Record<string, number> = { j: 2, k: 1, l: 0 };   // BTNL, BTNC, BTNR, left to right
 
 export function initCodeMirrorEditor() {
   if (editorState.cm) return;
@@ -212,7 +201,7 @@ export function initCodeMirrorEditor() {
     editorState.languageCompartment = new CM6.Compartment();
     window.languageCompartment = editorState.languageCompartment;
   }
-  const container = document.getElementById('cmEditorContainer');
+  const container = byId('cmEditorContainer');
   if (!container) return;
 
   // The very first thing shown, before any explicit example selection -
@@ -225,7 +214,7 @@ export function initCodeMirrorEditor() {
     extensions: [
       CM6.lineNumbers({
         domEventHandlers: {
-          mousedown(view, line, event) {
+          mousedown(view: { state: { doc: { lineAt: (arg0: any) => { (): any; new(): any; number: any; }; }; }; }, line: { from: any; }, event: any) {
             const lineNo = view.state.doc.lineAt(line.from).number;
             toggleBreakpoint(lineNo);
             return true;
@@ -235,11 +224,11 @@ export function initCodeMirrorEditor() {
       breakpointGutter,
       execLineField,
       pipeStagesField,
-      CM6.gutter({ class: 'cm-pipe-gutter', markers: v => v.state.field(pipeStagesField) }),
+      CM6.gutter({ class: 'cm-pipe-gutter', markers: (v: { state: { field: (arg0: null) => { state: { field: (arg0: null) => any; }; }; }; }) => v.state.field(pipeStagesField) }),
       signatureHelpField,
       riscvHoverTooltip,
       CM6.EditorView.domEventHandlers({
-        click(event, view) {
+        click(event: { clientX: any; clientY: any; }, view: { posAtCoords: (arg0: { x: any; y: any; }) => any; state: { doc: { lineAt: (arg0: any) => any; }; }; }) {
           if (editorState.language !== 'c') return false;
           const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
           if (pos == null) return false;
@@ -281,11 +270,11 @@ export function initCodeMirrorEditor() {
         ...CM6.completionKeymap,
         {
           key: "Tab",
-          run: (view) => {
+          run: (view: { state: any; dispatch: any; }) => {
             if (CM6.acceptCompletion && CM6.acceptCompletion(view)) return true;
             const { state, dispatch } = view;
-            if (state.selection.ranges.every(r => r.empty)) {
-              dispatch(state.changeByRange(range => ({
+            if (state.selection.ranges.every((r: { empty: { empty: any; }; }) => r.empty)) {
+              dispatch(state.changeByRange((range: { from: number; }) => ({
                 changes: { from: range.from, insert: '	' },
                 range: CM6.EditorSelection.cursor(range.from + 1)
               })));
@@ -310,7 +299,7 @@ export function initCodeMirrorEditor() {
         {
           key: "Escape",
           run: () => {
-            const panel = document.getElementById('findReplacePanel');
+            const panel = byId('findReplacePanel');
             if (panel && panel.style.display !== 'none') {
               closeFindReplace();
               return true;
@@ -332,7 +321,7 @@ export function initCodeMirrorEditor() {
         },
         {
           key: "F9",
-          run: (view) => {
+          run: (view: { state: { doc: { lineAt: (arg0: any) => { (): any; new(): any; number: any; }; }; selection: { main: { head: any; }; }; }; }) => {
             const lineNo = view.state.doc.lineAt(view.state.selection.main.head).number;
             toggleBreakpoint(lineNo);
             return true;
@@ -347,7 +336,7 @@ export function initCodeMirrorEditor() {
           run: () => { saveFile(); return true; }
         }
       ]),
-      CM6.EditorView.updateListener.of((update) => {
+      CM6.EditorView.updateListener.of((update: { docChanged: any; }) => {
         if (update.docChanged) {
           updateEditor();
         }
@@ -364,13 +353,9 @@ export function initCodeMirrorEditor() {
   updateEditor();
 }
 
-
-// Initialize CodeMirror 6 after DOM load AND once window.CM6 is available
-// (CDN-loaded with a local fallback). The loader (01-cm6-loader.ts) runs
-// first, but the CDN import is async, so poll until the global exists.
-
 // Run once the page has loaded every module (main.ts), in page order.
 export function onFindReplaceLoad() {
+  // Keyboard shortcuts for the editor and the simulator.
   document.addEventListener('keydown', (e) => {
     // Find/Replace shortcuts
     if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
@@ -384,25 +369,25 @@ export function onFindReplaceLoad() {
       return;
     }
     if (e.key === 'Escape') {
-      const findPanel = document.getElementById('findReplacePanel');
+      const findPanel = byId('findReplacePanel');
       if (findPanel && findPanel.style.display !== 'none') {
         e.preventDefault();
         closeFindReplace();
         return;
       }
-      const bpOv = document.getElementById('bpFigOverlay');
+      const bpOv = byId('bpFigOverlay');
       if (bpOv && bpOv.classList.contains('open')) {
         e.preventDefault();
         closeBpFigure();
         return;
       }
-      const creditsOv = document.getElementById('creditsOverlay');
+      const creditsOv = byId('creditsOverlay');
       if (creditsOv && creditsOv.classList.contains('open')) {
         e.preventDefault();
         closeCreditsModal();
         return;
       }
-      const settingsOv = document.getElementById('settingsOverlay');
+      const settingsOv = byId('settingsOverlay');
       if (settingsOv && settingsOv.classList.contains('open')) {
         e.preventDefault();
         closeSettingsModal();
@@ -413,7 +398,7 @@ export function onFindReplaceLoad() {
     // If a form field other than the code editor is focused (UART console input,
     // memory address box, find/replace fields, etc.), don't let the global
     // simulator shortcuts (F5/F8/F9/Ctrl+Enter/Ctrl+S) fire while typing.
-    const t = e.target;
+    const t = targetEl(e);
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) {
       return;
     }
@@ -458,12 +443,19 @@ export function onFindReplaceLoad() {
     else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); assembleOnly(); }
     else if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveFile(); }
   });
+  // Releases whichever push-button key was held, and un-arms any released
+  // accelerometer axis key. Not gated on focus like the keydown handler:
+  // a key released after focus moved away (Tab mid-press) must still let
+  // go of the button or axis.
   document.addEventListener('keyup', (e) => {
     const lower = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     const pbKey = PB_KEYS[lower];
     if (pbKey !== undefined) pbSetState(pbKey, false);
     if (['x', 'y', 'z', 't'].includes(lower)) heldAxisKeys.delete(lower);
   });
+  // If the window loses focus while a key is held down (alt-tab, clicking
+  // into another app), no keyup ever arrives: release all three rather
+  // than leave a button stuck pressed.
   window.addEventListener('blur', () => {
     pbSetState(0, false);
     pbSetState(1, false);

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The Peripherals panel: section folding, LEDs, switches, push buttons,
 // 7-segment display, UART, OLED and accelerometer controls and status.
 
@@ -11,6 +10,8 @@ import { oledBlankPage } from '../machine/oled';
 import { accel, board, clock, cpu, oled, run, uart, ui } from '../machine/state';
 import { uartGapInstr, uartNow, uartTickDelivery } from '../machine/uart';
 import { updateMemoryView } from './memory-register-views';
+import { byId } from './dom';
+import { MmioRegister } from '../machine/mmio';
 
 // Fold/unfold state, per section: `folded` is the current visual
 // state; `userFolded` is set only when the *user* is the one who
@@ -20,7 +21,8 @@ import { updateMemoryView } from './memory-register-views';
 // in styles/11-peripherals.css).
 export const PERIPH_FOLD_KEYS = ['ledDip', 'pb', 'sevseg', 'uart', 'accel', 'oled'];
 export const PERIPH_DEFAULT_EXPANDED = new Set(['ledDip']);
-export let periphFoldState = {};
+// folded: shown folded; userFolded: the user folded it, so use does not unfold it.
+export let periphFoldState: Record<string, { folded: boolean; userFolded: boolean }> = {};
 
 export function resetPeriphFoldState() {
   periphFoldState = {};
@@ -30,14 +32,14 @@ export function resetPeriphFoldState() {
   PERIPH_FOLD_KEYS.forEach(applyPeriphFoldOne);
 }
 
-export function applyPeriphFoldOne(key) {
+export function applyPeriphFoldOne(key: string) {
   const el = document.querySelector(`.periph-section[data-periph="${key}"]`);
   const st = periphFoldState[key];
   if (!el || !st) return;
   el.classList.toggle('periph-folded', st.folded);
 }
 
-export function togglePeriphFold(key) {
+export function togglePeriphFold(key: string) {
   const st = periphFoldState[key];
   if (!st) return;
   st.folded = !st.folded;
@@ -52,11 +54,12 @@ export function togglePeriphFold(key) {
 // reading or writing a peripheral's registers is "using" it, so bring
 // it into view unless the user has deliberately folded it back since
 // the program was last (re)loaded.
-export function notePeripheralUse(reg) {
-  const st = reg.panel && periphFoldState[reg.panel];
-  if (st && st.folded && !st.userFolded) {
+export function notePeripheralUse(reg: MmioRegister) {
+  const panel = reg.panel;
+  const st = panel && periphFoldState[panel];
+  if (panel && st && st.folded && !st.userFolded) {
     st.folded = false;
-    applyPeriphFoldOne(reg.panel);
+    applyPeriphFoldOne(panel);
   }
 }
 
@@ -71,7 +74,7 @@ export function initPeripherals() {
     periphFoldBooted = true;
     resetPeriphFoldState();
   }
-  const ledRow = document.getElementById('ledRow');
+  const ledRow = byId('ledRow');
   if (ledRow) {
     let ledHtml = '';
     for (let i = 15; i >= 0; i--) {
@@ -102,7 +105,7 @@ export function initPeripherals() {
     ledRow.innerHTML = ledHtml;
   }
 
-  const dipCont = document.getElementById('dipContainer');
+  const dipCont = byId('dipContainer');
   if (dipCont) {
     let dipHtml = '';
     for (let i = 15; i >= 0; i--) {
@@ -121,7 +124,7 @@ export function initPeripherals() {
     dipCont.innerHTML = dipHtml;
   }
 
-  const pbCont = document.getElementById('pbContainer');
+  const pbCont = byId('pbContainer');
   if (pbCont) {
     const SQ = String.fromCharCode(39);
     // Click toggles (matches every other peripheral input here); the
@@ -136,7 +139,7 @@ export function initPeripherals() {
       '</div>';
   }
 
-  const sevseg = document.getElementById('sevsegContainer');
+  const sevseg = byId('sevsegContainer');
   if (sevseg) sevseg.innerHTML = '';
 
   updatePeripherals();
@@ -147,7 +150,7 @@ export function initPeripherals() {
 // engine) it is drawn from the wall clock: at the clock's own rate when
 // Real time paces one slow enough to see, otherwise flickering, which is
 // how a fast clock looks. A stopped clock holds its level; lit after Reset.
-export let clockLedTimer = null;
+export let clockLedTimer: number | null = null;
 export function updateClockLed() {
   const led = document.getElementById('led8');
   const busy = run.running || !!(hdlActivity.live || hdlActivity.chunked || hdlActivity.play);
@@ -195,13 +198,13 @@ export function updatePeripherals() {
   sevsegUpdate();
 
   // Update UART Status Badges & RX Queue Info
-  const rxValidEl = document.getElementById('badgeRxValid');
-  const txReadyEl = document.getElementById('badgeTxReady');
-  const countEl = document.getElementById('uartQueueCount');
-  const previewEl = document.getElementById('uartQueuePreview');
-  const termEl = document.getElementById('uartTerminal');
+  const rxValidEl = byId('badgeRxValid');
+  const txReadyEl = byId('badgeTxReady');
+  const countEl = byId('uartQueueCount');
+  const previewEl = byId('uartQueuePreview');
+  const termEl = byId('uartTerminal');
 
-  const asChar = (b) => (b >= 32 && b <= 126)
+  const asChar = (b: number) => (b >= 32 && b <= 126)
     ? `'${String.fromCharCode(b)}'` : '0x' + b.toString(16).padStart(2, '0');
 
   if (rxValidEl) {
@@ -230,8 +233,8 @@ export function updatePeripherals() {
     renderUartTerminal();
   }
 
-  const autoStatusEl = document.getElementById('uartAutoSendStatus');
-  const btnEl = document.getElementById('uartSendBtn');
+  const autoStatusEl = byId('uartAutoSendStatus');
+  const btnEl = byId<HTMLButtonElement>('uartSendBtn');
   if (autoStatusEl) {
     if (uart.pending.length) {
       const sentCount = Math.max(0, uart.sendTotal - uart.pending.length);
@@ -247,22 +250,22 @@ export function updatePeripherals() {
   }
 
   // Update OLED Status Badges & Mode Text
-  const oledColEl = document.getElementById('oledColVal');
-  const oledRowEl = document.getElementById('oledRowVal');
-  const oledCtrlEl = document.getElementById('oledCtrlVal');
-  const oledDescEl = document.getElementById('oledModeDesc');
+  const oledColEl = byId('oledColVal');
+  const oledRowEl = byId('oledRowVal');
+  const oledCtrlEl = byId('oledCtrlVal');
+  const oledDescEl = byId('oledModeDesc');
 
-  if (oledColEl) oledColEl.innerText = oled.col;
-  if (oledRowEl) oledRowEl.innerText = oled.row;
+  if (oledColEl) oledColEl.innerText = String(oled.col);
+  if (oledRowEl) oledRowEl.innerText = String(oled.row);
   if (oledCtrlEl) oledCtrlEl.innerText = '0x' + (oled.ctrl & 0xFF).toString(16).padStart(2, '0').toUpperCase();
 
   // Bit 0 of OLED_STATUS, shown the way DREADY and RX VALID are. Always 0
   // here: with no scanout to wait for, a present has landed by the time
   // anything can look. Which page the panel is on does change, so that is
   // spelled out below.
-  const oledSwapEl = document.getElementById('badgeOledSwap');
+  const oledSwapEl = byId('badgeOledSwap');
   if (oledSwapEl) oledSwapEl.innerText = '0';
-  const oledBufEl = document.getElementById('oledBufDesc');
+  const oledBufEl = byId('oledBufDesc');
   if (oledBufEl) {
     oledBufEl.innerText = (oled.front === oled.back)
       ? 'Single buffered · writes appear at once'
@@ -272,14 +275,14 @@ export function updatePeripherals() {
   if (oledDescEl) {
     const triggerMode = oled.ctrl & 0x0F;
     const colorMode = (oled.ctrl >> 4) & 0x0F;
-    const triggerNames = {
+    const triggerNames: Record<number, string> = {
       0x0: 'vary_pixel_data_mode',
       0x1: 'vary_col_mode (x)',
       0x2: 'vary_row_mode (y)',
       0x4: 'autoadvance_col (row major)',
       0x5: 'autoadvance_row (column major)'
     };
-    const colorNames = {
+    const colorNames: Record<number, string> = {
       0x0: '8-bit (3R-3G-2B)',
       0x1: '16-bit (5R-6G-5B)',
       0x2: '24-bit (5R-3(0)-6G-2(0)-5B-3(0))'
@@ -290,31 +293,31 @@ export function updatePeripherals() {
   }
 
   // Update Accelerometer UI & Cycle Count Badge
-  const xEl = document.getElementById('accelXVal');
-  const yEl = document.getElementById('accelYVal');
-  const zEl = document.getElementById('accelZVal');
-  const tEl = document.getElementById('accelTempVal');
-  const dreadyEl = document.getElementById('badgeAccelDready');
-  const cycleEl = document.getElementById('badgeCycleCount');
+  const xEl = byId('accelXVal');
+  const yEl = byId('accelYVal');
+  const zEl = byId('accelZVal');
+  const tEl = byId('accelTempVal');
+  const dreadyEl = byId('badgeAccelDready');
+  const cycleEl = byId('badgeCycleCount');
 
-  const fmtHexByte = (v) => '0x' + (v & 0xFF).toString(16).padStart(2, '0').toUpperCase();
-  const fmtG = (v) => (v / 64 >= 0 ? '+' : '') + (v / 64).toFixed(2) + 'g';
+  const fmtHexByte = (v: number) => '0x' + (v & 0xFF).toString(16).padStart(2, '0').toUpperCase();
+  const fmtG = (v: number) => (v / 64 >= 0 ? '+' : '') + (v / 64).toFixed(2) + 'g';
 
   if (xEl) xEl.innerText = `${accel.x} (${fmtHexByte(accel.x)}, ${fmtG(accel.x)})`;
   if (yEl) yEl.innerText = `${accel.y} (${fmtHexByte(accel.y)}, ${fmtG(accel.y)})`;
   if (zEl) zEl.innerText = `${accel.z} (${fmtHexByte(accel.z)}, ${fmtG(accel.z)})`;
   if (tEl) tEl.innerText = `${accel.temp}°C (${fmtHexByte(accel.temp)})`;
   if (dreadyEl) dreadyEl.innerText = accel.dready ? '1' : '0';
-  if (cycleEl) cycleEl.innerText = cpu.totalCycles;
+  if (cycleEl) cycleEl.innerText = String(cpu.totalCycles);
   updateOledCanvas();
   hdlRefreshMmioView();
 }
 
 export function updateAccelValues() {
-  const xS = document.getElementById('accelXSlider');
-  const yS = document.getElementById('accelYSlider');
-  const zS = document.getElementById('accelZSlider');
-  const tS = document.getElementById('accelTempSlider');
+  const xS = byId<HTMLInputElement>('accelXSlider');
+  const yS = byId<HTMLInputElement>('accelYSlider');
+  const zS = byId<HTMLInputElement>('accelZSlider');
+  const tS = byId<HTMLInputElement>('accelTempSlider');
 
   if (xS) accel.x = parseInt(xS.value, 10);
   if (yS) accel.y = parseInt(yS.value, 10);
@@ -325,7 +328,7 @@ export function updateAccelValues() {
   hdlOnInputChanged(HDL_STIM_ACCEL, hdlAccelWord());
 }
 
-export function setAccelPreset(preset) {
+export function setAccelPreset(preset: string) {
   if (preset === 'flat') {
     accel.x = 0; accel.y = 0; accel.z = 64;
   } else if (preset === 'tiltX') {
@@ -342,12 +345,12 @@ export function setAccelPreset(preset) {
     accel.x = 0; accel.y = 0; accel.z = 0;
   }
 
-  const xS = document.getElementById('accelXSlider');
-  const yS = document.getElementById('accelYSlider');
-  const zS = document.getElementById('accelZSlider');
-  if (xS) xS.value = accel.x;
-  if (yS) yS.value = accel.y;
-  if (zS) zS.value = accel.z;
+  const xS = byId<HTMLInputElement>('accelXSlider');
+  const yS = byId<HTMLInputElement>('accelYSlider');
+  const zS = byId<HTMLInputElement>('accelZSlider');
+  if (xS) xS.value = String(accel.x);
+  if (yS) yS.value = String(accel.y);
+  if (zS) zS.value = String(accel.z);
 
   updatePeripherals();
   hdlOnInputChanged(HDL_STIM_ACCEL, hdlAccelWord());
@@ -357,29 +360,29 @@ export function setAccelPreset(preset) {
 // step, clamped to the same range as its slider - see the keydown
 // handler (heldAxisKeys, in ui/find-replace.ts) for where `axis`/`delta`
 // come from.
-export function bumpAccelAxis(axis, delta) {
+export function bumpAccelAxis(axis: unknown, delta: number) {
   if (axis === 'x') accel.x = Math.max(-128, Math.min(127, accel.x + delta));
   else if (axis === 'y') accel.y = Math.max(-128, Math.min(127, accel.y + delta));
   else if (axis === 'z') accel.z = Math.max(-128, Math.min(127, accel.z + delta));
   else if (axis === 't') accel.temp = Math.max(-40, Math.min(85, accel.temp + delta));
   else return;
 
-  const xS = document.getElementById('accelXSlider');
-  const yS = document.getElementById('accelYSlider');
-  const zS = document.getElementById('accelZSlider');
-  const tS = document.getElementById('accelTempSlider');
-  if (xS) xS.value = accel.x;
-  if (yS) yS.value = accel.y;
-  if (zS) zS.value = accel.z;
-  if (tS) tS.value = accel.temp;
+  const xS = byId<HTMLInputElement>('accelXSlider');
+  const yS = byId<HTMLInputElement>('accelYSlider');
+  const zS = byId<HTMLInputElement>('accelZSlider');
+  const tS = byId<HTMLInputElement>('accelTempSlider');
+  if (xS) xS.value = String(accel.x);
+  if (yS) yS.value = String(accel.y);
+  if (zS) zS.value = String(accel.z);
+  if (tS) tS.value = String(accel.temp);
 
   updatePeripherals();
 }
 
-export let oledImageData = null;
+export let oledImageData: ImageData | null = null;
 
 export function updateOledCanvas() {
-  const canvas = document.getElementById('oledCanvas');
+  const canvas = byId<HTMLCanvasElement>('oledCanvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -396,8 +399,8 @@ export function clearOledDisplay() {
   updatePeripherals();
 }
 
-export function parseAsciiEscapes(str) {
-  const bytes = [];
+export function parseAsciiEscapes(str: string) {
+  const bytes: number[] = [];
   let i = 0;
   while (i < str.length) {
     if (str[i] === '\\' && i + 1 < str.length) {
@@ -455,10 +458,10 @@ export function parseAsciiEscapes(str) {
 }
 
 export function queueUartInput() {
-  const modeEl = document.getElementById('uartInputMode');
-  const textEl = document.getElementById('uartInputText');
-  const btnEl = document.getElementById('uartSendBtn');
-  const statusEl = document.getElementById('uartAutoSendStatus');
+  const modeEl = byId<HTMLSelectElement>('uartInputMode');
+  const textEl = byId<HTMLInputElement>('uartInputText');
+  const btnEl = byId<HTMLButtonElement>('uartSendBtn');
+  const statusEl = byId('uartAutoSendStatus');
   if (!modeEl || !textEl) return;
 
   if (uart.pending.length) {
@@ -524,12 +527,12 @@ export function sendUartInput() {
   else queueUartInput();
 }
 
-export let uartTermShown = null;
+export let uartTermShown: string | null = null;
 
 export function renderUartTerminal() {
-  const termEl = document.getElementById('uartTerminal');
+  const termEl = byId('uartTerminal');
   if (!termEl) return;
-  const modeEl = document.getElementById('uartInputMode');
+  const modeEl = byId<HTMLSelectElement>('uartInputMode');
   const isHex = modeEl && modeEl.value === 'hex';
   let text;
   if (uart.txBytes.length === 0) {
@@ -559,19 +562,19 @@ export function clearUartTx() {
   uart.rxByte = 0;
   uart.rxDropped = 0;
   uart.rxDroppedTotal = 0;
-  const btnEl = document.getElementById('uartSendBtn');
+  const btnEl = byId<HTMLButtonElement>('uartSendBtn');
   if (btnEl) {
     btnEl.innerText = 'Send';
     btnEl.style.background = '';
   }
-  const statusEl = document.getElementById('uartAutoSendStatus');
+  const statusEl = byId('uartAutoSendStatus');
   if (statusEl) statusEl.innerText = '';
   renderUartTerminal();
   updatePeripherals();
   updateMemoryView();
 }
 
-export function toggleDip(idx) {
+export function toggleDip(idx: number) {
   board.dip ^= (1 << idx);
   board.dip &= 0xFFFF;
   updatePeripherals();
@@ -579,7 +582,7 @@ export function toggleDip(idx) {
 }
 
 // Push button: click to toggle press/release
-export function pbToggle(btn) {
+export function pbToggle(btn: number) {
   if (btn >= 0 && btn <= 2) {
     if (board.buttons & (1 << btn)) {
       board.buttons &= ~(1 << btn);
@@ -593,7 +596,7 @@ export function pbToggle(btn) {
 
 // Push button: keyboard hold. Sets the bit to exactly `down`, so it
 // behaves as a momentary button - pressed while held, not latched on.
-export function pbSetState(btn, down) {
+export function pbSetState(btn: number, down: boolean) {
   if (btn < 0 || btn > 2) return;
   const bit = 1 << btn;
   const next = down ? (board.buttons | bit) : (board.buttons & ~bit);
@@ -619,7 +622,7 @@ export const SEGMENT_PATHS = [
 ];
 
 // Segment bits for each hex digit [a,b,c,d,e,f,g]
-export const HEX_SEGMENTS = {
+export const HEX_SEGMENTS: Record<string, number[]> = {
   0: [1, 1, 1, 1, 1, 1, 0],
   1: [0, 1, 1, 0, 0, 0, 0],
   2: [1, 1, 0, 1, 1, 0, 1],
@@ -638,7 +641,7 @@ export const HEX_SEGMENTS = {
   'f': [1, 0, 0, 0, 1, 1, 1]
 };
 
-export function createDigitSVG(digit) {
+export function createDigitSVG(digit: string) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'sevseg-digit');
   svg.setAttribute('viewBox', '0 0 22 40');
@@ -649,7 +652,7 @@ export function createDigitSVG(digit) {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', SEGMENT_PATHS[i]);
     path.setAttribute('class', 'sevseg-segment' + (bits[i] ? ' lit' : ''));
-    path.setAttribute('data-seg', i);
+    path.setAttribute('data-seg', String(i));
     svg.appendChild(path);
   }
 
@@ -657,7 +660,7 @@ export function createDigitSVG(digit) {
 }
 
 export function sevsegUpdate() {
-  const container = document.getElementById('sevsegContainer');
+  const container = byId('sevsegContainer');
   if (!container) return;
 
   const val = board.sevseg.padStart(8, '0').toLowerCase();

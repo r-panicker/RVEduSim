@@ -1,10 +1,9 @@
-// @ts-nocheck
 // The optional cross-check of an HDL run against the JavaScript
 // functional model.
 
 import { hdlLog } from './engine';
 import { hdlSeek } from './seek';
-import { hdlBuild, hdlRec } from './state';
+import { hdlBuild, hdlRec, type HdlTrace } from './state';
 import { hdlHex32 } from './verilog';
 import { observeWrites } from '../machine/memory';
 import { loadProgram } from '../machine/reset';
@@ -31,7 +30,7 @@ export async function hdlCompareWithJs() {
     hdlLog('Cross-check: no register-file path, so only data memory writes are compared.', 'warn');
   const at = hdlRec.idx;
   const dmem0 = layout.dataBase >>> 0;
-  const inDmem = a => a >= dmem0 && a < dmem0 + hdlBuild.dmemBytes;
+  const inDmem = (a: number) => a >= dmem0 && a < dmem0 + hdlBuild.dmemBytes;
   // An input changed part-way through arrives on a clock the model does
   // not have, so the comparison ends there.
   const stop = hdlRec.stim.length ? Math.min(...hdlRec.stim.map(e => e.cycle)) : Infinity;
@@ -57,7 +56,7 @@ export async function hdlCompareWithJs() {
 
   // The model, from reset, with the inputs the run started with.
   const saved = [board.dip, board.buttons, accel.x, accel.y, accel.z, accel.temp, accel.dready];
-  const s8 = v => ((v & 0xFF) << 24) >> 24;
+  const s8 = (v: number) => ((v & 0xFF) << 24) >> 24;
   board.dip = hdlRec.base.dip; board.buttons = hdlRec.base.pb; accel.dready = hdlRec.base.adrdy ? 1 : 0;
   accel.temp = s8(hdlRec.base.accel >>> 24); accel.x = s8(hdlRec.base.accel >>> 16);
   accel.y = s8(hdlRec.base.accel >>> 8); accel.z = s8(hdlRec.base.accel);
@@ -65,9 +64,9 @@ export async function hdlCompareWithJs() {
   stepHistory.journalEnabled = false;
   loadProgram(program.machineCode);
   run.finished = false;
-  const jsReg = [], jsMem = [];
+  const jsReg = [], jsMem: { a: number; v: number; pc: number; }[] = [];
   const jsShadow = new Int32Array(32);
-  let curPc = 0, fault = null;
+  let curPc = 0, fault: unknown = null;
   observeWrites((addr, val, size) => {
     const u = addr >>> 0;
     for (let i = 0; i < size; i++)
@@ -94,14 +93,14 @@ export async function hdlCompareWithJs() {
     [board.dip, board.buttons, accel.x, accel.y, accel.z, accel.temp, accel.dready] = saved;
   }
 
-  const firstDiff = (hw, js, same) => {
+  const firstDiff = (hw: string | any[], js: string | any[], same: { (a: any, b: any): boolean; (a: any, b: any): boolean; (arg0: any, arg1: any): any; }) => {
     for (let i = 0; i < hw.length; i++)
       if (i >= js.length || !same(hw[i], js[i])) return { hw: hw[i], js: js[i] || null };
     return null;
   };
-  const dr = hdlRec.trace.regBank ? firstDiff(hwReg, jsReg, (a, b) => a.r === b.r && a.v === b.v) : null;
-  const dm = firstDiff(hwMem, jsMem, (a, b) => a.a === b.a && a.v === b.v);
-  const by = d => d && d.js ? ' by the instruction at 0x' + d.js.pc.toString(16) + ' (line ' + sourceLineForPc(d.js.pc) + ')' : '';
+  const dr = hdlRec.trace.regBank ? firstDiff(hwReg, jsReg, (a: { r: any; v: any; }, b: { r: any; v: any; }) => a.r === b.r && a.v === b.v) : null;
+  const dm = firstDiff(hwMem, jsMem, (a: { a: any; v: any; }, b: { a: any; v: any; }) => a.a === b.a && a.v === b.v);
+  const by = (d: { hw?: any; js: any; }) => d && d.js ? ' by the instruction at 0x' + d.js.pc.toString(16) + ' (line ' + sourceLineForPc(d.js.pc) + ')' : '';
   let msg = null;
   if (dr && (!dm || dr.hw.cyc <= dm.hw.cyc)) {
     msg = 'first difference at cycle ' + dr.hw.cyc + ': the hardware set x' + dr.hw.r + ' = 0x' + hdlHex32(dr.hw.v) +
@@ -114,7 +113,7 @@ export async function hdlCompareWithJs() {
                ' to 0x' + hdlHex32(dm.js.a) + by(dm)
              : '; the model writes no more data memory');
   }
-  if (fault && !msg) msg = 'the functional model faulted: ' + fault.message;
+  if (fault && !msg) msg = 'the functional model faulted: ' + (fault as Error).message;
   const upTo = isFinite(stop) ? ' (to cycle ' + stop + ', where an input changed)' : '';
   if (!msg) {
     hdlLog('Cross-check: your hardware matches the functional model: ' + hwReg.length + ' register changes and ' +
@@ -134,7 +133,7 @@ export async function hdlCompareWithJs() {
 // pipeline, or a multi-cycle core that advances the PC in Fetch. The
 // trace's steps follow the fetch PC, so each write sits in a later
 // instruction's step than the one that made it.
-export function hdlLooksPipelined(t) {
+export function hdlLooksPipelined(t: HdlTrace) {
   let n = 0, off = 0;
   for (const s of t.steps) for (const w of s.regw) { n++; if (((s.instr >>> 7) & 31) !== w[0]) off++; }
   return n >= 8 && off * 2 > n;

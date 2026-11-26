@@ -352,23 +352,22 @@ export function pipeEmpty(): boolean { return !pipeline.regs.D && !pipeline.regs
 // current statement has left Write-back, which is when its results show.
 // The statement is the oldest instruction's. After that only W, M and E
 // are looked at, since whatever is in D or F may yet be flushed.
-export function pipeStatementStep(): Signals | null {
+export function pipeStatementStep(): Signals {
   const lineOf = (r: { pc: number } | null) => r ? host.sourceLine(r.pc) : -1;
   const oldest = () => pipeline.regs.W || pipeline.regs.M || pipeline.regs.E;
   const first = oldest() || pipeline.regs.D;
   pipeline.stmtLine = first ? lineOf(first) : host.sourceLine(cpu.pc);
   if (pipeline.stmtLine <= 0) return pipeStep();
-  let sig = null, retired = false;
-  for (let n = 0; n < 10000; n++) {
+  let retired = false;
+  for (let n = 1; ; n++) {
     if (lineOf(pipeline.regs.W) === pipeline.stmtLine) retired = true;
-    sig = pipeStep();
-    if (pipeDone()) break;
+    const sig = pipeStep();
+    if (n >= 10000 || pipeDone()) return sig;
     const next = oldest();
-    if (retired && next && lineOf(next) !== pipeline.stmtLine) break;
+    if (retired && next && lineOf(next) !== pipeline.stmtLine) return sig;
     const e = lineOf(pipeline.regs.E);
-    if (e > 0 && e !== pipeline.stmtLine && run.breakpoints.has(e)) break;
+    if (e > 0 && e !== pipeline.stmtLine && run.breakpoints.has(e)) return sig;
   }
-  return sig;
 }
 
 // Finished once the exit call has run, or once everything in flight has

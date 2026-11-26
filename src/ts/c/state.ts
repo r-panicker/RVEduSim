@@ -1,11 +1,15 @@
 // The C program last compiled, and how its lines map to the assembly the
 // compiler produced.
 
-export interface CLocalVar { name: string; offset: number; [key: string]: unknown }
+// A variable's offset is from the frame pointer (s0).
+export interface CLocalVar { name: string; offset: number; kind: 'param' | 'local' }
+// A function's code range, its C lines, and its stack variables. The
+// frame pointer (s0) is set up at framePtrAddr; before that the offsets do
+// not point at the variables yet.
 export interface CFunctionLocals {
   startAddr: number; endAddr: number; startLine: number; endLine: number;
+  framePtrAddr: number;
   vars: CLocalVar[];
-  [key: string]: unknown;
 }
 
 export const cProgram = {

@@ -1,8 +1,8 @@
-// @ts-nocheck
 
 import { HDL_CK_CYC_LINE, hdlVcdFromBytes } from './checkpoints';
 import { HDL_CYCLES_DEFAULT, hdlActivity, hdlConfig, hdlSources } from './state';
 import { log, setStatus } from '../ui/editor';
+import { errorMessage } from '../errors';
 /* ================================================================
    HDL SIMULATION MODE (Icarus Verilog -> WebAssembly)
    ================================================================
@@ -44,9 +44,16 @@ export const HDL_ENGINE_SOURCES = [
 export const hdlNative = (window.rvNative && window.rvNative.icarus) ? window.rvNative : null;
 // The app carries vendor/ beside the page, so the local copies come first.
 export const hdlNativeJobs = new Set();
-export let hdlEngine = null;         // { ivlpp, ivl, vvp } module factories
-export let hdlEngineBase = null;     // the base URL that actually loaded
-export let hdlEngineLoading = null;  // in-flight promise (de-dupes concurrent loads)
+// An Emscripten module factory: instantiates the tool with its output hooks.
+export type HdlToolFactory = (opts: { print: (s: string) => void; printErr: (s: string) => void }) => Promise<any>;
+export type HdlToolName = 'ivlpp' | 'ivl' | 'vvp';
+// A stage's input files, and what it returns: its output lines and the files it kept.
+export type HdlToolFiles = Record<string, string | Uint8Array>;
+export interface HdlToolResult { out: string[]; err: string[]; files: Record<string, Uint8Array> }
+
+export let hdlEngine: Record<HdlToolName, HdlToolFactory> | null = null;
+export let hdlEngineBase: string | null = null;     // the base URL that actually loaded
+export let hdlEngineLoading: Promise<Record<HdlToolName, HdlToolFactory>> | null = null;  // de-dupes concurrent loads
 export const HDL_MAX_CYCLES = 2000000;      // Icarus: the whole recording is kept
 export const HDL_VL_MAX_RUN = 1000000000;   // Verilator: one run; the recording is trimmed (HDL_VL_KEEP)
 // A waveform of a long run is the last this many cycles of it (Icarus
@@ -64,8 +71,8 @@ export const hdlCyclesFor = Object.assign({}, HDL_CYCLES_DEFAULT);
 // assembler's - one place to look when something fails, and room to grow
 // for a multi-line Verilog compile error. Lines are tagged so they can be
 // told apart at a glance.
-export const HDL_LOG_CLASS = { err: 'error', warn: 'warn', sys: 'info', ok: 'success' };
-export function hdlLog(msg, cls) {
+export const HDL_LOG_CLASS: Record<string, string> = { err: 'error', warn: 'warn', sys: 'info', ok: 'success' };
+export function hdlLog(msg: string, cls: string) {
   const type = HDL_LOG_CLASS[cls] || '';
   String(msg).replace(/\s+$/, '').split('\n')
     .forEach(line => log('[HDL] ' + line, type));
@@ -75,7 +82,7 @@ export function hdlLog(msg, cls) {
 export function hdlClearConsole() {
   log('[HDL] ------------------------------------------------', 'info');
 }
-export function hdlStatus(text, cls) {
+export function hdlStatus(text: string, cls: string) {
   setStatus('HDL: ' + text,
     cls === 'err' ? 'error' : cls === 'ok' ? 'success' : '');
 }
@@ -87,7 +94,7 @@ export async function loadHdlEngine() {
   if (hdlEngine) return hdlEngine;
   if (hdlEngineLoading) return hdlEngineLoading;
   hdlEngineLoading = (async () => {
-    let lastErr = null;
+    let lastErr: unknown = null;
     for (const base of HDL_ENGINE_SOURCES) {
       try {
         hdlStatus('loading engine from ' + base + ' …', 'busy');
@@ -96,11 +103,12 @@ export async function loadHdlEngine() {
           import(/* webpackIgnore: true */ base + 'ivl.js'),
           import(/* webpackIgnore: true */ base + 'vvp.js')
         ]);
-        hdlEngine = { ivlpp: ivlpp.default, ivl: ivl.default, vvp: vvp.default };
+        const engine = { ivlpp: ivlpp.default, ivl: ivl.default, vvp: vvp.default };
+        hdlEngine = engine;
         hdlEngineBase = base;
         hdlStatus('engine ready (Icarus Verilog → WASM)', 'ok');
         hdlLog('Engine loaded from ' + base, 'sys');
-        return hdlEngine;
+        return engine;
       } catch (e) {
         lastErr = e;
       }
@@ -108,7 +116,7 @@ export async function loadHdlEngine() {
     hdlEngineLoading = null;
     hdlStatus('engine failed to load', 'err');
     throw new Error('Could not load the Icarus/WASM engine from any source. ' +
-      'Last error: ' + (lastErr && lastErr.message ? lastErr.message : lastErr));
+      'Last error: ' + errorMessage(lastErr));
   })();
   return hdlEngineLoading;
 }
@@ -145,15 +153,15 @@ self.onmessage = async ({ data: job }) => {
     self.postMessage({ id: job.id, error: String(e && e.message || e) });
   }
 };`;
-export let hdlWorker = null;
-export let hdlWorkerUrl = null;
+export let hdlWorker: Worker | null = null;
+export let hdlWorkerUrl: string | null = null;
 export let hdlWorkerFailed = false;  // the stages run on the page from then on
-export const hdlWorkerJobs = new Map();
+export const hdlWorkerJobs = new Map<number, { resolve: (r: HdlToolResult) => void; reject: (e: Error) => void }>();
 
 export function hdlWorkerGet() {
   if (hdlWorker) return hdlWorker;
-  hdlWorkerUrl = URL.createObjectURL(new Blob([HDL_WORKER_SRC], { type: 'text/javascript' }));
-  const w = new Worker(hdlWorkerUrl, { type: 'module' });
+  const url = hdlWorkerUrl = URL.createObjectURL(new Blob([HDL_WORKER_SRC], { type: 'text/javascript' }));
+  const w = new Worker(url, { type: 'module' });
   w.onmessage = ({ data }) => {
     const job = hdlWorkerJobs.get(data.id);
     if (!job) return;
@@ -171,7 +179,7 @@ export function hdlWorkerGet() {
 
 // Ends the worker and fails whatever it was running. With no error
 // given, that is a cancellation: the run was discarded mid-flight.
-export function hdlStopWorker(err) {
+export function hdlStopWorker(err?: Error) {
   if (window.rvNative) for (const id of hdlNativeJobs) window.rvNative.hdlKill(id);
   if (hdlWorker) hdlWorker.terminate();
   if (hdlWorkerUrl) URL.revokeObjectURL(hdlWorkerUrl);
@@ -184,8 +192,9 @@ export function hdlStopWorker(err) {
 
 // Run one stage: write `files` into its file system, call main with
 // `args`, and return its output lines and the files matching `keep`.
-export async function hdlTool(tool, files, args, opts) {
-  opts = opts || {};
+// keep: the files to return; merge: stderr goes to out, in order.
+export async function hdlTool(tool: HdlToolName, files: HdlToolFiles, args: string[],
+                              opts: { keep?: RegExp; merge?: boolean } = {}): Promise<HdlToolResult> {
   if (hdlNative) {
     const id = ++hdlActivity.jobSeq;
     hdlNativeJobs.add(id);
@@ -201,7 +210,7 @@ export async function hdlTool(tool, files, args, opts) {
   await loadHdlEngine();
   if (!hdlWorkerFailed) {
     try {
-      return await new Promise((resolve, reject) => {
+      return await new Promise<HdlToolResult>((resolve, reject) => {
         const id = ++hdlActivity.jobSeq;
         hdlWorkerJobs.set(id, { resolve, reject });
         try {
@@ -211,22 +220,25 @@ export async function hdlTool(tool, files, args, opts) {
           });
         } catch (e) {
           hdlWorkerJobs.delete(id);
-          reject(Object.assign(e, { workerBroken: true }));
+          reject(Object.assign(e as Error, { workerBroken: true }));
         }
       });
     } catch (e) {
-      if (!e || !e.workerBroken) throw e;
+      const broken = e as Error & { workerBroken?: boolean };
+      if (!broken || !broken.workerBroken) throw e;
       hdlWorkerFailed = true;
-      hdlStopWorker(e);
-      hdlLog('The simulator runs on the page itself here (' + e.message + '), so the page ' +
+      hdlStopWorker(broken);
+      hdlLog('The simulator runs on the page itself here (' + broken.message + '), so the page ' +
         'does not respond while it compiles or simulates.', 'warn');
     }
   }
-  const out = [], err = [];
-  const m = await hdlEngine[tool]({ print: s => out.push(s), printErr: s => (opts.merge ? out : err).push(s) });
+  const engine = hdlEngine;
+  if (!engine) throw new Error('The Icarus engine is not loaded.');
+  const out: string[] = [], err: string[] = [];
+  const m = await engine[tool]({ print: s => out.push(s), printErr: s => (opts.merge ? out : err).push(s) });
   for (const name in files) m.FS.writeFile('/' + name, files[name]);
   m.callMain(args);
-  const got = {};
+  const got: Record<string, Uint8Array> = {};
   if (opts.keep) for (const name of m.FS.readdir('/')) if (opts.keep.test(name)) got[name] = m.FS.readFile('/' + name);
   return { out, err, files: got };
 }
@@ -234,8 +246,8 @@ export async function hdlTool(tool, files, args, opts) {
 // ---- stage 1: preprocess every source in one pass -----------------
 // A single ivlpp pass over all files gives them a shared macro table,
 // exactly like `iverilog a.v b.v ...` does.
-export async function hdlPreprocess(files) {
-  const fsFiles = {};
+export async function hdlPreprocess(files: { name: string; src: string }[]) {
+  const fsFiles: HdlToolFiles = {};
   const args = ['-L']; // emit `line directives so ivl errors map back to the right file
   for (const f of files) {
     fsFiles[f.name] = f.src.endsWith('\n') ? f.src : f.src + '\n';
@@ -246,7 +258,7 @@ export async function hdlPreprocess(files) {
 }
 
 // ---- stage 2: compile to .vvp bytecode ----------------------------
-export async function hdlCompile(src, generation) {
+export async function hdlCompile(src: string, generation: string) {
   const r = await hdlTool('ivl', {
     'ivl.conf': 'basedir:/\nmodule:system.vpi\ngeneration:' + (generation || '2005') +
       '\ngeneration:no-specify\nout:/out.vvp\niwidth:32\nwidthcap:65536\n' +
@@ -262,7 +274,7 @@ export async function hdlCompile(src, generation) {
 // files are all read by the testbench at $value$plusargs time. The
 // checkpoints a run writes come back as { cycle: { txt, mem: [] } }.
 export const HDL_RUN_KEEP = /^(dump\.vcd|ck_s?\d+(_m\d+\.mem|\.txt))$/;
-export async function hdlSimulate(vvpBytes, memFiles, plusargs) {
+export async function hdlSimulate(vvpBytes: any, memFiles: { 'AA_IROM.mem': string; 'AA_DMEM.mem': string; } & { 'stim.mem': string; 'uart_rx.mem': string; }, plusargs: string[]) {
   const files = Object.assign({ 'sim.vvp': vvpBytes }, memFiles);
   const r = await hdlTool('vvp', files, ['/sim.vvp'].concat(plusargs || []),
     { merge: true, keep: HDL_RUN_KEEP });
@@ -270,7 +282,7 @@ export async function hdlSimulate(vvpBytes, memFiles, plusargs) {
 }
 
 // A Verilator model takes the same plusargs and files as vvp does.
-export async function hdlRunModel(model, files, plusargs) {
+export async function hdlRunModel(model: any, files: any, plusargs: string[]) {
   const id = ++hdlActivity.jobSeq;
   hdlNativeJobs.add(id);
   let r;
@@ -292,9 +304,9 @@ export let hdlZigNoted = false;
 // one is downloaded and prepared before Verilator's own runtime is
 // compiled. Each step goes to the status line, so it is never a silent
 // wait.
-export function hdlOnVerilatorProgress(id, e) {
+export function hdlOnVerilatorProgress(id: number, e: { phase: string; total?: number; received?: number; done?: number }) {
   if (!hdlNativeJobs.has(id)) return;
-  const mb = n => (n / 1048576).toFixed(0);
+  const mb = (n: number) => (n / 1048576).toFixed(0);
   if (e.phase === 'compiler-download') {
     if (!hdlZigNoted) {
       hdlZigNoted = true;
@@ -302,7 +314,7 @@ export function hdlOnVerilatorProgress(id, e) {
         '55 MB, 100 MB on Windows) is being downloaded and prepared. This takes several minutes, once.', 'sys');
     }
     hdlStatus('downloading the C++ compiler for Verilator' +
-      (e.total ? ': ' + mb(e.received) + ' of ' + mb(e.total) + ' MB' : '...'), 'busy');
+      (e.total ? ': ' + mb(e.received ?? 0) + ' of ' + mb(e.total) + ' MB' : '...'), 'busy');
   } else if (e.phase === 'compiler-unpack') {
     hdlStatus('unpacking the C++ compiler...', 'busy');
   } else if (e.phase === 'compiler-check') {
@@ -317,9 +329,9 @@ export function hdlOnVerilatorProgress(id, e) {
     hdlStatus('Verilator: linking...', 'busy');
   }
 }
-export async function hdlVerilate(tb, gen, ck) {
+export async function hdlVerilate(tb: string, gen: string, ck: string) {
   const language = { '1995': '1364-1995', '2001': '1364-2001', '2005-sv': '1800-2017' }[gen] || '1364-2005';
-  const files = {}, headers = {};
+  const files: Record<string, string> = {}, headers: Record<string, string> = {};
   for (const f of hdlSources.files) (/\.(vh|svh)$/i.test(f.name) ? headers : files)[f.name] = f.src;
   if (ck) {
     files['cg3207_hdl_ck.v'] = ck;
@@ -351,7 +363,7 @@ export async function hdlVerilate(tb, gen, ck) {
 // Errors are listed as they come. Warnings, which a student design can
 // have by the hundred, are counted by kind with the first of each; the
 // testbench's own are left out.
-export function hdlReportVerilator(log) {
+export function hdlReportVerilator(log: string) {
   const errs = [], warn = new Map();
   for (const line of String(log || '').split(/\r?\n/)) {
     const m = /^%(Error|Warning)(?:-([A-Z0-9_]+))?: (.*)$/.exec(line);
@@ -369,9 +381,12 @@ export function hdlReportVerilator(log) {
 
 // Verilator's two checkpoint files are named by slot; the cycle each
 // holds is the testbench's cyc, saved with the rest.
-export function hdlDecodeCk(files) {
+// Each checkpoint: the state file's text and the memory images, by cycle.
+export type HdlVlCheckpoints = Record<string, { txt: string; mem: string[] }>;
+
+export function hdlDecodeCk(files: Record<string, Uint8Array>) {
   const dec = new TextDecoder();
-  const ck = {};
+  const ck: HdlVlCheckpoints = {};
   for (const name in files || {}) {
     const m = /^ck_(s?\d+)(?:_m(\d+)\.mem|\.txt)$/.exec(name);
     if (!m) continue;
@@ -388,23 +403,23 @@ export function hdlDecodeCk(files) {
   }
   return ck;
 }
-export function hdlDecodeRun(r) {
+export function hdlDecodeRun(r: { out: string[]; files: Record<string, Uint8Array> }) {
   const dec = new TextDecoder();
   return { out: r.out.join('\n'), vcd: r.files['dump.vcd'] ? hdlVcdFromBytes(r.files['dump.vcd'], dec) : null, ck: hdlDecodeCk(r.files) };
 }
 
 // Drop diagnostics that are artefacts of the WASM build rather than
 // anything wrong with the user's design.
-export function hdlFilterNoise(text) {
+export function hdlFilterNoise(text: string) {
   return (text || '').split('\n')
-    .filter(l => !/system\.vpi|dynamic linking not enabled/.test(l))
+    .filter((l: string) => !/system\.vpi|dynamic linking not enabled/.test(l))
     .join('\n');
 }
 
 // Run once the page has loaded every module (main.ts), in page order.
 export function onEngineLoad() {
   if (window.rvNative) {
-    HDL_ENGINE_SOURCES.sort((a, b) => /^https?:/.test(a) - /^https?:/.test(b));
+    HDL_ENGINE_SOURCES.sort((a, b) => Number(/^https?:/.test(a)) - Number(/^https?:/.test(b)));
   }
   if (window.rvNative && window.rvNative.onVlProgress) window.rvNative.onVlProgress(hdlOnVerilatorProgress);
 }

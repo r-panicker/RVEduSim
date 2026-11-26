@@ -3,6 +3,7 @@
 // state through it (cpu.pc, uart.rxFull) rather than through loose
 // variables.
 
+import type { ImmInfo } from '../asm/assembler';
 import { DEFAULT_BASE, DEFAULT_DATA_BASE } from './memory-map';
 
 export interface MemWrite { addr: number; size: number }
@@ -56,10 +57,10 @@ export interface MachineLine {
   native?: string;             // the Native column: the instruction as encoded
   immFrom?: number;            // where the immediate sits in `native`
   immTo?: number;
-  imm?: unknown;               // the immediate's other readings (asm/assembler.ts ImmInfo)
+  imm?: ImmInfo | null;        // what the immediate means, for its other readings
   isPseudo?: boolean;
   error?: string;
-  [key: string]: unknown;
+  cLine?: number;               // in C mode, the C line it was compiled from
 }
 
 // The program the editor last assembled.

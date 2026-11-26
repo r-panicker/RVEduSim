@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Assemble, Step, Back, Run, Pause and Reset for the JS engine, and the
 // toolbar buttons' states.
 
@@ -15,7 +14,7 @@ import { fpBits } from '../machine/fpregs';
 import { setMemByte } from '../machine/memory';
 import { restoreOledPages } from '../machine/oled';
 import { capturePeriphState, restorePeriphState } from '../machine/peripherals';
-import { pipeDone, pipeEvents, pipeRestore, pipeSnapshot, pipeStatementStep, pipeStep, pipeline } from '../machine/pipeline';
+import { pipeDone, pipeEvents, pipeRestore, pipeSnapshot, pipeStatementStep, pipeStep, pipeline, type Signals } from '../machine/pipeline';
 import { initializeState, loadProgram } from '../machine/reset';
 import { accel, board, clock, cpu, layout, oled, program, run, stepHistory, uart, ui } from '../machine/state';
 import { dpOnStateChange, updateFloatSteps } from './datapath';
@@ -26,6 +25,8 @@ import { executeOne, hideExecMarker, highlightCurrentLine, highlightFirstLine, p
 import { updateMemSubTabs, updateMemoryView } from './memory-register-views';
 import { updateRegisters } from './panels';
 import { clearOledDisplay, resetPeriphFoldState, updateOledCanvas, updatePeripherals } from './peripherals';
+import { byId } from './dom';
+import { errorMessage } from '../errors';
 
 export function assembleOnly() {
   hdlDiscardTrace();
@@ -89,9 +90,9 @@ export function stepOnce() {
   const instrBefore = cpu.instructionCount;
   const startSourceLine = sourceLineForPc(cpu.pc);
   let line = startSourceLine;   // of the last instruction executed
-  let fault = null;
+  let fault: unknown = null;
   const prePipe = pipeline.on ? pipeSnapshot() : null;
-  let pipeSig = null;
+  let pipeSig: Signals | null = null;
   try {
     if (pipeline.on) {
       pipeSig = run.statementStepping ? pipeStatementStep() : pipeStep();
@@ -123,7 +124,7 @@ export function stepOnce() {
   });
   if (stepHistory.entries.length > stepHistory.cap) stepHistory.entries.shift();
   if (fault) {
-    log(`Error at PC 0x${prePc.toString(16)}: ${fault.message}`, 'error');
+    log(`Error at PC 0x${prePc.toString(16)}: ${errorMessage(fault)}`, 'error');
     updateRegisters(); updateMemoryView(); updateMachineCode(); updateDisassembly(); updateStats();
     updateToolbarButtonStates();
     return;
@@ -133,7 +134,7 @@ export function stepOnce() {
   run.currentLine = sourceLineForPc(cpu.pc);
   highlightCurrentLine();
   updateRegisters(); updateMemoryView(); updateMachineCode(); updateDisassembly(); updateStats();
-  if (pipeline.on) {
+  if (pipeline.on && pipeSig) {
     const ev = pipeEvents(pipeSig);
     if (pipeDone()) {
       run.finished = true;
@@ -209,7 +210,7 @@ export function updateToolbarButtonStates() {
   const isCodeModifiedOrUnassembled = (editorState.lastAssembledCode === null || source !== editorState.lastAssembledCode || !program.assembled);
 
   // 1. Assemble button: enabled ONLY when a program is loaded or modified, disabled once assembled
-  const assembleBtn = document.getElementById('btnAssemble');
+  const assembleBtn = byId<HTMLButtonElement>('btnAssemble');
   if (assembleBtn) {
     const hasCode = source.trim().length > 0;
     const canAssemble = hasCode && isCodeModifiedOrUnassembled;
@@ -237,8 +238,8 @@ export function updateToolbarButtonStates() {
   }
 
   // 2. Undo / Redo buttons
-  const undoBtn = document.getElementById('btnUndo');
-  const redoBtn = document.getElementById('btnRedo');
+  const undoBtn = byId<HTMLButtonElement>('btnUndo');
+  const redoBtn = byId<HTMLButtonElement>('btnRedo');
   if (undoBtn) {
     const canUndo = !!(editorHistory && editorHistory.currentIndex > 0);
     undoBtn.disabled = !canUndo;
@@ -253,7 +254,7 @@ export function updateToolbarButtonStates() {
   }
 
   // 3. Run / Pause button (Standard button styling, not distinct primary color)
-  const runBtn = document.getElementById('runPauseBtn');
+  const runBtn = byId<HTMLButtonElement>('runPauseBtn');
   if (runBtn) {
     runBtn.classList.remove('primary');
     runBtn.classList.remove('danger');
@@ -299,7 +300,7 @@ export function updateToolbarButtonStates() {
   }
 
   // 4. Step forward button
-  const stepBtn = document.getElementById('btnStep');
+  const stepBtn = byId<HTMLButtonElement>('btnStep');
   if (stepBtn) {
     const canStep = (program.assembled && !run.running && !run.finished);
     stepBtn.disabled = !canStep;
@@ -316,7 +317,7 @@ export function updateToolbarButtonStates() {
   }
 
   // 5. Step back button
-  const backBtn = document.getElementById('btnBack');
+  const backBtn = byId<HTMLButtonElement>('btnBack');
   if (backBtn) {
     const canBack = (program.assembled && !run.running && stepHistory.entries && stepHistory.entries.length > 0);
     backBtn.disabled = !canBack;
@@ -333,7 +334,7 @@ export function updateToolbarButtonStates() {
   }
 
   // 6. Reset button: active only after starting to Run or Step, or if state is dirty
-  const resetBtn = document.getElementById('btnReset');
+  const resetBtn = byId<HTMLButtonElement>('btnReset');
   if (resetBtn) {
     const isDirty = (cpu.instructionCount > 0 || (stepHistory.entries && stepHistory.entries.length > 0) || run.running || run.finished || cpu.pc !== layout.baseAddress || (typeof board.leds !== 'undefined' && board.leds !== 0) || (typeof board.sevseg !== 'undefined' && parseInt(board.sevseg, 16) !== 0) || (typeof uart.txText !== 'undefined' && uart.txText !== '') || (typeof uart.pending !== 'undefined' && (uart.pending.length > 0 || uart.rxFull)));
     resetBtn.disabled = !isDirty;
@@ -342,10 +343,10 @@ export function updateToolbarButtonStates() {
   }
 
   // 7. Find & Replace action buttons
-  const findPrevBtn = document.getElementById('findPrevBtn');
-  const findNextBtn = document.getElementById('findNextBtn');
-  const replaceBtn = document.getElementById('findReplaceBtn');
-  const replaceAllBtn = document.getElementById('findReplaceAllBtn');
+  const findPrevBtn = byId<HTMLButtonElement>('findPrevBtn');
+  const findNextBtn = byId<HTMLButtonElement>('findNextBtn');
+  const replaceBtn = byId<HTMLButtonElement>('findReplaceBtn');
+  const replaceAllBtn = byId<HTMLButtonElement>('findReplaceAllBtn');
   const hasMatches = (typeof editorState.find.matches !== 'undefined' && editorState.find.matches.length > 0);
   if (findPrevBtn) { findPrevBtn.disabled = !hasMatches; findPrevBtn.classList.toggle('inactive', !hasMatches); }
   if (findNextBtn) { findNextBtn.disabled = !hasMatches; findNextBtn.classList.toggle('inactive', !hasMatches); }
@@ -353,7 +354,7 @@ export function updateToolbarButtonStates() {
   if (replaceAllBtn) { replaceAllBtn.disabled = !hasMatches; replaceAllBtn.classList.toggle('inactive', !hasMatches); }
 
   // 8. UART Clear button
-  const uartClearBtn = document.getElementById('uartClearBtn');
+  const uartClearBtn = byId<HTMLButtonElement>('uartClearBtn');
   if (uartClearBtn) {
     const hasUartText = !!(typeof uart.txText !== 'undefined' && uart.txText.length > 0);
     uartClearBtn.disabled = !hasUartText;
@@ -393,12 +394,12 @@ export function runProgram() {
   // Real time: each tick runs the cycles the clock has owed since the run
   // started. More than a quarter second behind, the debt is dropped and
   // the shortfall shows as a fraction of real time.
-  let rt = null;
+  let rt: { cyc: number; wall: number; lastWall: number; lastCyc: number } | null = null;
   clock.rtRatio = 1;
   const initialLine = sourceLineForPc(cpu.pc);
   let resumeLine = (initialLine >= 1 && run.breakpoints.has(initialLine)) ? initialLine : -1;
 
-  function finishRun(stopReason, cycleCount) {
+  function finishRun(stopReason: string | null, cycleCount: number) {
     run.running = false;
     if (run.timerId) { clearTimeout(run.timerId); run.timerId = null; }
     program.assembled = true;
@@ -449,11 +450,8 @@ export function runProgram() {
     const hasBreakpoints = run.breakpoints.size > 0;
     const paced = clock.pace === 'real';
     const tick0 = performance.now(), hz = cpuHz();
-    let due = Infinity;
-    if (paced) {
-      if (!rt) rt = { wall: tick0, cyc: cpu.totalCycles, lastWall: tick0, lastCyc: cpu.totalCycles };
-      due = rt.cyc + (tick0 - rt.wall) / 1000 * hz;
-    }
+    const pace = paced ? (rt ??= { wall: tick0, cyc: cpu.totalCycles, lastWall: tick0, lastCyc: cpu.totalCycles }) : null;
+    const due = pace ? pace.cyc + (tick0 - pace.wall) / 1000 * hz : Infinity;
 
     while (run.running && count < INFINITE_LOOP_CAP && count < maxRunLimit &&
            (paced ? cpu.totalCycles < due && ((batchCount & 1023) || performance.now() - tick0 < 30)
@@ -467,7 +465,7 @@ export function runProgram() {
         try {
           pipeStep();
         } catch (e) {
-          log(`Error in cycle ${cpu.totalCycles}: ${e.message}`, 'error');
+          log(`Error in cycle ${cpu.totalCycles}: ${errorMessage(e)}`, 'error');
           stopReason = 'error';
           run.running = false;
           break;
@@ -505,7 +503,7 @@ export function runProgram() {
       try {
         executeOne();
       } catch (e) {
-        log(`Error executing at PC 0x${execAddr.toString(16)}: ${e.message}`, 'error');
+        log(`Error executing at PC 0x${execAddr.toString(16)}: ${errorMessage(e)}`, 'error');
         stopReason = 'error';
         run.running = false;
         break;
@@ -526,16 +524,16 @@ export function runProgram() {
     updatePeripherals();
 
     let wait = 0;
-    if (paced) {
+    if (pace) {
       const t = performance.now();
-      if (cpu.totalCycles < due - hz / 4) { rt.wall = t; rt.cyc = cpu.totalCycles; }
+      if (cpu.totalCycles < due - hz / 4) { pace.wall = t; pace.cyc = cpu.totalCycles; }
       // Measured over at least 50 cycles: on a slow clock a shorter window
       // can end between two whole cycles and read as lag.
-      if (t - rt.lastWall >= Math.max(500, 50000 / hz)) {
-        clock.rtRatio = Math.min(1, (cpu.totalCycles - rt.lastCyc) / ((t - rt.lastWall) / 1000 * hz));
-        rt.lastWall = t; rt.lastCyc = cpu.totalCycles;
+      if (t - pace.lastWall >= Math.max(500, 50000 / hz)) {
+        clock.rtRatio = Math.min(1, (cpu.totalCycles - pace.lastCyc) / ((t - pace.lastWall) / 1000 * hz));
+        pace.lastWall = t; pace.lastCyc = cpu.totalCycles;
       }
-      if (cpu.totalCycles >= due) wait = Math.max(0, Math.min(100, rt.wall + (cpu.totalCycles + 1 - rt.cyc) / hz * 1000 - t));
+      if (cpu.totalCycles >= due) wait = Math.max(0, Math.min(100, pace.wall + (cpu.totalCycles + 1 - pace.cyc) / hz * 1000 - t));
       updateStats();
       // A clock slow enough to watch: show each instruction as it runs.
       if (hz <= RT_FOLLOW_HZ) { run.currentLine = sourceLineForPc(cpu.pc); highlightCurrentLine(); updateRegisters(); }
@@ -620,7 +618,7 @@ export function resetAll() {
     program.assembled = false;
     highlightCurrentLine();
     setStatus('Reset');
-    let mc = [];
+    let mc: any[] = [];
     try { if (editor.value.trim()) mc = assemble(editor.value, undefined, { language: editorState.language, report: log }); } catch (e) { }
     highlightFirstLine(mc);
   }
@@ -653,12 +651,12 @@ export function resetState() {
   uart.rxByte = 0;
   uart.rxDropped = 0;
   uart.rxDroppedTotal = 0;
-  const btnEl = document.getElementById('uartSendBtn');
+  const btnEl = byId<HTMLButtonElement>('uartSendBtn');
   if (btnEl) {
     btnEl.innerText = 'Send';
     btnEl.style.background = '';
   }
-  const statusEl = document.getElementById('uartAutoSendStatus');
+  const statusEl = byId('uartAutoSendStatus');
   if (statusEl) statusEl.innerText = '';
   oled.col = 0;
   oled.row = 0;
@@ -671,14 +669,14 @@ export function resetState() {
   accel.z = 64;
   accel.temp = 25;
   accel.dready = 1;
-  const xS = document.getElementById('accelXSlider');
-  const yS = document.getElementById('accelYSlider');
-  const zS = document.getElementById('accelZSlider');
-  const tS = document.getElementById('accelTempSlider');
-  if (xS) xS.value = 0;
-  if (yS) yS.value = 0;
-  if (zS) zS.value = 64;
-  if (tS) tS.value = 25;
+  const xS = byId<HTMLInputElement>('accelXSlider');
+  const yS = byId<HTMLInputElement>('accelYSlider');
+  const zS = byId<HTMLInputElement>('accelZSlider');
+  const tS = byId<HTMLInputElement>('accelTempSlider');
+  if (xS) xS.value = '0';
+  if (yS) yS.value = '0';
+  if (zS) zS.value = '64';
+  if (tS) tS.value = '25';
   updatePeripherals();
   updateRegisters();
   updateMemoryView();

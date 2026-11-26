@@ -15,14 +15,15 @@ import { refreshDownloadMenu } from '../ui/execution';
 import { escapeHtml } from '../ui/panels';
 import { updateToolbarButtonStates } from '../ui/run-control';
 import { hdlRefreshRegPathHint } from '../ui/waveform';
-export function hdlAddFiles(fileList) {
+import { byId } from '../ui/dom';
+export function hdlAddFiles(fileList: any[] | FileList) {
   const pending = [];
   for (const file of fileList) {
     if (!/\.(v|sv|vh|svh)$/i.test(file.name)) {
       hdlLog('Skipped ' + file.name + ' (not a Verilog source)', 'warn');
       continue;
     }
-    pending.push(file.text().then(src => ({ name: file.name, src })));
+    pending.push(file.text().then((src: any) => ({ name: file.name, src })));
   }
   if (!pending.length) return Promise.resolve();
   return Promise.all(pending).then(loaded => {
@@ -43,7 +44,7 @@ export function hdlAddFiles(fileList) {
 export const HDL_PREBUILT_FILES = ['Wrapper.v', 'RV_reference.v'];
 
 export async function hdlLoadPrebuiltProcessor() {
-  const btn = document.getElementById('hdlPrebuiltBtn');
+  const btn = byId<HTMLButtonElement>('hdlPrebuiltBtn');
   if (btn) btn.disabled = true;
   try {
     hdlStatus('fetching the prebuilt processor …', 'busy');
@@ -71,7 +72,7 @@ export async function hdlLoadPrebuiltProcessor() {
   }
 }
 
-export function hdlRemoveFile(name) {
+export function hdlRemoveFile(name: string) {
   const gone = hdlSources.files.find(f => f.name === name);
   if (gone && gone.folderPath && hdlSources.folder) hdlSources.folder.excluded.add(gone.folderPath);
   hdlSources.files = hdlSources.files.filter(f => f.name !== name);
@@ -100,11 +101,11 @@ export const HDL_FOLDER_SKIP = /^\.|\.(cache|runs|sim|hw|ip_user_files|gen)$|^(n
 export const HDL_SOURCE_RE = /\.(v|sv|vh|svh)$/i;
 export const HDL_FOLDER_MAX = 500;
 
-export function hdlFolderMakeState(kind, name, extra) {
+export function hdlFolderMakeState(kind: string, name: any, extra?: { path?: any; handle?: any; } | undefined) {
   return Object.assign({ kind, name, pending: false, excluded: new Set() }, extra);
 }
 
-export async function hdlWalkHandle(dir, rel, out) {
+export async function hdlWalkHandle(dir: any[], rel: string, out: { path: any; src: any; }[]) {
   for await (const [name, entry] of dir.entries()) {
     if (out.length >= HDL_FOLDER_MAX) break;
     const r = rel ? rel + '/' + name : name;
@@ -121,9 +122,9 @@ export async function hdlWalkHandle(dir, rel, out) {
 // that sits under the Wrapper, so that a testbench or an old copy beside
 // them does not become a second top level. Headers stay, since any of
 // them may be included. With no Wrapper in the folder, everything stays.
-export function hdlFolderSelect(all) {
-  const files = all.filter(f => !f.path.split('/').slice(0, -1).some(d => HDL_FOLDER_SKIP.test(d)))
-    .sort((a, b) => a.path.localeCompare(b.path));
+export function hdlFolderSelect(all: any[]) {
+  const files = all.filter((f) => !f.path.split('/').slice(0, -1).some((d: string) => HDL_FOLDER_SKIP.test(d)))
+    .sort((a: { path: string; }, b: { path: any; }) => a.path.localeCompare(b.path));
   const defs = new Map();
   const stripped = new Map();
   for (const f of files) {
@@ -160,20 +161,20 @@ export function hdlFolderSelect(all) {
     else skipped.push(f);
   }
   const dups = [...reached].filter(m => defs.get(m).length > 1)
-    .map(m => m + ' (' + defs.get(m).map(f => f.path).join(', ') + ')');
+    .map(m => m + ' (' + defs.get(m).map((f: { path: { path: any; }; }) => f.path).join(', ') + ')');
   return { files: keep, skipped, dups };
 }
 
 // Files are named by their base name, which is what error messages and
 // the file list show; two of the same name in different subfolders get
 // their paths instead.
-export function hdlFolderName(list) {
+export function hdlFolderName(list: any[]) {
   const count = new Map();
   for (const f of list) {
     const base = f.path.split('/').pop();
     count.set(base, (count.get(base) || 0) + 1);
   }
-  return list.map(f => {
+  return list.map((f) => {
     const base = f.path.split('/').pop();
     return { name: count.get(base) > 1 ? f.path.replace(/\//g, '__') : base, src: f.src, folderPath: f.path };
   });
@@ -182,11 +183,11 @@ export function hdlFolderName(list) {
 // Puts a folder's sources in place of the folder files loaded before,
 // keeping any file dropped in by hand, which also wins over a folder
 // file of the same name. Returns whether anything changed.
-export function hdlApplyFolderFiles(list, first) {
+export function hdlApplyFolderFiles(list: any[], first: boolean) {
   const f = hdlSources.folder;
-  const sel = hdlFolderSelect(list.filter(x => !f.excluded.has(x.path)));
+  const sel = hdlFolderSelect(list.filter((x) => !f.excluded.has(x.path)));
   const own = first ? [] : hdlSources.files.filter(x => !x.folderPath);
-  const incoming = hdlFolderName(sel.files).filter(x => !own.some(o => o.name === x.name));
+  const incoming = hdlFolderName(sel.files).filter((x) => !own.some(o => o.name === x.name));
   const before = hdlSources.files.filter(x => x.folderPath);
   const same = before.length === incoming.length &&
     before.every((x, i) => x.name === incoming[i].name && x.src === incoming[i].src);
@@ -195,7 +196,7 @@ export function hdlApplyFolderFiles(list, first) {
   renderHdlFileList();
   if (first) {
     hdlLog('Loaded ' + incoming.length + ' file(s) from the folder ' + f.name + ': ' +
-      incoming.map(x => x.name).join(', '), 'sys');
+      incoming.map((x) => x.name).join(', '), 'sys');
   } else {
     const was = new Map(before.map(x => [x.name, x.src]));
     const changes = [];
@@ -221,7 +222,7 @@ export function hdlApplyFolderFiles(list, first) {
 
 // Reads the folder again if there is one. A folder that has gone, or can
 // no longer be read, leaves the loaded files as they were.
-export function hdlReadFolder(first) {
+export function hdlReadFolder(first?: boolean | undefined) {
   if (!hdlSources.folder || hdlSources.folder.pending || hdlSources.folder.kind === 'snapshot') return Promise.resolve(false);
   if (hdlSources.folderReading) return hdlSources.folderReading;
   const f = hdlSources.folder;
@@ -267,7 +268,7 @@ export async function hdlPickFolder() {
         hdlFolderStore('put', handle).catch(() => {});
       }
     } else {
-      document.getElementById('hdlFolderInput').click();
+      byId<HTMLInputElement>('hdlFolderInput').click();
       return;
     }
     if (await hdlReadFolder(true) && ui.engine !== 'hdl') setSimEngineMode('hdl');
@@ -286,9 +287,9 @@ export function hdlForgetFolder() {
 }
 
 export function hdlRenderFolderButton() {
-  const btn = document.getElementById('hdlFolderBtn');
+  const btn = byId<HTMLButtonElement>('hdlFolderBtn');
   if (!btn) return;
-  const input = document.getElementById('hdlFolderInput');
+  const input = byId<HTMLInputElement>('hdlFolderInput');
   const can = window.rvNative || window.showDirectoryPicker || (input && 'webkitdirectory' in input);
   btn.style.display = can ? '' : 'none';
   if (hdlSources.folder && hdlSources.folder.pending) {
@@ -306,7 +307,7 @@ export function hdlRenderFolderButton() {
 
 // One IndexedDB record holds the browser's folder handle, which
 // localStorage cannot store.
-export function hdlFolderStore(op, value) {
+export function hdlFolderStore(op: string, value?: undefined) {
   return new Promise((resolve, reject) => {
     if (!window.indexedDB) { resolve(null); return; }
     const open = indexedDB.open('rvsim', 1);
@@ -323,7 +324,7 @@ export function hdlFolderStore(op, value) {
 }
 
 export function hdlInitFolder() {
-  const input = document.getElementById('hdlFolderInput');
+  const input = byId<HTMLInputElement>('hdlFolderInput');
   if (input) input.addEventListener('change', e => {
     const picked = Array.from(e.target.files || []);
     e.target.value = '';
@@ -332,7 +333,7 @@ export function hdlInitFolder() {
     Promise.all(picked
       .filter(f => HDL_SOURCE_RE.test(f.name))
       .slice(0, HDL_FOLDER_MAX)
-      .map(f => f.text().then(src => ({ path: (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name, src }))))
+      .map(f => f.text().then((src: any) => ({ path: (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name, src }))))
       .then(list => {
         hdlForgetFolder();
         hdlSources.folder = hdlFolderMakeState('snapshot', root);
@@ -360,7 +361,7 @@ export function hdlInitFolder() {
 }
 
 export function renderHdlFileList() {
-  const el = document.getElementById('hdlFileList');
+  const el = byId('hdlFileList');
   if (!el) return;
   if (!hdlSources.files.length) {
     el.innerHTML = '<div class="hdl-empty">No files loaded yet.</div>';
@@ -389,17 +390,17 @@ export function renderHdlFileList() {
 
 export function updateHdlReadiness() {
   const wrapper = hdlFindWrapper();
-  const warn = document.getElementById('hdlWrapperWarn');
+  const warn = byId('hdlWrapperWarn');
   if (warn) warn.style.display = (hdlSources.files.length && !wrapper) ? 'block' : 'none';
 
   // No panel shows the file list all the time, so this chip is the standing
   // answer to "is my Verilog loaded?". Clicking it opens the tab that does.
-  const chip = document.getElementById('hdlFilesChip');
+  const chip = byId<HTMLButtonElement>('hdlFilesChip');
   if (chip) {
     chip.style.display = (ui.engine === 'hdl') ? '' : 'none';
     // Two labels: the narrow row cannot hold the long one beside six other
     // controls, and CSS picks which is shown.
-    const label = (long, short) =>
+    const label = (long: string, short: string) =>
       '<span class="chip-long">' + long + '</span>' +
       '<span class="chip-short">' + short + '</span>';
     if (!hdlSources.files.length) {
@@ -418,7 +419,7 @@ export function updateHdlReadiness() {
         ' - click to manage them';
     }
   }
-  const note = document.getElementById('hdlSourcesNote');
+  const note = byId('hdlSourcesNote');
   if (note) note.textContent = hdlSources.files.length
     ? hdlSources.files.length + ' loaded' + (hdlSources.folder && !hdlSources.folder.pending ? ' from ' + hdlSources.folder.name : '') +
       (wrapper ? ', Wrapper found' : ', no Wrapper')

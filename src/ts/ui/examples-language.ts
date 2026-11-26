@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Panel tab switching, the Example menu and example loading, ASM/C language
 // mode, and the C toolchain settings that invalidate a compiled program.
 
@@ -14,12 +13,14 @@ import { escapeHtml, mobileMode, panelDock, refreshPanel, setMobileTab, setPanel
 import { updatePeripherals } from './peripherals';
 import { assembleOnly, resetAll, updateToolbarButtonStates } from './run-control';
 import { waveApplyDockSize } from './waveform';
+import { byId } from './dom';
+import { errorMessage } from '../errors';
 
 // A tab-style entry point for callers that name a panel. Panels are independent,
 // and a caller of switchTab() wants the named panel shown, so this makes it
 // visible and refreshes it rather than toggling. On mobile (≤800px) the
 // tabbed view is active, so it also switches the visible tab.
-export function switchTab(tab) {
+export function switchTab(tab: string) {
   if (panelDock && panelDock[tab]) {
     if (mobileMode()) setMobileTab(tab);
     if (!panelDock[tab].visible) setPanelVisible(tab, true);
@@ -46,12 +47,13 @@ export function switchTab(tab) {
 // all three fall back to just the one baked example in each language, so
 // the dropdown is never genuinely empty.
 export const DEFAULT_DEPTH_BITS = 9;
-export let EXAMPLE_MENU = {
+// Each language's menu: [key, label, description].
+export let EXAMPLE_MENU: Record<'asm' | 'c', [string, string, string][]> = {
   asm: [['dip_led', 'DIP to LED (start here)', 'DIP to LED — the one example baked into the page, works with no server']],
   c: [['dip_led_c', 'DIP to LED (start here)', 'DIP switches mirrored to LEDs — the one C example baked into the page, works with no server']],
 };
-export let EXAMPLE_FILENAMES = { dip_led: 'DIP_to_LED.asm', dip_led_c: 'DIP_to_LED.c' };
-export let EXAMPLE_DEPTHS = {
+export let EXAMPLE_FILENAMES: Record<string, string> = { dip_led: 'DIP_to_LED.asm', dip_led_c: 'DIP_to_LED.c' };
+export let EXAMPLE_DEPTHS: Record<string, { irom: number; dmem: number; lang?: 'asm' | 'c' }> = {
   dip_led: { irom: 9, dmem: 9 },
   dip_led_c: { irom: 9, dmem: 9 },
 };
@@ -61,8 +63,11 @@ export let EXAMPLE_DEPTHS = {
 // matters, not header wording: the first all-dashes row (markdown's
 // column-alignment row) marks the start of real data, so a row before it
 // is a header regardless of its text.
-export function parseExampleIndexMarkdown(text) {
-  const rows = [];
+// A row: key, language, label, file, IROM bits, DMEM bits, description.
+export type ExampleRow = [string, string, string, string, number, number, string];
+
+export function parseExampleIndexMarkdown(text: string) {
+  const rows: ExampleRow[] = [];
   let dataStarted = false;
   for (let line of String(text || '').split('\n')) {
     line = line.trim();
@@ -75,7 +80,7 @@ export function parseExampleIndexMarkdown(text) {
       continue;
     }
     if (cells.length < 7 || !cells[0]) continue;
-    const bits = (c, fallback) => {
+    const bits = (c: string, fallback: number) => {
       const n = parseInt(c, 10);
       return (Number.isFinite(n) && n >= 2 && n <= 30) ? n : fallback;
     };
@@ -92,14 +97,14 @@ export async function loadExampleIndex() {
     if (!resp.ok) return;
     const rows = parseExampleIndexMarkdown(await resp.text());
     if (!rows.length) return;
-    const menu = { asm: [], c: [] };
+    const menu: typeof EXAMPLE_MENU = { asm: [], c: [] };
     for (const [key, lang, label, file, irom, dmem, desc] of rows) {
       const l = (lang === 'c') ? 'c' : 'asm';
       menu[l].push([key, label, desc]);
       EXAMPLE_FILENAMES[key] = file;
       EXAMPLE_DEPTHS[key] = { irom: irom, dmem: dmem, lang: l };
     }
-    for (const l of ['asm', 'c']) if (menu[l].length) EXAMPLE_MENU[l] = menu[l];
+    for (const l of ['asm', 'c'] as const) if (menu[l].length) EXAMPLE_MENU[l] = menu[l];
   } catch (err) { /* index.txt unreachable (e.g. file://) - stay on the fallback */ }
   updateExampleSelectorOptions();
 }
@@ -110,7 +115,7 @@ export async function loadExampleIndex() {
 export const exampleIndexReady = loadExampleIndex();
 
 export function updateExampleSelectorOptions() {
-  const select = document.getElementById('exampleSelect');
+  const select = byId<HTMLSelectElement>('exampleSelect');
   if (!select) return;
   const menu = EXAMPLE_MENU[editorState.language === 'c' ? 'c' : 'asm'];
   select.innerHTML = menu.map(([value, label, title]) =>
@@ -124,9 +129,9 @@ export function updateExampleSelectorOptions() {
 // controls with it; there it becomes a sixth panel instead, and is moved
 // into the stack rather than duplicated so all of its wiring still applies.
 export function syncWaveformPanelHost() {
-  const dock = document.getElementById('waveDock');
-  const host = document.getElementById('tab-waveform');
-  const resizer = document.getElementById('waveResizer');
+  const dock = byId('waveDock');
+  const host = byId('tab-waveform');
+  const resizer = byId('waveResizer');
   if (!dock || !host) return;
   const body = host.querySelector(':scope > .panel-body') || host;
   const wantMobile = mobileMode();
@@ -144,11 +149,11 @@ export function syncWaveformPanelHost() {
 // HDL mode is the only mode that produces waveforms, so the chip follows it
 // the way Locals follows C mode.
 export function updateWaveformPanelAvailability() {
-  const chip = document.getElementById('panelChip-waveform');
+  const chip = byId<HTMLButtonElement>('panelChip-waveform');
   // Read the engine off its toggle rather than the variable: this runs from
   // initPanelDock(), which is called before `simEngineMode` is declared
   // (in hdl/engine.ts).
-  const hdlBtn = document.getElementById('engBtnHdl');
+  const hdlBtn = byId<HTMLButtonElement>('engBtnHdl');
   const show = mobileMode() && !!(hdlBtn && hdlBtn.classList.contains('active'));
   if (chip) chip.style.display = show ? '' : 'none';
   if (!show && panelDock && panelDock.waveform && panelDock.waveform.visible) {
@@ -161,7 +166,7 @@ export function updateWaveformPanelAvailability() {
 // itself, if it happened to be open) disappears in ASM mode rather than
 // sitting there just to explain that it's not applicable.
 export function updateLocalsPanelAvailability() {
-  const chip = document.getElementById('panelChip-locals');
+  const chip = byId<HTMLButtonElement>('panelChip-locals');
   const isC = editorState.language === 'c';
   if (chip) chip.style.display = isC ? '' : 'none';
   if (!isC && panelDock && panelDock.locals && panelDock.locals.visible) {
@@ -169,13 +174,13 @@ export function updateLocalsPanelAvailability() {
   }
 }
 
-export function setLanguageMode(mode) {
+export function setLanguageMode(mode: 'asm' | 'c') {
   if (editorState.language === mode) return;
   editorState.language = mode;
   updateLocalsPanelAvailability();
 
-  const btnAsm = document.getElementById('langBtnAsm');
-  const btnC = document.getElementById('langBtnC');
+  const btnAsm = byId<HTMLButtonElement>('langBtnAsm');
+  const btnC = byId<HTMLButtonElement>('langBtnC');
   if (btnAsm) btnAsm.classList.toggle('active', mode === 'asm');
   if (btnC) btnC.classList.toggle('active', mode === 'c');
 
@@ -203,7 +208,7 @@ export function setLanguageMode(mode) {
 // change to them makes what is currently loaded stale. Drop it and make
 // the user rebuild rather than leave a program running that no longer
 // corresponds to the settings on screen.
-export function invalidateCompiledProgram(what) {
+export function invalidateCompiledProgram(what: string) {
   if (typeof run.running !== 'undefined' && run.running) {
     run.running = false;
     if (run.timerId) { clearTimeout(run.timerId); run.timerId = null; }
@@ -232,7 +237,7 @@ export function invalidateCompiledProgram(what) {
 // Wire every toolchain control to that. Doing it here rather than with
 // inline handlers keeps the markup free of duplicated calls.
 export function initCompilerSettingWatchers() {
-  const watch = (id, ev, label) => {
+  const watch = (id: string, ev: string, label: string) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener(ev, () => invalidateCompiledProgram(label));
   };
@@ -243,8 +248,8 @@ export function initCompilerSettingWatchers() {
 }
 
 export function syncGodboltArchFlags() {
-  const cb = document.getElementById('godboltUseM');
-  const input = document.getElementById('godboltArchFlags');
+  const cb = byId<HTMLInputElement>('godboltUseM');
+  const input = byId<HTMLInputElement>('godboltArchFlags');
   if (!input) return;
   const useM = cb ? cb.checked : false;
   const march = useM ? '-march=rv32im' : '-march=rv32i';
@@ -252,10 +257,10 @@ export function syncGodboltArchFlags() {
 }
 
 export function resetCompilerConfig() {
-  const selComp = document.getElementById('godboltCompilerSelect');
-  const selOpt = document.getElementById('godboltOptSelect');
-  const inputArch = document.getElementById('godboltArchFlags');
-  const useMCheck = document.getElementById('godboltUseM');
+  const selComp = byId<HTMLSelectElement>('godboltCompilerSelect');
+  const selOpt = byId<HTMLSelectElement>('godboltOptSelect');
+  const inputArch = byId<HTMLInputElement>('godboltArchFlags');
+  const useMCheck = byId<HTMLInputElement>('godboltUseM');
   if (selComp) selComp.value = 'rv32-cclang2010';
   if (selOpt) selOpt.value = '-O0';
   if (useMCheck) useMCheck.checked = true;
@@ -411,7 +416,7 @@ int main()
 }
 `;
 
-export async function loadExample(name) {
+export async function loadExample(name: string) {
   const myToken = ++editorState.exampleLoadToken;
   let source;
 
@@ -431,7 +436,7 @@ export async function loadExample(name) {
       source = await resp.text();
     } catch (err) {
       if (myToken !== editorState.exampleLoadToken) return; // a newer selection already won
-      log(`Could not load '${url}': ${err.message}. Every example but DIP to LED is ` +
+      log(`Could not load '${url}': ${errorMessage(err)}. Every example but DIP to LED is ` +
           `loaded from a file next to the page, which needs it served over ` +
           `http:// (a local server, or the hosted deployment) \u2014 opening the ` +
           `file directly (file://) blocks that fetch. DIP to LED needs no server.`, 'error');

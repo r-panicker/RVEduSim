@@ -20,6 +20,7 @@ import { updateWaveformPanelAvailability } from './examples-language';
 import { downloadTextFile } from './execution';
 import { escapeHtml, mobileMode, panelDock, setMobileTab, setPanelVisible } from './panels';
 import { updateToolbarButtonStates } from './run-control';
+import { byId } from './dom';
 
 export function hdlDownloadVcd() {
   if (!hdlBuild.lastVcd) return;
@@ -67,7 +68,7 @@ export let waveDropped = 0;         // chosen signals the current VCD no longer 
 // ---- VCD parsing ------------------------------------------------------
 // Narrow by design: this reads what Icarus or Verilator writes for the
 // testbench hdl/testbench.ts generates, not arbitrary VCD.
-export function parseVcd(text) {
+export function parseVcd(text: string | string[]) {
   const vars = [];                // {id, ref, path, width}
   const byPath = new Map();
   const changes = new Map();      // id -> {times: [], values: []}
@@ -121,7 +122,7 @@ export function parseVcd(text) {
     }
   }
 
-  const record = (id, value) => {
+  const record = (id: any, value: any) => {
     let c = changes.get(id);
     if (!c) { c = { times: [], values: [] }; changes.set(id, c); }
     // Icarus can emit the same value twice at one timestamp; keeping only
@@ -163,9 +164,9 @@ export function parseVcd(text) {
 // the UI counts in is cycles. Derive the ratio from CLK's own edges
 // rather than assuming the stock testbench's 10, so an edited clock
 // cannot silently slide the cursor off the instruction it marks.
-export function waveTicksPerCycle(p) {
+export function waveTicksPerCycle(p: never) {
   const clk = p && (p.byPath.get('cg3207_hdl_tb.CLK') ||
-    p.vars.find(v => v.name === 'CLK' || v.name === 'clk'));
+    p.vars.find((v: { name: string; }) => v.name === 'CLK' || v.name === 'clk'));
   const c = clk && p.changes.get(clk.id);
   if (!c || c.times.length < 3) return 10;
   // Two transitions make a full period.
@@ -191,10 +192,10 @@ export function waveEnsureParsed() {
 // A chosen set survives a re-run, and a re-run over edited Verilog can
 // legitimately no longer have a signal. Drop those, but count them, so a
 // shrinking list is reported rather than silent.
-export function waveApplySignalChoice(p) {
+export function waveApplySignalChoice(p: { byPath: { has: (arg0: any) => any; }; } | null) {
   const chosen = waveLoadSignals();
   if (chosen && chosen.length) {
-    const kept = chosen.filter(path => p.byPath.has(path));
+    const kept = chosen.filter((path: any) => p.byPath.has(path));
     waveDropped = chosen.length - kept.length;
     if (kept.length) { waveSignals = kept; return; }
   }
@@ -202,12 +203,12 @@ export function waveApplySignalChoice(p) {
   waveSignals = waveResolveDefaults(p);
 }
 
-export function waveResolveDefaults(p) {
-  const out = [];
+export function waveResolveDefaults(p: never) {
+  const out: any[] = [];
   for (const want of WAVE_DEFAULT_SIGNALS) {
     // Match on the tail of the path so 'dut.PC' finds it under whatever
     // the top-level testbench scope happens to be called.
-    const hit = p.vars.find(v => v.path === want || v.path.endsWith('.' + want));
+    const hit = p.vars.find((v: { path: string; }) => v.path === want || v.path.endsWith('.' + want));
     if (hit && !out.includes(hit.path)) out.push(hit.path);
   }
   return out;
@@ -223,7 +224,7 @@ export function waveSaveSignals() {
   catch (e) { /* private mode */ }
 }
 
-export function waveAddSignal(path) {
+export function waveAddSignal(path: any) {
   if (!waveParsed || !waveParsed.byPath.has(path) || waveSignals.includes(path)) return;
   waveSignals.push(path);
   waveSaveSignals();
@@ -231,7 +232,7 @@ export function waveAddSignal(path) {
   renderWavePicker();
 }
 
-export function waveRemoveSignal(path) {
+export function waveRemoveSignal(path: any) {
   const i = waveSignals.indexOf(path);
   if (i < 0) return;
   waveSignals.splice(i, 1);
@@ -240,7 +241,7 @@ export function waveRemoveSignal(path) {
   renderWavePicker();
 }
 
-export function waveToggleSignal(path) {
+export function waveToggleSignal(path: any) {
   if (waveSignals.includes(path)) waveRemoveSignal(path); else waveAddSignal(path);
 }
 
@@ -253,7 +254,7 @@ export function waveResetSignals() {
 }
 
 // Index of the last change at or before `time`, or -1 before the first.
-export function waveChangeIndexAt(c, time) {
+export function waveChangeIndexAt(c: { times: string | any[]; }, time: number) {
   let lo = 0, hi = c.times.length - 1, ans = -1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
@@ -263,7 +264,7 @@ export function waveChangeIndexAt(c, time) {
 }
 
 // Last value at or before `time`; null before the signal's first change.
-export function waveValueAt(p, id, time) {
+export function waveValueAt(p: { changes: { get: (arg0: any) => any; }; }, id: any, time: any) {
   const c = p.changes.get(id);
   if (!c || !c.times.length) return null;
   const i = waveChangeIndexAt(c, time);
@@ -271,7 +272,7 @@ export function waveValueAt(p, id, time) {
 }
 
 // 'b1010' -> 'a'; 'x'/'z' runs stay symbolic rather than lying with a 0.
-export function waveFormatValue(raw, width) {
+export function waveFormatValue(raw: string | any[] | null | undefined, width: any) {
   if (raw === null || raw === undefined) return '';
   if (raw.length === 1) return raw;
   const bits = raw.slice(1);
@@ -288,9 +289,9 @@ export function waveFormatValue(raw, width) {
 }
 
 // ---- The dock ---------------------------------------------------------
-export function waveDockEl() { return document.getElementById('waveDock'); }
+export function waveDockEl() { return byId('waveDock'); }
 
-export function setWaveHeight(px, persist) {
+export function setWaveHeight(px: number | null, persist: boolean) {
   const dock = waveDockEl();
   if (!dock) return;
   const max = Math.max(120, window.innerHeight - 220);
@@ -318,12 +319,12 @@ export function waveApplyDockSize() {
 }
 
 export function initWaveResizer() {
-  const bar = document.getElementById('waveResizer');
+  const bar = byId('waveResizer');
   const el = waveDockEl();
   if (!bar || !el) return;
 
   let startY = 0, startH = 0;
-  const move = e => {
+  const move = (e: { clientY: number; }) => {
     // The strip grows upwards, so dragging up makes it taller.
     setWaveHeight(startH + (startY - e.clientY), false);
     drawWaveforms();
@@ -357,7 +358,7 @@ export function applyWaveOpen() {
   // Only ever open in HDL mode: there are no waveforms to show otherwise.
   const on = waveOpen && ui.engine === 'hdl';
   document.body.classList.toggle('wave-open', on);
-  const fold = document.getElementById('waveFoldBtn');
+  const fold = byId<HTMLButtonElement>('waveFoldBtn');
   if (fold) fold.title = 'Hide the waveform';
   if (typeof updateVizButton === 'function') updateVizButton();
   waveApplyDockSize();
@@ -409,7 +410,7 @@ export function updateWaveAvailability() {
 // with no run recorded yet, the next Run produces it anyway.
 export function waveEnableVcdAndRerun() {
   setHdlDumpVcd(true);
-  const cb = document.getElementById('hdlVcd');
+  const cb = byId<HTMLInputElement>('hdlVcd');
   if (cb) cb.checked = true;
   if (hdlRec.trace) hdlQueueResim('re-simulated with the VCD dump on');
 }
@@ -418,14 +419,14 @@ export function updateWaveView() {
   const dock = waveDockEl();
   if (!dock || !(document.body.classList.contains('wave-open') || waveInPanel())) return;
   waveApplyDefaultSpan();
-  const notice = document.getElementById('waveNotice');
-  const info = document.getElementById('waveInfo');
+  const notice = byId('waveNotice');
+  const info = byId('waveInfo');
 
-  const say = (html) => {
+  const say = (html: string) => {
     dock.classList.add('wave-empty');
     if (notice) notice.innerHTML = html;
     if (info) info.textContent = '';
-    const box = document.getElementById('waveCycleInput');
+    const box = byId<HTMLInputElement>('waveCycleInput');
     if (box) box.value = '';
   };
 
@@ -462,29 +463,29 @@ export function updateWaveView() {
 export const WAVE_PICKER_LIMIT = 200;
 
 export function toggleWavePicker() {
-  const el = document.getElementById('wavePicker');
+  const el = byId('wavePicker');
   if (!el) return;
   el.hidden = !el.hidden;
-  const btn = document.getElementById('waveAddBtn');
+  const btn = byId<HTMLButtonElement>('waveAddBtn');
   if (btn) btn.classList.toggle('active', !el.hidden);
   if (!el.hidden) {
     renderWavePicker();
-    const f = document.getElementById('wavePickerFilter');
+    const f = byId<HTMLInputElement>('wavePickerFilter');
     if (f) f.focus();
   }
 }
 
 export function renderWavePicker() {
-  const list = document.getElementById('wavePickerList');
-  const picker = document.getElementById('wavePicker');
+  const list = byId('wavePickerList');
+  const picker = byId('wavePicker');
   if (!list || !picker || picker.hidden) return;
   if (!waveParsed) {
     list.innerHTML = '<div class="wave-picker-empty">Run with the VCD dump on to see the signal list.</div>';
     return;
   }
-  const f = document.getElementById('wavePickerFilter');
+  const f = byId<HTMLInputElement>('wavePickerFilter');
   const q = (f && f.value || '').toLowerCase();
-  const hits = waveParsed.vars.filter(v => !q || v.path.toLowerCase().includes(q));
+  const hits = waveParsed.vars.filter((v: { path: string; }) => !q || v.path.toLowerCase().includes(q));
   if (!hits.length) {
     list.innerHTML = '<div class="wave-picker-empty">No signal matches.</div>';
     return;
@@ -504,19 +505,19 @@ export function renderWavePicker() {
 }
 
 export function initWavePicker() {
-  const f = document.getElementById('wavePickerFilter');
+  const f = byId<HTMLInputElement>('wavePickerFilter');
   if (f) {
     f.addEventListener('input', renderWavePicker);
     f.addEventListener('keydown', e => { if (e.key === 'Escape') toggleWavePicker(); });
   }
-  const list = document.getElementById('wavePickerList');
+  const list = byId('wavePickerList');
   if (list) {
     list.addEventListener('click', e => {
       const item = e.target.closest('.wave-picker-item');
       if (item) waveToggleSignal(item.getAttribute('data-path'));
     });
   }
-  const names = document.getElementById('waveNames');
+  const names = byId('waveNames');
   if (names) {
     names.addEventListener('click', e => {
       const btn = e.target.closest('.wave-name-remove');
@@ -526,7 +527,7 @@ export function initWavePicker() {
   // Clicking away closes it, the way any dropdown behaves - otherwise the
   // only way out is a button, and the nearest button is easy to miss.
   document.addEventListener('pointerdown', e => {
-    const el = document.getElementById('wavePicker');
+    const el = byId('wavePicker');
     if (!el || el.hidden) return;
     if (e.target.closest('#wavePicker') || e.target.closest('#waveAddBtn')) return;
     toggleWavePicker();
@@ -534,7 +535,7 @@ export function initWavePicker() {
 }
 
 // ---- Zoom, pan and click-to-seek --------------------------------------
-export function waveSetSpan(n, anchorCycle) {
+export function waveSetSpan(n: number, anchorCycle?: number | undefined) {
   const p = waveParsed;
   if (!p) return;
   waveSpanChosen = true;
@@ -577,12 +578,12 @@ export function waveClampStart() {
   waveStart = Math.max(0, Math.min(waveStart, Math.max(0, last - waveSpan + 1)));
 }
 
-export function waveZoom(factor) { waveSetSpan(waveSpan * factor); }
+export function waveZoom(factor: number) { waveSetSpan(waveSpan * factor); }
 
 // Half a window per press, so there is always an overlap to line the new
 // view up against. Touch drag pans too, but it is not discoverable and it
 // fights the panel's own scrolling.
-export function wavePan(dir) {
+export function wavePan(dir: number) {
   if (!waveParsed) return;
   waveStart += dir * Math.max(1, Math.round(waveSpan / 2));
   waveClampStart();
@@ -608,8 +609,8 @@ export function waveFit() {
 export function updateWaveHeaderAndDraw() {
   const p = waveParsed;
   if (!p) return;
-  const info = document.getElementById('waveInfo');
-  const box = document.getElementById('waveCycleInput');
+  const info = byId('waveInfo');
+  const box = byId<HTMLInputElement>('waveCycleInput');
   if (box && document.activeElement !== box) box.value = String(hdlCurrentCycle());
   if (info) {
     const last = waveActiveEndCycle();
@@ -630,7 +631,7 @@ export function updateWaveHeaderAndDraw() {
 }
 
 // A long run's waveform keeps only its last stretch.
-export function waveFirstCycle(p) {
+export function waveFirstCycle(p: never) {
   let t = Infinity;
   for (const c of p.changes.values()) if (c.times.length && c.times[0] < t) t = c.times[0];
   return Number.isFinite(t) ? Math.floor(t / waveTicksPerCycle(p)) : 0;
@@ -638,7 +639,7 @@ export function waveFirstCycle(p) {
 
 // A cycle typed into the header goes there as a click on the waveform
 // would, and puts it in the middle of the view.
-export function waveGotoCycle(text) {
+export function waveGotoCycle(text: string) {
   const c = parseInt(String(text).replace(/[\s,_]/g, ''), 10);
   if (!waveParsed || !Number.isFinite(c)) { updateWaveHeaderAndDraw(); return false; }
   const end = Math.max(waveActiveEndCycle(), hdlRec.trace ? hdlRec.trace.budget : 0);
@@ -650,8 +651,8 @@ export function waveGotoCycle(text) {
   return true;
 }
 
-export function waveCycleAtX(clientX) {
-  const canvas = document.getElementById('waveCanvas');
+export function waveCycleAtX(clientX: number) {
+  const canvas = byId<HTMLCanvasElement>('waveCanvas');
   if (!canvas) return 0;
   const r = canvas.getBoundingClientRect();
   return waveStart + ((clientX - r.left) / Math.max(1, r.width)) * waveSpan;
@@ -660,7 +661,7 @@ export function waveCycleAtX(clientX) {
 // Clicking a waveform moves the whole simulator to that cycle: the last
 // instruction that had started by then, which is the one the waveform is
 // showing there.
-export function waveSeekToCycle(cycle) {
+export function waveSeekToCycle(cycle: number) {
   const t = hdlRec.trace;
   if (!t || !t.steps.length) return;
   let idx = 0;
@@ -671,7 +672,7 @@ export function waveSeekToCycle(cycle) {
 }
 
 export function initWaveCanvas() {
-  const box = document.getElementById('waveCycleInput');
+  const box = byId<HTMLInputElement>('waveCycleInput');
   if (box) {
     box.addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); waveGotoCycle(box.value); box.blur(); }
@@ -679,7 +680,7 @@ export function initWaveCanvas() {
     });
     box.addEventListener('blur', () => { if (waveParsed) updateWaveHeaderAndDraw(); });
   }
-  const canvas = document.getElementById('waveCanvas');
+  const canvas = byId<HTMLCanvasElement>('waveCanvas');
   if (!canvas) return;
 
   // A plain wheel is left alone so it scrolls the signal list, which is
@@ -719,7 +720,7 @@ export function initWaveCanvas() {
       updateWaveHeaderAndDraw();
     }
   });
-  const end = (e) => {
+  const end = (e: { pointerId: number; clientX: any; }) => {
     if (!dragging) return;
     dragging = false;
     canvas.classList.remove('wave-panning');
@@ -732,7 +733,7 @@ export function initWaveCanvas() {
   canvas.addEventListener('pointercancel', () => { dragging = false; canvas.classList.remove('wave-panning'); });
 }
 
-export function waveShortLabel(path) {
+export function waveShortLabel(path: string) {
   // The full path is in the title; the gutter shows the shortest tail
   // that still tells two instances apart.
   const parts = path.split('.');
@@ -742,8 +743,8 @@ export function waveShortLabel(path) {
   return clashes ? tail2 : parts[parts.length - 1];
 }
 
-export function drawWaveNames(p) {
-  const host = document.getElementById('waveNames');
+export function drawWaveNames(p: never) {
+  const host = byId('waveNames');
   if (!host) return;
   let html = '<div class="wave-names-axis">cycle</div>';
   for (const path of waveSignals) {
@@ -759,7 +760,7 @@ export function drawWaveNames(p) {
 }
 
 export function drawWaveforms() {
-  const canvas = document.getElementById('waveCanvas');
+  const canvas = byId<HTMLCanvasElement>('waveCanvas');
   const p = waveParsed;
   if (!canvas || !p || !document.body.classList.contains('wave-open')) return;
   // The rows define the height; the body scrolls if the strip is shorter.
@@ -783,7 +784,7 @@ export function drawWaveforms() {
 
   const tpc = waveTicksPerCycle(p);
   const pxPerCycle = w / waveSpan;
-  const xOf = (cycle) => (cycle - waveStart) * pxPerCycle;
+  const xOf = (cycle: number) => (cycle - waveStart) * pxPerCycle;
   const activeEnd = waveActiveEndCycle();
   const deadX = xOf(activeEnd);
 
@@ -846,7 +847,7 @@ export function drawWaveforms() {
 
     let prevX = 0;
     let prevVal = c.values[k];
-    const drawSeg = (x0, x1, raw) => {
+    const drawSeg = (x0: number, x1: number, raw: string) => {
       if (x1 <= x0) return;
       const bad = raw && (raw === 'x' || raw === 'z' || raw === 'X' || raw === 'Z' || /[xXzZ]/.test(raw));
       if (single) {
@@ -966,30 +967,30 @@ export function hdlDownloadTestbench() {
 export function hdlCyclesKey() { return hdlConfig.simulator === 'icarus' && hdlConfig.synthEnabled ? 'synth' : hdlConfig.simulator; }
 export function hdlShowCycles() {
   hdlConfig.cycleBudget = hdlCyclesFor[hdlCyclesKey()];
-  const cyc = document.getElementById('hdlCycles');
+  const cyc = byId<HTMLInputElement>('hdlCycles');
   if (cyc) {
     cyc.max = String(hdlConfig.simulator === 'verilator' ? HDL_VL_MAX_RUN : HDL_MAX_CYCLES);
-    cyc.value = hdlConfig.cycleBudget;
+    cyc.value = String(hdlConfig.cycleBudget);
   }
 }
-export function setHdlCycles(v) {
+export function setHdlCycles(v: string) {
   const n = parseInt(v, 10);
   if (!Number.isFinite(n) || n <= 0) return;
   hdlConfig.cycleBudget = Math.min(n, hdlConfig.simulator === 'verilator' ? HDL_VL_MAX_RUN : HDL_MAX_CYCLES);
   hdlCyclesFor[hdlCyclesKey()] = hdlConfig.cycleBudget;
   // Keep the field honest when the budget is set from anywhere else,
   // including the automatic extension when stepping off the end.
-  const el = document.getElementById('hdlCycles');
-  if (el && parseInt(el.value, 10) !== hdlConfig.cycleBudget) el.value = hdlConfig.cycleBudget;
+  const el = byId<HTMLInputElement>('hdlCycles');
+  if (el && parseInt(el.value, 10) !== hdlConfig.cycleBudget) el.value = String(hdlConfig.cycleBudget);
 }
-export function setHdlDumpVcd(on) {
+export function setHdlDumpVcd(on: boolean) {
   hdlConfig.dumpVcd = !!on;
   updateWaveView();
   hdlRefreshDetail();
 }
-export function setHdlWaveTop(on) { hdlConfig.waveTop = !!on;   hdlRefreshDetail();
+export function setHdlWaveTop(on: any) { hdlConfig.waveTop = !!on;   hdlRefreshDetail();
 }
-export function setHdlLiveWave(v) { hdlConfig.liveWave = v === 'live' ? 'live' : 'pause';   hdlRefreshDetail();
+export function setHdlLiveWave(v: string) { hdlConfig.liveWave = v === 'live' ? 'live' : 'pause';   hdlRefreshDetail();
 }
 // ---- Detail presets -------------------------------------------------
 // Each sets the options that cost run time. They stay visible and can be
@@ -1015,8 +1016,8 @@ export function hdlDetailMatch() {
 // Puts every control in step with the settings, which a preset or Reset
 // Defaults changes without touching the controls.
 export function hdlRefreshDetail() {
-  const byId = id => document.getElementById(id);
-  const set = (id, prop, v) => { const el = byId(id); if (el && el[prop] !== v) el[prop] = v; };
+  const byId = (id: string) => document.getElementById(id);
+  const set = (id: string, prop: string, v: string | boolean) => { const el = byId(id); if (el && el[prop] !== v) el[prop] = v; };
   set('hdlTrace', 'checked', hdlConfig.traceEnabled);
   set('hdlVcd', 'checked', hdlConfig.dumpVcd);
   set('hdlWaveTop', 'value', hdlConfig.waveTop ? 'top' : 'all');
@@ -1035,7 +1036,7 @@ export function hdlRefreshDetail() {
     sel.value = m;
   }
 }
-export function setHdlDetail(name, quiet) {
+export function setHdlDetail(name: string | string[], quiet: boolean) {
   const p = HDL_DETAIL[name];
   if (!p) { hdlRefreshDetail(); return; }
   const now = hdlDetailNow();
@@ -1064,8 +1065,8 @@ export const hdlVerilatorAvail = !!(window.rvNative && window.rvNative.verilator
 export const HDL_SIMULATOR_KEY = 'rvsim.hdlSimulator';
 
 export function hdlInitSimulator() {
-  const sel = document.getElementById('hdlSimulator');
-  const row = document.getElementById('hdlSimulatorRow');
+  const sel = byId<HTMLSelectElement>('hdlSimulator');
+  const row = byId('hdlSimulatorRow');
   if (!sel || !row) return;
   sel.disabled = !hdlVerilatorAvail;
   row.title = hdlVerilatorAvail
@@ -1080,20 +1081,20 @@ export function hdlInitSimulator() {
   setHdlSimulator(saved === 'verilator' ? 'verilator' : 'icarus', true);
 }
 
-export function setHdlSimulator(v, restoring) {
+export function setHdlSimulator(v: string, restoring?: boolean | undefined) {
   if (v !== 'verilator' || !hdlVerilatorAvail) v = 'icarus';
   const changed = v !== hdlConfig.simulator;
   hdlConfig.simulator = v;
   hdlShowCycles();
   hdlRefreshDetail();
-  const sel = document.getElementById('hdlSimulator');
+  const sel = byId<HTMLSelectElement>('hdlSimulator');
   if (sel) sel.value = v;
   if (!restoring) { try { localStorage.setItem(HDL_SIMULATOR_KEY, v); } catch (e) { /* private mode */ } }
-  const synth = document.getElementById('hdlSynthCard');
+  const synth = byId('hdlSynthCard');
   if (synth) synth.style.display = v === 'verilator' ? 'none' : '';
   if (v === 'verilator' && hdlConfig.synthEnabled) {
     setHdlSynth(false);
-    const cb = document.getElementById('hdlSynth');
+    const cb = byId<HTMLInputElement>('hdlSynth');
     if (cb) cb.checked = false;
   }
   if (changed) hdlDiscardTrace();
@@ -1102,18 +1103,18 @@ export function setHdlSimulator(v, restoring) {
 export function hdlSimulatorName() {
   return hdlConfig.simulator === 'verilator' ? 'Verilator' : hdlNative ? 'Icarus Verilog' : 'Icarus/WASM';
 }
-export function setHdlTrace(on) {
+export function setHdlTrace(on: any) {
   hdlConfig.traceEnabled = !!on;
   hdlDiscardTrace();
   updateToolbarButtonStates();
   hdlRefreshDetail();
 }
-export function setHdlCompare(on) { hdlConfig.compareEnabled = !!on;   hdlRefreshDetail();
+export function setHdlCompare(on: any) { hdlConfig.compareEnabled = !!on;   hdlRefreshDetail();
 }
 // Ticking this is what triggers the one-off Yosys download. If a run has
 // already been recorded, synthesise and check it now instead of waiting
 // for the next Run.
-export function setHdlSynth(on) {
+export function setHdlSynth(on: boolean) {
   const was = hdlConfig.synthEnabled;
   hdlConfig.synthEnabled = !!on;
   hdlShowCycles();
@@ -1147,11 +1148,11 @@ export function setHdlSynth(on) {
 export function setHdlRegPath() { hdlBuild.vvpCache = null; hdlDiscardTrace(); }
 
 export function hdlRefreshRegPathHint() {
-  const el = document.getElementById('hdlRegPath');
+  const el = byId<HTMLInputElement>('hdlRegPath');
   if (!el) return;
   const found = hdlDiscoverRegBank();
   el.placeholder = found || 'e.g. dut.RV1.RegFile1.RegBank';
-  const hint = document.getElementById('hdlRegPathHint');
+  const hint = byId('hdlRegPathHint');
   if (hint) {
     hint.textContent = found
       ? 'detected automatically: ' + found

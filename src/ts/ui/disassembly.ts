@@ -1,36 +1,36 @@
-// @ts-nocheck
 // Disassembly panel: the machine-code table with its Byte/Word and
 // hex/binary display options, and the popover for multi-reading immediates.
 
 import { nativeImmReadings } from '../asm/assembler';
 import { getCurrentCFunction } from '../c/compile';
 import { pipeline } from '../machine/pipeline';
-import { cpu, program, run, ui } from '../machine/state';
+import { cpu, MachineLine, program, run, ui } from '../machine/state';
 import { PDP_COLOUR } from './datapath';
 import { disassemblyDisplay, editor, setStatus } from './editor';
 import { editorState } from './editor-state';
 import { applyPanelColLayout, escapeHtml, panelFindActive, panelFindMatch, setPanelFindCount } from './panels';
+import { byId, targetEl } from './dom';
 export function updateMachineCode() {
   updateDisassembly();
 }
 
 export function updateDisasmViewButtons() {
-  const bytesBtn = document.getElementById('disasmViewModeBytes');
-  const wordBtn = document.getElementById('disasmViewModeWord');
+  const bytesBtn = byId<HTMLButtonElement>('disasmViewModeBytes');
+  const wordBtn = byId<HTMLButtonElement>('disasmViewModeWord');
   if (bytesBtn) bytesBtn.classList.toggle('active', ui.disasmView === 'bytes');
   if (wordBtn) wordBtn.classList.toggle('active', ui.disasmView === 'word');
 }
 
-export function setDisasmViewMode(mode) {
+export function setDisasmViewMode(mode: string) {
   ui.disasmView = (mode === 'bytes') ? 'bytes' : 'word';
   updateDisasmViewButtons();
   updateDisassembly();
   setStatus(ui.disasmView === 'word' ? 'Disassembly: 32-bit word machine-code display' : 'Disassembly: separate byte machine-code display', 'info');
 }
 
-export function handleDisasmShowToggle(checkbox) {
-  const showHexEl = document.getElementById('showHex');
-  const showBinaryEl = document.getElementById('showBinary');
+export function handleDisasmShowToggle(checkbox: { checked: boolean; }) {
+  const showHexEl = byId<HTMLInputElement>('showHex');
+  const showBinaryEl = byId<HTMLInputElement>('showBinary');
   if (showHexEl && showBinaryEl && !showHexEl.checked && !showBinaryEl.checked) {
     checkbox.checked = true;
   }
@@ -39,8 +39,8 @@ export function handleDisasmShowToggle(checkbox) {
 
 export function updateDisassembly() {
   if (!disassemblyDisplay) return;
-  const showHexEl = document.getElementById('showHex');
-  const showBinaryEl = document.getElementById('showBinary');
+  const showHexEl = byId<HTMLInputElement>('showHex');
+  const showBinaryEl = byId<HTMLInputElement>('showBinary');
   // Guard against being invoked before the disassembly toolbar DOM is
   // parsed (e.g. CodeMirror's very first editor dispatch on load).
   if (!showHexEl || !showBinaryEl) return;
@@ -49,11 +49,11 @@ export function updateDisassembly() {
   updateDisasmViewButtons();
   // Byte mode = "LSB to the left" (bytes in memory order, low byte first),
   // Word mode = "LSB to the right" (one whole little-endian 32-bit word).
-  const orderHintEl = document.getElementById('disasmOrderHint');
+  const orderHintEl = byId('disasmOrderHint');
   if (orderHintEl) orderHintEl.textContent = (ui.disasmView === 'word') ? 'LSB to the right' : 'LSB to the left';
 
   // Build address-to-labels mapping for label headers and target annotations
-  const addrToLabels = {};
+  const addrToLabels: Record<number, string[]> = {};
   if (typeof program.labels === 'object' && program.labels) {
     for (const [name, addr] of Object.entries(program.labels)) {
       if (typeof addr === 'number' && !isNaN(addr)) {
@@ -64,9 +64,9 @@ export function updateDisassembly() {
     }
   }
 
-  function annotateLabels(text) {
+  function annotateLabels(text: string) {
     if (!text) return '';
-    return text.replace(/\b(0x[0-9a-fA-F]+|\d+)\b/g, (match, numStr) => {
+    return text.replace(/\b(0x[0-9a-fA-F]+|\d+)\b/g, (match: any, numStr: string) => {
       const target = (numStr.startsWith('0x') || numStr.startsWith('0X')) ? parseInt(numStr, 16) : parseInt(numStr, 10);
       if (!isNaN(target) && addrToLabels[target >>> 0] && addrToLabels[target >>> 0].length > 0) {
         if (target >= 0x1000 || numStr.startsWith('0x') || numStr.startsWith('0X')) {
@@ -81,12 +81,13 @@ export function updateDisassembly() {
   // way just gains a marker carrying the other readings. Any label badge
   // annotateLabels would have added stays outside the marker, so the
   // underline covers the number alone.
-  function renderNativeCell(item, native) {
-    const readings = nativeImmReadings(item.imm);
-    if (!readings.length || item.immFrom < 0 || item.immTo > native.length) {
+  function renderNativeCell(item: MachineLine, native: string | any[]) {
+    const readings = nativeImmReadings(item.imm ?? null);
+    const from = item.immFrom ?? -1, to = item.immTo ?? -1;
+    if (!readings.length || from < 0 || to > native.length) {
       return annotateLabels(escapeHtml(native));
     }
-    const tok = escapeHtml(native.slice(item.immFrom, item.immTo));
+    const tok = escapeHtml(native.slice(from, to));
     const badge = annotateLabels(tok).slice(tok.length);
     const tip = readings.map(r => r[0] + ' ' + r[1]).join(' · ');
     // No `title`: the browser would draw its own tooltip alongside the
@@ -104,7 +105,7 @@ export function updateDisassembly() {
   // C mode only: annotate a stack-relative load/store's Native cell with
   // the C variable name it corresponds to, using the same best-effort
   // location table the Locals panel and the source hover use.
-  function annotateCVar(nativeText, address) {
+  function annotateCVar(nativeText: string, address: number) {
     if (editorState.language !== 'c') return '';
     const m = /\b(?:s[bhw]|lw|lh|lhu|lb|lbu)\s+[^,]+,\s*(-?\d+)\((s0|x8|sp|x2)\)/.exec(nativeText || '');
     if (!m) return '';
@@ -136,9 +137,10 @@ export function updateDisassembly() {
   // their own address: searching a label is really asking to see the code
   // under it, and only the first instruction sits exactly on it.
   let blockLabels = '';
-  const stageAt = new Map();
+  const stageAt = new Map<number, string>();
   if (pipeline.on && ui.engine !== 'hdl' && pipeline.regs) {
-    ['W', 'M', 'E', 'D'].forEach(k => { if (pipeline.regs[k]) stageAt.set(pipeline.regs[k].pc >>> 0, k); });
+    const regs = pipeline.regs;
+    (['W', 'M', 'E', 'D'] as const).forEach(k => { const r = regs[k]; if (r) stageAt.set(r.pc >>> 0, k); });
     if (!run.finished) stageAt.set(cpu.pc >>> 0, (stageAt.has(cpu.pc >>> 0) ? stageAt.get(cpu.pc >>> 0) + ' ' : '') + 'F');
   }
   for (const item of program.machineCode) {
@@ -242,7 +244,7 @@ export function updateDisassembly() {
     html += `<tr${rowClass ? ` class="${rowClass}"` : ''}>
       <td class="addr" data-col="addr">0x${item.address.toString(16).padStart(8, '0')}</td>
       <td class="bytes" data-col="bytes">${bytesStr}</td>
-      <td class="native ${expanded ? 'native-expanded' : ''}" data-col="native">${nativeRendered}${stageAt.has(item.address >>> 0) ? stageAt.get(item.address >>> 0).split(' ').map(L => `<span class="disasm-stage" style="color:${PDP_COLOUR[L]}">${L}</span>`).join('') : ''}</td>
+      <td class="native ${expanded ? 'native-expanded' : ''}" data-col="native">${nativeRendered}${(stageAt.get(item.address >>> 0) ?? '').split(' ').filter(Boolean).map(L => `<span class="disasm-stage" style="color:${PDP_COLOUR[L as keyof typeof PDP_COLOUR]}">${L}</span>`).join('')}</td>
       <td class="source ${expanded ? 'pseudo' : ''}" data-col="source">${sourceRendered}${cSrcTag}</td>
     </tr>`;
   }
@@ -253,7 +255,7 @@ export function updateDisassembly() {
   applyPanelColLayout('disassembly');
 
   // Autoscroll active execution instruction into view while the Disassembly panel is shown
-  const tabDisasm = document.getElementById('tab-disassembly');
+  const tabDisasm = byId('tab-disassembly');
   const disasmShown = tabDisasm &&
     (tabDisasm.classList.contains('panel-docked') || tabDisasm.classList.contains('panel-floating') ||
       tabDisasm.classList.contains('panel-mobile-active'));
@@ -276,7 +278,7 @@ export function updateDisassembly() {
 // The tap is bound to click rather than touchstart: a scroll gesture does
 // not fire click, so dragging the disassembly still scrolls it instead of
 // opening a bubble every time.
-export let immPopoverFor = null;
+export let immPopoverFor: HTMLElement | null = null;
 
 export function immPopover() {
   let el = document.getElementById('immPopover');
@@ -295,8 +297,8 @@ export function hideImmPopover() {
   if (el) el.hidden = true;
 }
 
-export function showImmPopover(span) {
-  let readings;
+export function showImmPopover(span: HTMLElement) {
+  let readings: [string, string][];
   try { readings = JSON.parse(decodeURIComponent(span.dataset.imm || '')) || []; } catch (e) { return; }
   if (!readings.length) return;
   const el = immPopover();
@@ -318,20 +320,16 @@ export function showImmPopover(span) {
   el.style.top = top + 'px';
 }
 
-
-
-
-// Capture, so a scroll inside the panel closes it too, not just the page.
-
 // Run once the page has loaded every module (main.ts), in page order.
 export function onDisassemblyLoad() {
   document.addEventListener('mouseover', e => {
-    const span = e.target.closest && e.target.closest('.disasm-imm');
+    const t = targetEl(e);
+    const span = t?.closest<HTMLElement>('.disasm-imm');
     if (span) showImmPopover(span);
-    else if (immPopoverFor && !(e.target.closest && e.target.closest('#immPopover'))) hideImmPopover();
+    else if (immPopoverFor && !t?.closest('#immPopover')) hideImmPopover();
   });
   document.addEventListener('click', e => {
-    const span = e.target.closest && e.target.closest('.disasm-imm');
+    const span = targetEl(e)?.closest<HTMLElement>('.disasm-imm');
     if (span) {
       if (immPopoverFor === span) hideImmPopover();
       else showImmPopover(span);
@@ -342,6 +340,7 @@ export function onDisassemblyLoad() {
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') hideImmPopover();
   }, true);
+  // Capture, so a scroll inside the panel closes it too, not just the page.
   document.addEventListener('scroll', hideImmPopover, true);
   window.addEventListener('resize', hideImmPopover);
 }

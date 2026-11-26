@@ -1,4 +1,3 @@
-// @ts-nocheck
 // HDL mode: the memory images the Wrapper's $readmemh loads, and the
 // search for the register file the testbench traces.
 
@@ -8,9 +7,10 @@ import { renderHdlFileList } from './sources';
 import { hdlSources } from './state';
 import { hdlFindWrapper, hdlModuleBody } from './verilog';
 import { getMemByte } from '../machine/memory';
-import { layout, program } from '../machine/state';
+import { layout, program, type MachineLine } from '../machine/state';
 import { setStatus } from '../ui/editor';
 import { DEFAULT_DEPTH_BITS } from '../ui/examples-language';
+import { byId } from '../ui/dom';
 
 // ================================================================
 // Memory images for the Wrapper's $readmemh
@@ -19,7 +19,7 @@ import { DEFAULT_DEPTH_BITS } from '../ui/examples-language';
 // back out of the uploaded file rather than assuming the defaults —
 // a student who enlarged IROM_DEPTH_BITS for a bigger program should
 // get a correspondingly larger image.
-export function hdlDepthBits(wrapperSrc, name, fallback) {
+export function hdlDepthBits(wrapperSrc: any, name: string, fallback: number) {
   const m = new RegExp('localparam\\s+' + name + '\\s*=\\s*(\\d+)').exec(wrapperSrc || '');
   const v = m ? parseInt(m[1], 10) : NaN;
   return Number.isFinite(v) && v > 2 && v <= 24 ? v : fallback;
@@ -29,7 +29,7 @@ export function hdlDepthBits(wrapperSrc, name, fallback) {
 // taken straight from the assembled memory image so that gaps inside
 // the segment keep their addresses (a plain item dump would pack them
 // and silently shift everything after the gap).
-export function hdlBuildMemImage(baseAddr, depthBits, lastUsedAddr) {
+export function hdlBuildMemImage(baseAddr: number, depthBits: number, lastUsedAddr: number) {
   const words = Math.pow(2, depthBits - 2);
   const lines = [];
   // Only emit up to the last word the program actually uses, mirroring
@@ -49,11 +49,12 @@ export function hdlBuildMemImage(baseAddr, depthBits, lastUsedAddr) {
   return lines.join('\n') + '\n';
 }
 
-export function hdlMemFiles(wrapperSrc) {
+export function hdlMemFiles(wrapperSrc: string) {
   const iromBits = hdlDepthBits(wrapperSrc, 'IROM_DEPTH_BITS', 9);
   const dmemBits = hdlDepthBits(wrapperSrc, 'DMEM_DEPTH_BITS', 14);
-  const codeItems = program.machineCode.filter(i => !i.error && i.bytes && i.address < layout.dataBase);
-  const dataItems = program.machineCode.filter(i => !i.error && i.bytes && i.address >= layout.dataBase);
+  const placed = (i: MachineLine): i is MachineLine & { bytes: number[] } => !i.error && !!i.bytes;
+  const codeItems = program.machineCode.filter(placed).filter(i => i.address < layout.dataBase);
+  const dataItems = program.machineCode.filter(placed).filter(i => i.address >= layout.dataBase);
   const lastCode = codeItems.reduce((m, i) => Math.max(m, i.address + i.bytes.length - 1), layout.baseAddress - 1);
   const lastData = dataItems.reduce((m, i) => Math.max(m, i.address + i.bytes.length - 1), layout.dataBase - 1);
   return {
@@ -73,7 +74,7 @@ export function hdlMemFiles(wrapperSrc) {
 // DMEM_DEPTH_BITS would express them. Taken from the Linker segment sizes,
 // which an example sets from its row in examples/index.txt.
 export function hdlRequiredDepths() {
-  const bitsFor = bytes => {
+  const bitsFor = (bytes: number) => {
     let b = 2;
     while (Math.pow(2, b) < bytes) b++;
     return Math.max(b, DEFAULT_DEPTH_BITS);
@@ -163,7 +164,7 @@ export function hdlDiscoverRegBank() {
 // What the testbench should actually use: an explicit override from the
 // panel wins, otherwise whatever discovery found.
 export function hdlRegBankPath() {
-  const el = document.getElementById('hdlRegPath');
+  const el = byId<HTMLInputElement>('hdlRegPath');
   const manual = el && el.value.trim();
   if (manual) return manual;
   return hdlDiscoverRegBank();

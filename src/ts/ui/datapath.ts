@@ -36,13 +36,14 @@ import { bumpAccelAxis, clearOledDisplay, initPeripherals, updateAccelValues } f
 import { pipeInitControls } from './pipeline-controls';
 import { assembleOnly, resetAll, runProgram, stepBack, stepOnce, toggleRunPause, updateToolbarButtonStates } from './run-control';
 import { toggleWaveDock } from './waveform';
+import { byId } from './dom';
 
 
-export function dpHex(v) { return '0x' + (v >>> 0).toString(16).padStart(8, '0'); }
+export function dpHex(v: number) { return '0x' + (v >>> 0).toString(16).padStart(8, '0'); }
 
 // Why the diagram cannot show this instruction, or null when it can.
 // The datapath is the lecture's: word loads and stores only, no MCycle.
-export function dpUnsupported(instr, op, f3, f7) {
+export function dpUnsupported(instr: number, op: number, f3: number, f7: number) {
   if (instr === 0) return 'This word is 0, which is not an instruction. The simulator steps over it.';
   if (!DECODER_TABLE[op]) {
     return 'Opcode 0x' + op.toString(16).padStart(2, '0') + ' has no row in the decoder ' +
@@ -181,9 +182,9 @@ export const DP_BLOCKS = {
 };
 export const DP_CLOCKS = { pc: [116, 117], rf: [119, 120], dmem: [122, 123] };
 
-export const DP_REG_NAME = i => 'x' + i + (i ? ' (' + ABI_NAMES[i] + ')' : '');
+export const DP_REG_NAME = (i: string) => 'x' + i + (i ? ' (' + ABI_NAMES[i] + ')' : '');
 
-export function dpSelBit(m, name, bit) {
+export function dpSelBit(m: { pcSrc: any; ctrl: { [x: string]: any; }; } | null, name: string, bit: number) {
   const v = name === 'pcSrc' ? m.pcSrc : m.ctrl[name];
   return ctlBit(v, bit);
 }
@@ -193,7 +194,7 @@ export function dpSelBit(m, name, bit) {
 // some of them, draws mux selections, glows blocks, and says what is
 // happening. Everything the hardware computes is shown, including values
 // no mux or enable lets through; those are drawn as unused.
-export function dpPhases(m) {
+export function dpPhases(m: null) {
   const hx = dpHex;
   const phases = [];
   const fetch = {
@@ -213,11 +214,11 @@ export function dpPhases(m) {
   const c = m.ctrl;
   const fmt = { 0x33: 'R', 0x13: 'I', 0x03: 'I', 0x67: 'I', 0x23: 'S', 0x63: 'B', 0x6F: 'J', 0x17: 'U', 0x37: 'U' }[m.op];
   const uses = { rs1: 'RISB'.includes(fmt), rs2: 'RSB'.includes(fmt), rd: 'RIUJ'.includes(fmt) };
-  const bin = (v, n) => v.toString(2).padStart(n, '0');
-  const ctl = (name, text) => [name, /x/.test(c[name]) ? 'x' : 'ctrl', text || c[name]];
+  const bin = (v: { toString: (arg0: number) => string; }, n: number) => v.toString(2).padStart(n, '0');
+  const ctl = (name: string, text?: string | undefined) => [name, /x/.test(c[name]) ? 'x' : 'ctrl', text || c[name]];
   // A 2-bit select bus: the trunk carries the value, and each bit's own
   // branch is a don't-care or not on its own account.
-  const ctlBus = (name) => [
+  const ctlBus = (name: string) => [
     [name, /^x+$/.test(c[name]) ? 'x' : 'ctrl', c[name]],
     [name + '0', ctlBit(c[name], 0) === 'x' ? 'x' : 'ctrl', '', 'nochip'],
     [name + '1', ctlBit(c[name], 1) === 'x' ? 'x' : 'ctrl', '', 'nochip'],
@@ -249,7 +250,7 @@ export function dpPhases(m) {
   const aSel0 = ctlBit(c.ALUSrcA, 0), aSel1 = ctlBit(c.ALUSrcA, 1);
   const bSel0 = ctlBit(c.ALUSrcB, 0), bSel1 = ctlBit(c.ALUSrcB, 1);
   const p0 = ctlBit(m.pcSrc, 0), p1 = ctlBit(m.pcSrc, 1);
-  const used = (on) => on ? 'data' : 'unused';
+  const used = (on: boolean) => on ? 'data' : 'unused';
   const ext = m.extImm === null ? 'x' : hx(m.extImm);
   phases.push({
     stage: 'D', title: 'Register Read',
@@ -374,7 +375,7 @@ export function dpSvg() {
   return document.getElementById(!pipeline.on ? 'dpSvg' : pipeline.predictor.on ? 'dpPipeBpSvg' : 'dpPipeSvg');
 }
 export function dpOverlayEl() { const svg = dpSvg(); return svg && svg.querySelector('.dp-overlay'); }
-export function dpEl(i) { const svg = dpSvg(); return svg && svg.querySelector(`[data-e="${i}"]`); }
+export function dpEl(i: string | number) { const svg = dpSvg(); return svg && svg.querySelector(`[data-e="${i}"]`); }
 
 export function dpActive() {
   return !!dpSvg() && ui.engine !== 'hdl' &&
@@ -400,7 +401,7 @@ export function dpCurrentValueStamp() {
 // A new instruction starts from phase 0. The same instruction keeps its
 // phase but is re-evaluated, so an edited register shows up at once.
 // Nothing is drawn while the strip is hidden: showing it syncs with force.
-export function dpSync(force) {
+export function dpSync(force: boolean) {
   if (!dpSvg() || !dpActive()) return;
   if (run.running) return;
   const stamp = dpCurrentStamp();
@@ -447,7 +448,7 @@ export function dpClear() {
 // pipeline, its timeline and the clock beside the drawing.
 export let dpStageColour = null;
 
-export function dpLight(routeName, kind) {
+export function dpLight(routeName: string | number, kind: string) {
   const r = DP_ROUTES[routeName];
   if (!r) return;
   const used = kind !== 'unused' && kind !== 'x';
@@ -468,7 +469,7 @@ export function dpLight(routeName, kind) {
   }
 }
 
-export function dpGlow(names) {
+export function dpGlow(names: any) {
   for (const n of names || []) {
     const el = dpEl(DP_BLOCKS[n]);
     if (!el) continue;
@@ -477,14 +478,14 @@ export function dpGlow(names) {
   }
 }
 
-export function dpNS(tag, attrs) {
+export function dpNS(tag: string, attrs: { [x: string]: any; points?: string; fill?: any; stroke?: any; "stroke-width"?: number; "stroke-linecap"?: string; class?: string; x?: number; y?: number; width?: number; height?: number; "text-anchor"?: string; "font-weight"?: number; }) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
   for (const k in attrs) el.setAttribute(k, attrs[k]);
   return el;
 }
 
 // The chosen path through a mux, drawn inside its shape.
-export function dpDrawMux(name) {
+export function dpDrawMux(name: string | number) {
   const mx = DP_MUXES[name];
   const bit = dpSelBit(dpModel, mx.sel[0], mx.sel[1]);
   const shape = dpEl(mx.e);
@@ -504,7 +505,7 @@ export function dpDrawMux(name) {
   }));
 }
 
-export function dpChip(text, kind, parked) {
+export function dpChip(text: string | any[], kind: string, parked: boolean) {
   const g = dpNS('g', { class: 'dp-chip' + (parked ? ' dp-parked' : '') });
   const fs = parked ? 26 : 34;
   const w = Math.max(40, text.length * fs * 0.6 + 22), h = fs + 16;
@@ -519,13 +520,13 @@ export function dpChip(text, kind, parked) {
   return g;
 }
 
-export function dpRouteLength(pts) {
+export function dpRouteLength(pts: string | any[]) {
   let len = 0;
   for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
   return len;
 }
 
-export function dpPointAt(pts, frac) {
+export function dpPointAt(pts: string | any[], frac: number) {
   const total = dpRouteLength(pts);
   let want = total * frac;
   for (let i = 1; i < pts.length; i++) {
@@ -543,7 +544,7 @@ export function dpPointAt(pts, frac) {
 // straight run - below a horizontal run, right of a vertical one - which
 // keeps it off the blocks at either end and off the diagram's own labels,
 // which sit above and to the left of their wires.
-export function dpParkPoint(route, chip) {
+export function dpParkPoint(route: { pts: any; park: any; }, chip: { dataset: { w: string | number; h: string | number; }; }) {
   const pts = route.pts;
   let best = 1, bestLen = -1;
   for (let i = 1; i < pts.length; i++) {
@@ -558,11 +559,11 @@ export function dpParkPoint(route, chip) {
   return Math.abs(b[1] - a[1]) > Math.abs(b[0] - a[0]) ? [x + w / 2 + 8, y] : [x, y + h / 2 + 8];
 }
 
-export function dpPlace(g, xy) { g.setAttribute('transform', `translate(${xy[0]},${xy[1]})`); }
+export function dpPlace(g: { setAttribute: (arg0: string, arg1: string) => void; }, xy: any[]) { g.setAttribute('transform', `translate(${xy[0]},${xy[1]})`); }
 
 // Everything phases 1..k leave on the diagram, drawn at rest. The latest
 // phase's values are full size; earlier ones shrink to tags.
-export function dpDrawStatic(k) {
+export function dpDrawStatic(k: number) {
   dpClear();
   const ov = dpOverlayEl();
   for (let p = 1; p <= k; p++) {
@@ -613,7 +614,7 @@ export const DP_FORMATS = {
 export const DP_FORMAT_IMMSRC = { I: '011', S: '110', B: '111', U: '000', J: '010' };
 export const DP_BRANCH_NAMES = { 0: 'beq', 1: 'bne', 4: 'blt', 5: 'bge', 6: 'bltu', 7: 'bgeu' };
 
-export function dpFormatOf(op, f3) {
+export function dpFormatOf(op: number, f3: number) {
   switch (op) {
     case 0x33: return 'R';
     case 0x13: return (f3 === 1 || f3 === 5) ? 'Ish' : 'I';
@@ -628,7 +629,7 @@ export function dpFormatOf(op, f3) {
 
 // What one field says about this instruction; '' when its bits are
 // only a slice of the immediate, which the last row gathers.
-export function dpFieldMeaning(m, fmt, name) {
+export function dpFieldMeaning(m: { op: number; rd: any; rs1: any; rs2: string; f3: number; ctrl: { ALUControl: string | number; }; }, fmt: string | null, name: string) {
   if (name === 'opcode') {
     const row = DECODER_TABLE[m.op];
     return '0x' + m.op.toString(16).padStart(2, '0') + ' · ' + (row ? row.row : 'no decoder row');
@@ -654,7 +655,7 @@ export const DP_ALUCTL_TEXT = {
 };
 // The lecture's row order; an object's numeric keys would come out sorted.
 export const DP_CONTROL_ORDER = [0x33, 0x13, 0x03, 0x23, 0x63, 0x6F, 0x17, 0x37, 0x67];
-export function dpControlTable(m) {
+export function dpControlTable(m: { ctrl: { row: any; ALUControl: string | number; }; }) {
   const cur = m.ctrl && m.ctrl.row;
   let rows = '';
   for (const op of DP_CONTROL_ORDER) {
@@ -675,15 +676,15 @@ export function dpControlTable(m) {
     '<div class="dp-ctl-note"># ALUControl[0] = (funct3 == 0x5) ? imm[10] : 1\'b0</div>';
 }
 
-export function dpDrawEncoding(m) {
-  const el = document.getElementById('dpEnc');
+export function dpDrawEncoding(m: { op: any; f3: any; instr: number; text: any; } | null) {
+  const el = byId('dpEnc');
   if (!el) return;
   if (!m) { el.hidden = true; return; }
   el.hidden = false;
   const fmt = dpFormatOf(m.op, m.f3);
   const fields = DP_FORMATS[fmt || 'raw'];
-  const bit = i => (m.instr >>> i) & 1;
-  const bitsOf = (hi, lo) => { let str = ''; for (let i = hi; i >= lo; i--) str += bit(i); return str; };
+  const bit = (i: number) => (m.instr >>> i) & 1;
+  const bitsOf = (hi: string | number, lo: number) => { let str = ''; for (let i = hi; i >= lo; i--) str += bit(i); return str; };
   let names = '', cells = '', ends = '', rows = '';
   for (const [hi, lo, name, kind] of fields) {
     const span = `grid-column: span ${hi - lo + 1}`;
@@ -712,8 +713,8 @@ export function dpDrawEncoding(m) {
 // own: beside the drawing where the strip is wide, below it where not,
 // since the drawing matters more.
 export function dpPlaceEncoding() {
-  const el = document.getElementById('dpEnc');
-  const body = document.getElementById('dpBody');
+  const el = byId('dpEnc');
+  const body = byId('dpBody');
   if (!el || !body || el.hidden || !dpActive()) return;
   body.classList.remove('dp-enc-below', 'dp-enc-side');
   body.classList.add(body.clientWidth >= 900 ? 'dp-enc-side' : 'dp-enc-below');
@@ -725,7 +726,7 @@ export function dpPlaceEncoding() {
 export const DP_STAGE_NAME = { F: 'Fetch', D: 'Decode', E: 'Execute', M: 'Memory', W: 'Writeback' };
 export const DP_CLK = { left: 320, y0: 120, y1: 1640, wLow: -300, wHigh: -195, bx0: -165, bx1: -25 };
 export function dpClockInit() {
-  const svg = document.getElementById('dpSvg');
+  const svg = byId<SVGSVGElement>('dpSvg');
   if (!svg || svg.querySelector('#dpClock')) return;
   const [vx, vy, vw, vh] = svg.getAttribute('viewBox').split(/[\s,]+/).map(Number);
   svg.setAttribute('viewBox', `${vx - DP_CLK.left} ${vy} ${vw + DP_CLK.left} ${vh}`);
@@ -733,7 +734,7 @@ export function dpClockInit() {
   const NS = 'http://www.w3.org/2000/svg';
   const g = document.createElementNS(NS, 'g');
   g.id = 'dpClock';
-  const arrow = (y, cls) => `<path class="${cls}" d="M${(wLow + wHigh) / 2 - 18} ${y - 16}L${(wLow + wHigh) / 2 + 18} ${y}L${(wLow + wHigh) / 2 - 18} ${y + 16}Z"/>`;
+  const arrow = (y: number, cls: string) => `<path class="${cls}" d="M${(wLow + wHigh) / 2 - 18} ${y - 16}L${(wLow + wHigh) / 2 + 18} ${y}L${(wLow + wHigh) / 2 - 18} ${y + 16}Z"/>`;
   g.innerHTML =
     '<title>One clock period: in a single-cycle processor every stage happens within it</title>' +
     `<text class="dp-clk-label" x="${(wLow + wHigh) / 2}" y="${y0 - 50}" text-anchor="middle">CLK</text>` +
@@ -760,10 +761,10 @@ export function dpClockUpdate() {
   g.classList.toggle('dp-clk-edge', steps.length > 0 && dpPhase === steps.length);
 }
 
-export function dpRender(animate) {
-  const instrEl = document.getElementById('dpInstr');
-  const phaseEl = document.getElementById('dpPhase');
-  const capEl = document.getElementById('dpCaption');
+export function dpRender(animate: boolean) {
+  const instrEl = byId('dpInstr');
+  const phaseEl = byId('dpPhase');
+  const capEl = byId('dpCaption');
   const total = dpPhaseList.length;
   if (pipeline.on) {
     pdpRenderTimeline();
@@ -813,10 +814,10 @@ export function dpUpdateButtons() {
 }
 
 export function dpUpdateOwnButtons() {
-  const set = (id, on) => { const b = document.getElementById(id); if (b) b.disabled = !on; };
-  const play = document.getElementById('dpPlayBtn');
+  const set = (id: string, on: boolean) => { const b = document.getElementById(id); if (b) b.disabled = !on; };
+  const play = byId<HTMLButtonElement>('dpPlayBtn');
   if (play) play.textContent = pdpPlaying ? '⏸' : '▶▶';
-  const tip = (id, t) => { const b = document.getElementById(id); if (b) b.title = t; };
+  const tip = (id: string, t: string) => { const b = document.getElementById(id); if (b) b.title = t; };
   tip('dpPrevBtn', pipeline.on ? 'Back one clock cycle' : 'Previous phase');
   tip('dpNextBtn', pipeline.on ? 'Next clock cycle' : 'Next phase; at the clock edge, execute the instruction');
   tip('dpPlayBtn', pipeline.on ? 'Clock one cycle after another; press again to pause' : 'Play every phase of this instruction, then execute it');
@@ -836,7 +837,7 @@ export function dpUpdateOwnButtons() {
 // Tokens for phase k fly along their routes; everything before k is
 // already at rest. A phase marked sequential sends its tokens one after
 // another (the PC must reach the memory before the instruction leaves it).
-export function dpAnimatePhase(k) {
+export function dpAnimatePhase(k: number) {
   const my = ++dpAnimToken;
   dpDrawStatic(k - 1);
   const ph = dpPhaseList[k - 1];
@@ -844,16 +845,16 @@ export function dpAnimatePhase(k) {
   dpGlow(ph.glow);
   for (const mx of ph.muxes || []) dpDrawMux(mx);
   const ov = dpOverlayEl();
-  ph.routes.filter(r => r[3] === 'nochip').forEach(([name, kind]) => dpLight(name, kind));
-  const moving = ph.routes.filter(r => r[3] !== 'static' && r[3] !== 'nochip');
-  ph.routes.filter(r => r[3] === 'static').forEach(([name, kind, text]) => {
+  ph.routes.filter((r: string[]) => r[3] === 'nochip').forEach(([name, kind]) => dpLight(name, kind));
+  const moving = ph.routes.filter((r: string[]) => r[3] !== 'static' && r[3] !== 'nochip');
+  ph.routes.filter((r: string[]) => r[3] === 'static').forEach(([name, kind, text]) => {
     dpLight(name, kind);
     const chip = dpChip(text, kind, false);
     dpPlace(chip, dpParkPoint(DP_ROUTES[name], chip));
     ov.appendChild(chip);
   });
   const dur = 900 / dpSpeed;
-  const tokens = moving.map(([name, kind, text], i) => {
+  const tokens = moving.map(([name, kind, text]: any, i: number) => {
     const chip = dpChip(text, kind, false);
     const pts = DP_ROUTES[name].pts;
     dpPlace(chip, pts[0]);
@@ -864,9 +865,9 @@ export function dpAnimatePhase(k) {
   dpBusy = true;
   dpUpdateButtons();
   const start = performance.now();
-  const end = Math.max(...tokens.map(t => t.delay + dur), 0);
+  const end = Math.max(...tokens.map((t: { delay: number; }) => t.delay + dur), 0);
   return new Promise(resolve => {
-    const frame = (now) => {
+    const frame = (now: number) => {
       if (my !== dpAnimToken) { resolve(false); return; }
       const t = now - start;
       for (const tk of tokens) {
@@ -937,7 +938,7 @@ export async function dpPlay() {
   dpCommit();
 }
 
-export function dpSetSpeed(v) {
+export function dpSetSpeed(v: string) {
   const n = parseFloat(v);
   dpSpeed = Number.isFinite(n) && n > 0 ? n : 1;
 }
@@ -956,7 +957,7 @@ export const PDP_FWD_FROM = { '00': 'E', '01': 'W', '10': 'M' };
 
 export function pdpTable() { return PDP_DRAW[pipeline.predictor.on ? 'bp' : 'full']; }
 
-export function pdpText(addr) {
+export function pdpText(addr: number) {
   const item = program.machineCode.find(it => it.address === (addr >>> 0) && it.bytes);
   return item ? (item.native || item.text || '').trim() : dpHex(readMem(addr >>> 0, 4, true));
 }
@@ -970,10 +971,10 @@ export function pdpEvaluate() {
 }
 
 // Every wire this cycle uses, as [route, stage or 'off', chip text].
-export function pdpRoutes(m) {
-  const s = m.s, st = m.st, out = [];
-  const on = (r, stage, chip) => out.push([r, stage, chip === undefined ? null : chip]);
-  const off = r => out.push([r, 'off', null]);
+export function pdpRoutes(m: { s: any; st: any; }) {
+  const s = m.s, st = m.st, out: any[][] = [];
+  const on = (r: string, stage: string, chip?: string | null | undefined) => out.push([r, stage, chip === undefined ? null : chip]);
+  const off = (r: string) => out.push([r, 'off', null]);
   const hex = dpHex;
 
   on('f_pc', 'F', hex(s.pcF));
@@ -1100,7 +1101,7 @@ export function pdpRoutes(m) {
 }
 
 // Which input each mux passes, and whose value it is.
-export function pdpMuxes(m) {
+export function pdpMuxes(m: { s: any; st: any; }) {
   const s = m.s, st = m.st, out = [];
   if (pipeline.predictor.on) {
     if (st.E) {
@@ -1128,9 +1129,9 @@ export function pdpMuxes(m) {
   return out;
 }
 
-export function pdpHazardNotes(m) {
+export function pdpHazardNotes(m: { s: any; st: any; }) {
   const s = m.s, st = m.st, H = pipeline.hazards, notes = [];
-  const reg = i => 'x' + i;
+  const reg = (i: string) => 'x' + i;
   if (s.forwardAE !== '00') notes.push(`ForwardAE = ${s.forwardAE}: rs1E (${reg(st.E.rs1)}) is ${s.forwardAE === '10' ? 'rdM' : 'rdW'}, so SrcA takes ${s.forwardAE === '10' ? 'ALUResultM' : 'ResultW'}`);
   if (s.forwardBE !== '00') notes.push(`ForwardBE = ${s.forwardBE}: rs2E (${reg(st.E.rs2)}) is ${s.forwardBE === '10' ? 'rdM' : 'rdW'}, so it takes ${s.forwardBE === '10' ? 'ALUResultM' : 'ResultW'}`);
   if (s.forward1D) notes.push(`Forward1D: rs1D (${reg(st.D.dec.rs1)}) is being written this edge, so RD1 takes ResultW`);
@@ -1140,7 +1141,7 @@ export function pdpHazardNotes(m) {
   if (s.drain) notes.push('the instruction in Decode is not a datapath instruction: F and D hold until E, M and W are empty');
   if (s.serialExec) notes.push('the pipeline behind it is empty, so the functional model executes it now, in Decode');
   if (pipeline.predictor.on) {
-    const hx = v => '<code>' + dpHex(v) + '</code>';
+    const hx = (v: number) => '<code>' + dpHex(v) + '</code>';
     if (s.mispredict) {
       const why = s.brMiss
         ? `predicted ${s.prPCSrcE ? 'taken' : 'not taken'}, but PCSrcE is ${s.pcSrcE ? 1 : 0}`
@@ -1167,7 +1168,7 @@ export function pdpHazardNotes(m) {
   return notes;
 }
 
-export function pdpLight(name, stage) {
+export function pdpLight(name: string | number, stage: string) {
   const r = pdpTable().routes[name];
   if (!r) return;
   for (const i of r.segs) {
@@ -1186,7 +1187,7 @@ export function pdpLight(name, stage) {
   }
 }
 
-export function pdpChip(text, stage) {
+export function pdpChip(text: string | any[], stage: string) {
   const g = dpNS('g', { class: 'dp-chip dp-parked' });
   const fs = 26;
   const w = Math.max(40, text.length * fs * 0.6 + 18), h = fs + 14;
@@ -1199,7 +1200,7 @@ export function pdpChip(text, stage) {
   return g;
 }
 
-export function pdpDrawMux(name, sel, stage) {
+export function pdpDrawMux(name: string | number, sel: string | number, stage: string | number) {
   const mx = pdpTable().muxes[name];
   if (!mx) return;
   const shape = dpEl(mx.e);
@@ -1212,7 +1213,7 @@ export function pdpDrawMux(name, sel, stage) {
   }));
 }
 
-export function pdpHazardRoutes(m) {
+export function pdpHazardRoutes(m: { s: any; }) {
   const s = m.s, out = [];
   if (s.stallF) out.push(['h_stallf', 'StallF']);
   if (s.stallD) out.push(['h_stalld', 'StallD']);
@@ -1229,14 +1230,14 @@ export function pdpHazardRoutes(m) {
 // Where each stage lies across the drawing, for its instruction's label.
 export const PDP_STAGE_X = { F: [0, 911], D: [965, 1768], E: [1823, 2628], M: [2682, 3167], W: [3221, 3460] };
 
-export function pdpCaption(m) {
+export function pdpCaption(m: never) {
   const notes = pdpHazardNotes(m);
   return notes.join('. ').replace(/\.\./g, '.') + (/[.>]$/.test(notes[notes.length - 1]) ? '' : '.');
 }
 
 // Each stage's instruction above it, alternating rows so neighbours
 // do not collide.
-export function pdpStageLabels(m) {
+export function pdpStageLabels(m: { st: { [x: string]: any; }; }) {
   const ov = dpOverlayEl(), width = pdpTable().width, xs = PDP_STAGE_X;
   const fs = 50;
   ['F', 'D', 'E', 'M', 'W'].forEach((k, i) => {
@@ -1257,7 +1258,7 @@ export function pdpStageLabels(m) {
 
 // One clock cycle, drawn whole: every stage's wires, the mux choices, the
 // hazard unit's signals and the values.
-export function pdpDraw(m) {
+export function pdpDraw(m: never) {
   dpClear();
   const ov = dpOverlayEl(), t = pdpTable().routes;
   const routes = pdpRoutes(m);
@@ -1284,8 +1285,8 @@ export function pdpDraw(m) {
 
 // The five instructions' encodings beside the drawing, in program order:
 // the oldest, in Writeback, first.
-export function pdpDrawEncodings(m) {
-  const el = document.getElementById('dpEnc');
+export function pdpDrawEncodings(m: { st: { [x: string]: any; }; } | null) {
+  const el = byId('dpEnc');
   if (!el) return;
   if (!m) { el.hidden = true; return; }
   el.hidden = false;
@@ -1315,7 +1316,7 @@ export function pdpDrawEncodings(m) {
 
 // The BHT's entries: every one when the table is small, otherwise those
 // in use. The entries Fetch and Execute read this cycle are marked.
-export function pdpBhtTable(m) {
+export function pdpBhtTable(m: { s: any; st: { E: { pc: number; }; }; }) {
   const s = m.s, n = pipeline.predictor.entries, bht = pipeline.regs.bht;
   const iF = pipeBhtIndex(s.pcF), iE = m.st.E ? pipeBhtIndex(m.st.E.pc) : -1;
   const rows = [];
@@ -1354,10 +1355,10 @@ export async function pdpPlay() {
 export const PDP_TL_COLS = 18;
 export let dpView = 'diagram';
 
-export function dpSetView(v) {
+export function dpSetView(v: string) {
   dpView = v === 'timeline' && pipeline.on ? 'timeline' : 'diagram';
   document.body.classList.toggle('dp-view-timeline', dpView === 'timeline');
-  const d = document.getElementById('dpViewDiagram'), t = document.getElementById('dpViewTimeline');
+  const d = byId<HTMLButtonElement>('dpViewDiagram'), t = byId<HTMLButtonElement>('dpViewTimeline');
   if (d) d.classList.toggle('active', dpView === 'diagram');
   if (t) t.classList.toggle('active', dpView === 'timeline');
   if (dpView === 'timeline') pdpRenderTimeline();
@@ -1367,16 +1368,16 @@ export function dpSetView(v) {
 export function dpToggleView() { dpSetView(dpView === 'timeline' ? 'diagram' : 'timeline'); }
 
 export function pdpRenderTimeline() {
-  const host = document.getElementById('dpTimeline');
+  const host = byId('dpTimeline');
   if (!host || dpView !== 'timeline') return;
   if (!program.assembled || !pipeline.regs) { host.innerHTML = '<p class="pdp-tl-empty">Assemble a program to chart it.</p>'; return; }
   // A few columns before the window, so bubbles already in flight at its
   // left edge are known.
-  const all = [];
+  const all: any[] = [];
   for (let t = pipeline.regs.trace; t && all.length < PDP_TL_COLS + 3; t = t.prev) all.unshift(t);
   if (!run.finished) {
     const s = pipeEvaluate();
-    const rec = r => r ? { seq: r.seq, pc: r.pc } : null;
+    const rec = (r) => r ? { seq: r.seq, pc: r.pc } : null;
     all.push({
       cyc: cpu.totalCycles, live: true,
       st: [s.instrF ? { seq: pipeline.regs.seqF, pc: s.pcF } : null, rec(pipeline.regs.D), rec(pipeline.regs.E), rec(pipeline.regs.M), rec(pipeline.regs.W)],
@@ -1409,20 +1410,20 @@ export function pdpRenderTimeline() {
     }
   }
   const lastCol = all[all.length - 1];
-  const live = lastCol && lastCol.live ? new Set(lastCol.st.filter(Boolean).map(r => r.seq)
+  const live = lastCol && lastCol.live ? new Set(lastCol.st.filter(Boolean).map((r: { seq: { seq: any; }; }) => r.seq)
     .concat(bubs[all.length - 1].filter(key => key !== null))) : null;
   // A phone has room only for what is in flight, and not for addresses.
   const phone = mobileMode(), onlyLive = phone && !!live;
   const letters = ['F', 'D', 'E', 'M', 'W'];
-  const render = n => {
+  const render = (n: number) => {
     let cols = all.slice(-n), off = all.length - cols.length;
     const rows = new Map();
-    const rowAt = (key, pc) => {
+    const rowAt = (key: never, pc: any) => {
       if (!rows.has(key)) rows.set(key, { pc, nop: !!(info.get(key) || {}).nop, cells: {} });
       return rows.get(key);
     };
     cols.forEach((c, ci) => {
-      c.st.forEach((r, k) => {
+      c.st.forEach((r: { seq: any; pc: any; }, k: number) => {
         if (!r) return;
         const cell = { k };
         if (c.stall && k <= 1) cell.stall = true;
@@ -1487,8 +1488,8 @@ export function pdpRenderTimeline() {
 }
 
 // ---- The strip --------------------------------------------------------
-export function setDpHeight(px, persist) {
-  const dock = document.getElementById('dpDock');
+export function setDpHeight(px: number | null, persist: boolean) {
+  const dock = byId('dpDock');
   if (!dock) return;
   const h = Math.max(200, Math.min(px, window.innerHeight - 160));
   dock.style.flex = '0 0 ' + h + 'px';
@@ -1504,7 +1505,7 @@ export function dpSavedHeight() {
 // The inline flex from a drag outranks the folded and in-panel rules, so
 // it is only present while the strip is open at the bottom.
 export function dpApplyDockSize() {
-  const dock = document.getElementById('dpDock');
+  const dock = byId('dpDock');
   if (!dock) return;
   const b = document.body.classList;
   if (b.contains('dp-open') && !b.contains('dp-in-panel') && !b.contains('dp-max')) setDpHeight(dpSavedHeight(), false);
@@ -1534,7 +1535,7 @@ export function toggleDpDock() {
 // The first instruction the diagrams do not draw, or null. The same set
 // for both: no MCycle, word loads and stores only, nothing outside the
 // decoder table (FP, atomics, ecall, fence, CSRs).
-export let dpBlockKey = null, dpBlockVal = null;
+export let dpBlockKey: string | null = null, dpBlockVal = null;
 export const DP_MULTI_BLOCK = { msg: 'The datapath is not available in Multi-cycle mode.' };
 export function dpBlocker() {
   if (pipeline.arch === 'multi') return DP_MULTI_BLOCK;
@@ -1603,7 +1604,7 @@ export function floatStepsMode() {
   return pipeline.on || floatOnDpTab() ? 'dp' : 'tb';
 }
 export function updateFloatSteps() {
-  const bar = document.getElementById('floatSteps');
+  const bar = byId('floatSteps');
   if (!bar) return;
   const onDp = mobileMode() && program.assembled && floatOnDpTab();
   const show = onDp || (floatStepsWanted && mobileMode() && program.assembled);
@@ -1612,7 +1613,7 @@ export function updateFloatSteps() {
   if (!show) return;
   const dp = floatStepsMode() === 'dp';
   bar.dataset.mode = dp ? 'dp' : 'tb';
-  const mirror = (btn, src, label, title) => {
+  const mirror = (btn: HTMLButtonElement, src: string, label: string, title?: string | undefined) => {
     const s = document.getElementById(src);
     btn.textContent = label;
     btn.title = title || (s ? s.title : '');
@@ -1630,7 +1631,7 @@ export function updateFloatSteps() {
     c.hidden = true;
   }
 }
-export function floatStep(which) {
+export function floatStep(which: number) {
   const dp = floatStepsMode() === 'dp';
   if (which === 0) dp ? dpPrev() : stepBack();
   else if (which === 1) dp ? dpNext() : stepOnce();
@@ -1639,12 +1640,12 @@ export function floatStep(which) {
 }
 // The toolbar's Step has scrolled out of view (on a phone), so the step
 // controls float.
-export function setToolbarOutOfView(out) {
+export function setToolbarOutOfView(out: boolean) {
   floatStepsWanted = !!out;
   updateFloatSteps();
 }
 export function initFloatSteps() {
-  const step = document.getElementById('btnStep');
+  const step = byId<HTMLButtonElement>('btnStep');
   if (!step || typeof IntersectionObserver === 'undefined') return;
   new IntersectionObserver(entries => {
     setToolbarOutOfView(entries[0].intersectionRatio < 0.6);
@@ -1653,7 +1654,7 @@ export function initFloatSteps() {
 }
 
 export function updateVizButton() {
-  const b = document.getElementById('btnViz');
+  const b = byId<HTMLButtonElement>('btnViz');
   if (!b) return;
   const hdl = ui.engine === 'hdl';
   const block = hdl ? null : dpBlocker();
@@ -1677,9 +1678,9 @@ export function toggleDpMax() {
 // Below the breakpoint the strip becomes a panel tab, the way the
 // waveform does, so reaching it does not scroll the toolbar away.
 export function syncDatapathPanelHost() {
-  const dock = document.getElementById('dpDock');
-  const host = document.getElementById('tab-datapath');
-  const resizer = document.getElementById('dpResizer');
+  const dock = byId('dpDock');
+  const host = byId('tab-datapath');
+  const resizer = byId('dpResizer');
   if (!dock || !host) return;
   const body = host.querySelector(':scope > .panel-body') || host;
   const wantMobile = mobileMode();
@@ -1693,8 +1694,8 @@ export function syncDatapathPanelHost() {
 }
 
 export function updateDatapathPanelAvailability() {
-  const chip = document.getElementById('panelChip-datapath');
-  const hdlBtn = document.getElementById('engBtnHdl');
+  const chip = byId<HTMLButtonElement>('panelChip-datapath');
+  const hdlBtn = byId<HTMLButtonElement>('engBtnHdl');
   const show = mobileMode() && !(hdlBtn && hdlBtn.classList.contains('active')) && !dpBlocker();
   if (chip) chip.style.display = show ? '' : 'none';
   if (!show && panelDock && panelDock.datapath && panelDock.datapath.visible) {
@@ -1704,11 +1705,11 @@ export function updateDatapathPanelAvailability() {
 }
 
 export function initDatapath() {
-  const bar = document.getElementById('dpResizer');
-  const dock = document.getElementById('dpDock');
+  const bar = byId('dpResizer');
+  const dock = byId('dpDock');
   if (bar && dock) {
     let startY = 0, startH = 0;
-    const move = e => setDpHeight(startH + (startY - e.clientY), false);
+    const move = (e: { clientY: number; }) => setDpHeight(startH + (startY - e.clientY), false);
     const up = () => {
       bar.classList.remove('dragging');
       window.removeEventListener('pointermove', move);
@@ -1725,7 +1726,7 @@ export function initDatapath() {
     });
     bar.addEventListener('dblclick', () => setDpHeight(DP_H_DEFAULT, true));
   }
-  const body = document.getElementById('dpBody');
+  const body = byId('dpBody');
   if (body && typeof ResizeObserver !== 'undefined') new ResizeObserver(() => dpPlaceEncoding()).observe(body);
   try { dpWanted = localStorage.getItem(DP_OPEN_KEY) === '1'; } catch (e) { dpWanted = false; }
   initFloatSteps();
@@ -1766,7 +1767,7 @@ export function dpOnModeChange() {
   const b = document.body.classList;
   b.toggle('dp-pipe', pipeline.on);
   b.toggle('dp-bp', pipeline.predictor.on);
-  const arch = document.getElementById('dpArch');
+  const arch = byId<HTMLSelectElement>('dpArch');
   if (arch) arch.value = pipeline.on ? 'pipe' : 'single';
   dpSetView(pipeline.on ? dpView : 'diagram');
   pdpPlaying = false;
@@ -1776,6 +1777,9 @@ export function dpOnModeChange() {
 }
 
 // ---- Boot and window hooks -------------------------------------------
+// Starts the page once window.CM6 exists. ui/cm6-loader.ts loads it from
+// the CDN, with a local fallback, and the import is asynchronous, so this
+// polls for it.
 export function bootSimulator() {
   if (!window.CM6) {
     setTimeout(bootSimulator, 20);

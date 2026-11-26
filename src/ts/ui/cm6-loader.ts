@@ -1,4 +1,3 @@
-// @ts-nocheck
 /* ================================================================
    CodeMirror 6 loader (window.CM6)
    Loads a SINGLE self-contained CM6 bundle (cm6_bundle.min.js) —
@@ -32,7 +31,7 @@ export function onCm6LoaderLoad() {
                    'riscv_simulator_tests/cm6_bundle.min.js',
                    'https://cdn.jsdelivr.net/gh/r-panicker/RVEduSim@main/vendor/codemirror/cm6_bundle.min.js'];
 
-    function load(i) {
+    function load(i: number) {
       if (i >= SOURCES.length) {
         console.error('[CM6] No bundle could be loaded: ' + SOURCES.join(', '));
         return;

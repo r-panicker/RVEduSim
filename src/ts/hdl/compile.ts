@@ -10,6 +10,7 @@ import { hdlBuildTestbench, hdlHasDoubleBuffer } from './testbench';
 import { hdlHash, hdlHex32 } from './verilog';
 import { accel, uart } from '../machine/state';
 import { uartGapInstr } from '../machine/uart';
+import { byId } from '../ui/dom';
 
 // ================================================================
 // Runtime environment handed to vvp
@@ -56,8 +57,8 @@ export function hdlSyncRx() {
 // ================================================================
 // Nothing program-specific reaches the Verilog, so the compiled
 // binary only has to be rebuilt when the sources themselves change. Runs, steps and input edits all reuse it.
-export async function hdlEnsureCompiled(quiet) {
-  const gen = (document.getElementById('hdlGeneration') || {}).value || '2005';
+export async function hdlEnsureCompiled(quiet: any) {
+  const gen = (byId<HTMLSelectElement>('hdlGeneration') || {}).value || '2005';
   let rb = hdlRegBankPath();
   const dbuf = hdlHasDoubleBuffer();
   const state = hdlCkState(hdlConfig.simulator === 'verilator');

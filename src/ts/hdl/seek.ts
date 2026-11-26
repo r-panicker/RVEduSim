@@ -1,4 +1,3 @@
-// @ts-nocheck
 // ================================================================
 // Seeking - the trace IS the stepping mechanism
 // ================================================================
@@ -7,7 +6,7 @@
 // through the recording. That makes stepping instant and, unlike a real
 // simulator, makes stepping BACKWARDS possible.
 
-import { hdlActivity, hdlBuild, hdlRec } from './state';
+import { hdlActivity, hdlBuild, hdlRec, type HdlTrace } from './state';
 import { HDL_NONE } from './trace';
 import { getMemByte, setMemByte } from '../machine/memory';
 import { oledBlankPage, oledNotePixelWrite, oledPanelCol, oledPresent } from '../machine/oled';
@@ -30,7 +29,7 @@ export function hdlResetPeripheralState() {
   oled.swapUnpolled = false;
 }
 
-export function hdlApplyPer(kind, f) {
+export function hdlApplyPer(kind: string, f: string[]) {
   if (kind === 'C') {
     cpu.pc = parseInt(f[1], 16) >>> 0;
   } else if (kind === 'L') {
@@ -74,7 +73,7 @@ export function hdlApplyPer(kind, f) {
 // snapshot of the state they leave, which a seek starts from instead of
 // reset; offset counts them, so the instruction count stays true.
 export const HDL_VL_KEEP = 2000000;
-export function hdlRestoreBase(b) {
+export function hdlRestoreBase(b: { regs: ArrayLike<number>; regKnown: ArrayLike<number>; mem: string | any[]; periph: { ledState: number; sevsegState: string; oledCol: number; oledRow: number; oledCtrl: number; oledDataVal: number; oledAdvCol: boolean; oledAdvRow: boolean; oledFrontPage: number; oledBackPage: number; oledSwapUnpolled: boolean; oledRaceWarned: boolean; uartPending: number[]; uartRxByte: number; uartRxFull: boolean; uartRxDropped: number; uartRxDroppedTotal: number; uartNextDeliveryInstr: number; uartTxBuffer: string; uartTxLen: number; }; tx: number[]; txBuf: string; oled: ArrayLike<number>[]; }) {
   loadProgram(program.machineCode);
   cpu.regs.set(b.regs);
   hdlRec.regKnown.set(b.regKnown);
@@ -88,7 +87,7 @@ export function hdlRestoreBase(b) {
   oled.buffer = oled.pages[oled.back];
 }
 // The state the page holds now, as a starting point for seeks.
-export function hdlCaptureBase(cyc, acks) {
+export function hdlCaptureBase(cyc: any, acks: any) {
   const mem = new Uint8Array(hdlBuild.dmemBytes);
   for (let i = 0; i < mem.length; i++) mem[i] = getMemByte(layout.dataBase + i);
   return { cyc, regs: cpu.regs.slice(), regKnown: hdlRec.regKnown.slice(), mem,
@@ -97,7 +96,7 @@ export function hdlCaptureBase(cyc, acks) {
 }
 
 // Returns how many steps were folded away, 0 when it was not yet time.
-export function hdlTrimTrace(t) {
+export function hdlTrimTrace(t: HdlTrace) {
   const steps = t.steps;
   if (steps.length < 2) return 0;
   const last = steps[steps.length - 1].cyc;
@@ -119,20 +118,20 @@ export function hdlTrimTrace(t) {
 }
 // Drops what a recording holds from cycle c on, so that a run printing
 // from c (+TRACEFROM) can be joined onto it.
-export function hdlCutTrace(t, c) {
+export function hdlCutTrace(t: HdlTrace, c: number) {
   let k = t.steps.length;
   while (k > 0 && t.steps[k - 1].cyc >= c) k--;
   t.steps.length = k;
   // The last step kept can hold what a long instruction did in later
   // cycles, which the run joined on prints again.
-  const before = (list, at) => list === HDL_NONE ? list : list.filter(e => at(e) < c);
+  const before = <T>(list: T[], at: (e: T) => number) => list === HDL_NONE ? list : list.filter(e => at(e) < c);
   const last = t.steps[k - 1];
   if (last) {
-    last.per = before(last.per, e => parseInt(e[1][0], 10));
-    last.regw = before(last.regw, e => e[2]);
-    last.memw = before(last.memw, e => e[3]);
+    last.per = before(last.per, (e) => parseInt(e[1][0], 10));
+    last.regw = before(last.regw, (e) => e[2]);
+    last.memw = before(last.memw, (e) => e[3]);
   }
-  t.pre = before(t.pre, e => parseInt(e[1][0], 10));
+  t.pre = before(t.pre, (e) => parseInt(e[1][0], 10));
   t.final = null;
   t.next = null;
   hdlRec.seekMark = null;
@@ -142,7 +141,7 @@ export function hdlCutTrace(t, c) {
 // Only writes the Wrapper actually commits to DMEM belong in the memory
 // image; MMIO writes at the same port are peripheral activity and arrive
 // as their own events.
-export function hdlApplyMemWrite(addr, be, data) {
+export function hdlApplyMemWrite(addr: number, be: number, data: number) {
   if (addr < layout.dataBase || addr >= layout.dataBase + hdlBuild.dmemBytes) return;
   const word = addr & ~3;
   for (let i = 0; i < 4; i++)
@@ -160,8 +159,10 @@ export function hdlCurrentCycle() {
 // How many of the events of a recording without the trace are shown: all,
 // or, while a run is held to the paced clock, those the clock has reached.
 export function hdlPreShown() {
-  const pre = hdlRec.trace.pre;
-  if (!hdlActivity.paced || hdlRec.trace.steps.length) return pre.length;
+  const trace = hdlRec.trace;
+  if (!trace) return 0;
+  const pre = trace.pre;
+  if (!hdlActivity.paced || trace.steps.length) return pre.length;
   let n = 0;
   while (n < pre.length && parseInt(pre[n][1][0], 10) <= hdlActivity.paced.cyc) n++;
   return hdlActivity.paced.applied = n;
@@ -174,7 +175,7 @@ export function hdlPreShown() {
 // else has touched the state since that seek, so only the live run asks.
 // light: only what a running simulation shows (peripherals, stats, the
 // waveform), not the line, registers and memory, which catch up when it stops.
-export function hdlSeek(idx, forward, light) {
+export function hdlSeek(idx: number, forward?: boolean | undefined, light?: boolean | undefined) {
   if (!hdlRec.trace) return;
   const steps = hdlRec.trace.steps;
   idx = Math.max(0, Math.min(idx, steps.length));

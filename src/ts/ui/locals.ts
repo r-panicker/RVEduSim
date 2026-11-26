@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The Locals panel (C mode): each variable of the current function with its
 // stack address and live value.
 
@@ -8,11 +7,12 @@ import { readMem, readMemSigned } from '../machine/memory';
 import { cpu } from '../machine/state';
 import { editorState } from './editor-state';
 import { escapeHtml, isPanelVisible, mobileMode, panelFindMatch, setMobileTab, setPanelFindCount, setPanelVisible } from './panels';
+import { byId } from './dom';
 export let localsDecSigned = true;
 
 export function updateLocalsView() {
-  const body = document.getElementById('localsBody');
-  const notice = document.getElementById('localsNotice');
+  const body = byId<HTMLTableSectionElement>('localsBody');
+  const notice = byId('localsNotice');
   if (!body) return;
   // Seeded here so the several early returns below all leave an honest
   // count behind; the tail of the function overwrites it with the real one.
@@ -69,7 +69,7 @@ export function updateLocalsView() {
   setPanelFindCount('locals', shown, fn.vars.length);
 }
 
-export function setLocalsDecSigned(signed) {
+export function setLocalsDecSigned(signed: any) {
   localsDecSigned = !!signed;
   updateLocalsView();
 }
@@ -77,7 +77,7 @@ export function setLocalsDecSigned(signed) {
 // Click a variable in the C source -> bring the Locals panel forward and
 // flash its row, so the source <-> memory correspondence is one click,
 // not just a hover.
-export function focusLocalsVar(name) {
+export function focusLocalsVar(name: string) {
   if (mobileMode()) {
     setMobileTab('locals');
   } else if (!isPanelVisible('locals')) {

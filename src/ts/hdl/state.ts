@@ -22,7 +22,8 @@ export const hdlConfig = {
   synthEnabled: false,     // synthesise with Yosys and simulate the netlist
 };
 
-export interface HdlSource { name: string; src: string }
+// isPrebuilt: the shipped reference core, whose Wrapper sizes are adjusted to the program.
+export interface HdlSource { name: string; src: string; isPrebuilt?: boolean }
 
 export const hdlSources = {
   files: [] as HdlSource[],
@@ -34,8 +35,47 @@ export const hdlSources = {
 export interface TimedInput { cycle: number; code: number; value: number }
 export interface TimedByte { cycle: number; byte: number }
 
+// A peripheral record as the testbench printed it: the @@ kind letter and
+// its fields, the cycle first.
+export type PerRecord = [kind: string, fields: string[]];
+
+// One instruction of the recording, and what happened while it ran.
+export interface HdlStep {
+  cyc: number;                                      // the cycle it was fetched in
+  pc: number;
+  instr: number;
+  regw: [reg: number, value: number, cycle: number][];
+  memw: [addr: number, byteEnable: number, data: number, cycle: number][];
+  per: PerRecord[];
+  acks: number;                                     // UART bytes the hardware took
+}
+
+// A recorded run: its instructions, the peripheral records before the first
+// one (all of them without the architectural trace), and what the run that
+// made it was given and produced.
+export interface HdlTimeline { stim: TimedInput[]; rx: TimedByte[] }
+
+export interface HdlTrace {
+  steps: HdlStep[];
+  pre: PerRecord[];
+  preAcks: number;
+  final: { cyc: number; led: number; ss: string } | null;   // the outputs at the end
+  next: number | null;                                     // the PC fetched after the end
+  userOutput: string;                                      // the design's own $display lines
+  newOutput?: string;                                      // ...from the latest run only
+  lastCyc?: number;                                        // the latest cycle a record named
+  budget: number;                                          // cycles recorded
+  offset?: number;                                         // instructions folded into base (Verilator)
+  base?: any;                                              // the state those instructions left
+  timeline?: HdlTimeline;                                  // the inputs it was recorded with
+  joinKey?: string;                                        // what a later run must match to join on
+  regBank?: string | null;                                 // the register file's path, if found
+  vlCks?: any[] | null;                                    // Verilator's checkpoints, newest first
+  vcdScope?: 'top' | 'all' | null;
+}
+
 export const hdlRec = {
-  trace: null as any,              // the recording: { steps, pre, final, next, ... }
+  trace: null as HdlTrace | null,  // the recording
   idx: 0,                          // position in it, in instructions completed
   stim: [] as TimedInput[],        // input changes on the timeline
   rx: [] as TimedByte[],           // UART bytes on the timeline
@@ -46,7 +86,7 @@ export const hdlRec = {
   // be dropped, or the recording would stop matching the switches.
   pendingResim: false,
   // Inputs already put on the timeline in the middle of a run.
-  stimmedInRun: new Set<unknown>(),
+  stimmedInRun: new Set<number>(),
   epoch: 0,                        // bumped whenever the recording is discarded
 };
 
@@ -68,7 +108,20 @@ export const hdlActivity = {
   running: false,
   jobSeq: 0,                       // id of the engine's next job
   live: null as any,               // a live Verilator run
-  chunked: null as any,            // { stop } during an Icarus run in chunks
-  paced: null as any,              // { cyc, applied }: a run without the trace at Real time
-  play: null as any,               // { to, trace, wall, cyc0, done, timer }: playback at Real time
+  chunked: null as { stop: boolean } | null,                // during an Icarus run in chunks
+  paced: null as { cyc: number; applied: number } | null,   // a run without the trace at Real time
+  play: null as HdlPlayback | null,                         // playback at Real time
 };
+
+// Playback of a recording at the clock: to the instruction at index to,
+// from wall-clock time wall and cycle cyc0; done runs when it gets there.
+export interface HdlPlayback {
+  to: number; trace: HdlTrace | null; wall: number; cyc0: number;
+  done?: () => void; timer: ReturnType<typeof setTimeout> | null;
+}
+
+// The recording, where the caller is only reached with one in hand.
+export function hdlRecording(): HdlTrace {
+  if (!hdlRec.trace) throw new Error('no HDL recording');
+  return hdlRec.trace;
+}

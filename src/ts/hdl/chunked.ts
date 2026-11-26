@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Runs with Icarus, in chunks, and the Run, Resume, Step and Back actions
 // that move through the recording in HDL mode.
 
@@ -8,7 +7,7 @@ import { HDL_MAX_CYCLES, hdlClearConsole, hdlLog, hdlStatus } from './engine';
 import { hdlLiveCapable, hdlRunLive } from './live';
 import { hdlBreakAt, hdlStartTrace, hdlWithBusy } from './run';
 import { hdlApplyPer, hdlCurrentCycle, hdlPreShown, hdlSeek } from './seek';
-import { hdlActivity, hdlConfig, hdlRec } from './state';
+import { hdlActivity, hdlConfig, hdlRec, type HdlTrace, hdlRecording, type HdlPlayback } from './state';
 import { hdlModeLabel } from './synthesis';
 import { hdlBuildTrace, hdlRunSummary } from './trace';
 import { RT_FOLLOW_HZ, cpuHz, fmtHz } from '../machine/clock';
@@ -41,7 +40,7 @@ export function hdlChunkedStop() {
 export async function hdlRunChunked() {
   return hdlWithBusy(async () => {
     const resume = !!hdlRec.trace && (hdlConfig.traceEnabled || !hdlRec.trace.steps.length);
-    const report = (stop, t) => {
+    const report = (stop: string, t: HdlTrace) => {
       if (stop === 'breakpoint') {
         hdlStatus('stopped at a breakpoint - line ' + run.currentLine, 'ok');
         setStatus('HDL (' + hdlModeLabel() + ') stopped at breakpoint (line ' +
@@ -58,31 +57,31 @@ export async function hdlRunChunked() {
       // A breakpoint still ahead in what is already recorded is reached
       // without simulating anything.
       const hit = hdlBreakAt(hdlRec.idx + 1);
-      if (hit >= 0) { hdlPlayTo(hit, () => report('breakpoint', hdlRec.trace)); return hdlRec.trace; }
+      if (hit >= 0) { hdlPlayTo(hit, () => report('breakpoint', hdlRecording())); return hdlRec.trace; }
     } else {
       hdlClearConsole();
     }
-    const end = Math.min(HDL_MAX_CYCLES, (resume ? hdlRec.trace.budget : 0) + hdlConfig.cycleBudget);
-    if (resume && hdlRec.trace.budget >= end) {
+    const end = Math.min(HDL_MAX_CYCLES, (resume ? hdlRecording().budget : 0) + hdlConfig.cycleBudget);
+    if (resume && hdlRecording().budget >= end) {
       hdlLog('Already recording the maximum of 2,000,000 cycles.', 'warn');
-      hdlPlayTo(hdlRec.trace.steps.length, () => report('end', hdlRec.trace));
+      hdlPlayTo(hdlRecording().steps.length, () => report('end', hdlRecording()));
       return hdlRec.trace;
     }
-    const run = hdlActivity.chunked = { stop: false };
+    const chunk = hdlActivity.chunked = { stop: false };
     updateToolbarButtonStates();
     const noise = /\$readmemh\(AA_(IROM|DMEM)\.mem\): Not enough words/;
-    const said = t => {
+    const said = (t: HdlTrace) => {
       const text = String(t.newOutput || '').split('\n').filter(l => l.trim() && !noise.test(l)).join('\n');
       if (text) hdlLog(text, 'out');
     };
-    let size = 1000, first = !resume, stop = 'end', preApplied = resume ? hdlRec.trace.pre.length : 0;
+    let size = 1000, first = !resume, stop = 'end', preApplied = resume ? hdlRecording().pre.length : 0;
     const wall0 = performance.now(), cyc0 = resume ? hdlCurrentCycle() : 0;
     // Without the trace, Real time holds what is shown to the paced clock:
     // each event, and the PC, is applied as the clock reaches it, and a
     // chunk is about HDL_CHUNK_MS of the clock, so the recording stays
     // close ahead.
     const paced = clock.pace === 'real' && !hdlConfig.traceEnabled;
-    const cap = n => paced ? Math.min(n, Math.max(1, Math.round(cpuHz() * HDL_CHUNK_MS / 1000))) : n;
+    const cap = (n: number) => paced ? Math.min(n, Math.max(1, Math.round(cpuHz() * HDL_CHUNK_MS / 1000))) : n;
     size = cap(size);
     const showPaced = () => {
       const t = hdlRec.trace;
@@ -104,7 +103,7 @@ export async function hdlRunChunked() {
     const pacer = paced ? setInterval(showPaced, 50) : null;
     // What the page shows follows the recording: the instructions, or
     // without the trace the peripheral events as they come.
-    const follow = (t, replayed) => {
+    const follow = (t: HdlTrace, replayed: boolean) => {
       if (t.steps.length) {
         if (clock.pace === 'real') hdlPlayTo(t.steps.length);
         else hdlSeek(t.steps.length, true, true);
@@ -131,11 +130,11 @@ export async function hdlRunChunked() {
     let hit = -1;
     try {
       for (;;) {
-        if (run.stop) { stop = 'paused'; break; }
+        if (chunk.stop) { stop = 'paused'; break; }
         if (hdlRec.pendingResim && hdlRec.trace && !first) {
           hdlRec.pendingResim = false;
           // A change at the end of the recording is simply taken by the next chunk.
-          if (hdlTimelineDiff(hdlRec.trace.timeline, { stim: hdlRec.stim, rx: hdlRec.rx }) < hdlRec.trace.budget) {
+          if (hdlTimelineDiff(hdlRec.trace.timeline ?? { stim: [], rx: [] }, { stim: hdlRec.stim, rx: hdlRec.rx }) < hdlRec.trace.budget) {
             const keep = hdlRec.idx;
             const t = await hdlBuildTrace(hdlRec.trace.budget, { quiet: true, chunk: true });
             if (!t) return null;
@@ -144,15 +143,15 @@ export async function hdlRunChunked() {
           }
           continue;
         }
-        const at = first ? 0 : hdlRec.trace.budget;
+        const at = first ? 0 : hdlRecording().budget;
         if (at >= end) break;
         if (clock.pace === 'real' && !first) {
-          const shown = hdlRec.trace.steps.length ? hdlCurrentCycle()
+          const shown = hdlRecording().steps.length ? hdlCurrentCycle()
             : cyc0 + (performance.now() - wall0) / 1000 * cpuHz();
           if (at - shown > 2 * size) { await new Promise(r => setTimeout(r, 50)); continue; }
         }
         const target = Math.min(end, at + size);
-        const from = first ? 0 : hdlRec.trace.steps.length;
+        const from = first ? 0 : hdlRecording().steps.length;
         const t0 = performance.now();
         const t = first ? await hdlStartTrace(target, { chunk: true })
                         : await hdlBuildTrace(target, { quiet: true, chunk: true });
@@ -171,13 +170,13 @@ export async function hdlRunChunked() {
       }
       // The last chunk is recorded before the clock shown reaches it.
       if (stop === 'end' && hdlActivity.paced) {
-        while (!run.stop && hdlRec.trace && hdlActivity.paced.cyc < hdlRec.trace.budget) await new Promise(r => setTimeout(r, 50));
-        if (run.stop) stop = 'paused';
+        while (!chunk.stop && hdlRec.trace && hdlActivity.paced.cyc < hdlRec.trace.budget) await new Promise(r => setTimeout(r, 50));
+        if (chunk.stop) stop = 'paused';
       }
     } finally {
       if (pacer) clearInterval(pacer);
       if (paced) hdlActivity.paced = null;
-      if (hdlActivity.chunked === run) hdlActivity.chunked = null;
+      if (hdlActivity.chunked === chunk) hdlActivity.chunked = null;
     }
     const t = hdlRec.trace;
     if (!t) return null;
@@ -204,15 +203,15 @@ export async function runHdlSimulation() {
   if (!hdlConfig.synthEnabled) return hdlRunChunked();
   if (hdlRec.trace && hdlConfig.traceEnabled) {
     return hdlWithBusy(async () => {
-      await hdlResumeRun(r => {
+      await hdlResumeRun((r) => {
         if (r.stop === 'breakpoint') {
           hdlStatus('stopped at a breakpoint - line ' + run.currentLine, 'ok');
           setStatus('HDL (' + hdlModeLabel() + ') stopped at breakpoint (line ' +
             run.currentLine + ', instruction ' + hdlRec.idx + ')', 'warn');
         } else {
-          hdlStatus('at the end of ' + hdlRec.trace.budget + ' recorded cycles', 'ok');
+          hdlStatus('at the end of ' + hdlRecording().budget + ' recorded cycles', 'ok');
           setStatus('HDL (' + hdlModeLabel() + ') ran ' + r.ran +
-            ' more instructions - end of the ' + hdlRec.trace.budget +
+            ' more instructions - end of the ' + hdlRecording().budget +
             '-cycle recording', 'success');
         }
       });
@@ -255,14 +254,14 @@ export async function runHdlSimulation() {
 // geometrically instead, so a long program does not re-simulate on every
 // step. The Cycles field itself is never rewritten - it stays the
 // increment the user chose.
-export async function hdlGrowTrace(target) {
+export async function hdlGrowTrace(target: number) {
   const cap = hdlConfig.simulator === 'verilator' ? Infinity : HDL_MAX_CYCLES;
-  const grown = Math.min(cap, Math.max(target, hdlRec.trace.budget + 1));
-  if (grown <= hdlRec.trace.budget) {
+  const grown = Math.min(cap, Math.max(target, hdlRecording().budget + 1));
+  if (grown <= hdlRecording().budget) {
     hdlLog('Already recording the maximum of 2,000,000 cycles.', 'warn');
     return false;
   }
-  const before = hdlRec.trace.steps.length;
+  const before = hdlRecording().steps.length;
   hdlStatus('extending the trace to ' + grown + ' cycles...', 'busy');
   const t = await hdlBuildTrace(grown, { quiet: true });
   if (!t) return false;
@@ -278,23 +277,23 @@ export async function hdlGrowTrace(target) {
 
 // At Real time a recording is played back at the clock: the position
 // moves to the last instruction that has begun by now.
-export function hdlStepCycle(k) {
-  const steps = hdlRec.trace.steps;
+export function hdlStepCycle(k: number) {
+  const trace = hdlRecording(), steps = trace.steps;
   if (k < steps.length) return steps[k].cyc;
-  return hdlRec.trace.final ? hdlRec.trace.final.cyc : (steps.length ? steps[steps.length - 1].cyc : 0);
+  return trace.final ? trace.final.cyc : (steps.length ? steps[steps.length - 1].cyc : 0);
 }
 export function hdlStopPlay() {
   if (!hdlActivity.play) return false;
-  clearTimeout(hdlActivity.play.timer);
+  if (hdlActivity.play.timer !== null) clearTimeout(hdlActivity.play.timer);
   hdlActivity.play = null;
   updateToolbarButtonStates();
   updateStats();
   return true;
 }
-export function hdlPlayTo(to, done) {
+export function hdlPlayTo(to: number, done?: () => void) {
   hdlStopPlay();
   if (clock.pace !== 'real' || to <= hdlRec.idx) { hdlSeek(to); if (done) done(); return; }
-  const play = hdlActivity.play = { to, trace: hdlRec.trace, wall: performance.now(), cyc0: hdlCurrentCycle(), done, timer: null };
+  const play: HdlPlayback = hdlActivity.play = { to, trace: hdlRec.trace, wall: performance.now(), cyc0: hdlCurrentCycle(), done, timer: null };
   clock.rtRatio = 1;
   const frame = () => {
     if (hdlActivity.play !== play) return;
@@ -320,23 +319,23 @@ export function hdlPlayTo(to, done) {
 // Continue from where we are to the next breakpoint, or to the end of
 // what has been recorded, recording another Cycles-worth first when there
 // is nothing left ahead to stop at.
-export async function hdlResumeRun(done) {
-  const steps = () => hdlRec.trace.steps;
+export async function hdlResumeRun(done: { (r: any): void; (arg0: { stop: string; ran: number; }): any; }) {
+  const steps = () => hdlRecording().steps;
   let hit = hdlBreakAt(hdlRec.idx + 1);
   if (hit < 0 && ((run.breakpoints && run.breakpoints.size) || hdlRec.idx >= steps().length)) {
-    if (await hdlGrowTrace(hdlRec.trace.budget + hdlConfig.cycleBudget)) hit = hdlBreakAt(hdlRec.idx + 1);
+    if (await hdlGrowTrace(hdlRecording().budget + hdlConfig.cycleBudget)) hit = hdlBreakAt(hdlRec.idx + 1);
   }
   const to = hit >= 0 ? hit : steps().length;
   const r = { stop: hit >= 0 ? 'breakpoint' : 'end', ran: to - hdlRec.idx };
-  hdlPlayTo(to, done ? () => done(r) : null);
+  hdlPlayTo(to, done ? () => done(r) : undefined);
   return r;
 }
 
 // Statement Stepping is engine-agnostic: one Step should cover every
 // machine instruction the current source line expands to. In HDL mode
 // that is a longer seek through the recording rather than more execution.
-export function hdlStatementTarget(from) {
-  const steps = hdlRec.trace.steps;
+export function hdlStatementTarget(from: number) {
+  const steps = hdlRecording().steps;
   if (!run.statementStepping || from >= steps.length) return from + 1;
   const startLine = sourceLineForPc(steps[from].pc);
   if (!(startLine > 0)) return from + 1;
@@ -350,8 +349,8 @@ export function hdlStatementTarget(from) {
 }
 
 // The mirror image, so Back undoes exactly what Step did.
-export function hdlStatementBackTarget(from) {
-  const steps = hdlRec.trace.steps;
+export function hdlStatementBackTarget(from: number) {
+  const steps = hdlRecording().steps;
   if (from <= 0) return 0;
   let k = from - 1;
   if (!run.statementStepping) return k;

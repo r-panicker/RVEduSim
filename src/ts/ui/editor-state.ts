@@ -11,7 +11,7 @@ export const editorState = {
   cm: null as any,                  // the CodeMirror EditorView
   languageCompartment: null as any, // swaps the language mode without rebuilding the editor
   find: {
-    matches: [] as { from: number; to: number }[],
+    matches: [] as { start: number; end: number }[],
     activeIndex: -1,
     caseSensitive: false,
   },

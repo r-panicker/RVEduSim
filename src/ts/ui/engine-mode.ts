@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Switching between the functional and HDL engines, the console's
 // resizable height, and Verilog dropped anywhere on the page.
 
@@ -12,8 +11,9 @@ import { openSettingsModal, refreshSimSettingsScope, updateStats } from './execu
 import { updateRegisters } from './panels';
 import { updateToolbarButtonStates } from './run-control';
 import { hdlInitSimulator, hdlRefreshRegPathHint, hdlSimulatorName, initWaveCanvas, initWavePicker, initWaveResizer, updateWaveAvailability } from './waveform';
+import { byId } from './dom';
 
-export function setSimEngineMode(mode) {
+export function setSimEngineMode(mode: string) {
   const want = (mode === 'hdl') ? 'hdl' : 'js';
   if (want === ui.engine) return;
 
@@ -35,8 +35,8 @@ export function setSimEngineMode(mode) {
   }
 
   ui.engine = want;
-  const jsBtn = document.getElementById('engBtnJs');
-  const hdlBtn = document.getElementById('engBtnHdl');
+  const jsBtn = byId<HTMLButtonElement>('engBtnJs');
+  const hdlBtn = byId<HTMLButtonElement>('engBtnHdl');
   if (jsBtn) jsBtn.classList.toggle('active', ui.engine === 'js');
   if (hdlBtn) hdlBtn.classList.toggle('active', ui.engine === 'hdl');
   document.body.classList.toggle('hdl-mode', ui.engine === 'hdl');
@@ -75,10 +75,10 @@ export function setSimEngineMode(mode) {
 export const CONSOLE_H_KEY = 'rvsim.consoleHeight.v1';
 export const CONSOLE_H_DEFAULT = 140;
 
-export function setConsoleHeight(px, persist) {
-  const el = document.getElementById('console');
+export function setConsoleHeight(px: number | null, persist: boolean) {
+  const el = byId('console');
   if (!el) return;
-  const h = Math.max(40, Math.min(px, Math.round((window.innerHeight || 800) * 0.7)));
+  const h = Math.max(40, Math.min(px ?? 0, Math.round((window.innerHeight || 800) * 0.7)));
   el.style.height = h + 'px';
   el.style.maxHeight = h + 'px';
   if (persist) {
@@ -87,15 +87,15 @@ export function setConsoleHeight(px, persist) {
 }
 
 export function initConsoleResizer() {
-  const bar = document.getElementById('consoleResizer');
-  const el = document.getElementById('console');
+  const bar = byId('consoleResizer');
+  const el = byId('console');
   if (!bar || !el) return;
   let saved = null;
   try { saved = parseInt(localStorage.getItem(CONSOLE_H_KEY) || '', 10); } catch (e) { saved = null; }
   if (Number.isFinite(saved)) setConsoleHeight(saved, false);
 
   let startY = 0, startH = 0;
-  const move = e => {
+  const move = (e: { clientY: number; }) => {
     // The console grows upwards, so a drag up is a taller console.
     setConsoleHeight(startH + (startY - e.clientY), false);
   };
@@ -139,11 +139,11 @@ export function initGlobalVerilogDrop() {
 }
 
 export function hdlInitSources() {
-  const drop = document.getElementById('hdlDropZone');
-  const input = document.getElementById('hdlFileInput');
+  const drop = byId('hdlDropZone');
+  const input = byId<HTMLInputElement>('hdlFileInput');
   if (input) input.addEventListener('change', e => {
-    hdlAddFiles(e.target.files);
-    e.target.value = '';
+    hdlAddFiles(input.files ?? []);
+    input.value = '';
   });
   hdlInitFolder();
   hdlInitSimulator();

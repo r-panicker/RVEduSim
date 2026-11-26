@@ -1,12 +1,11 @@
-// @ts-nocheck
 // Compiling C: Compiler Explorer's output assembled into the program, and
 // where each C variable lives while the program runs.
 
 import { DATA_DIRECTIVE_WIDTH, DATA_SECTION_DIRECTIVES, assemble, parseStringLiteral, setSection } from '../asm/assembler';
 import { parseImm } from '../asm/operands';
-import { cProgram } from './state';
+import { cProgram, type CLocalVar } from './state';
 import { loadProgram } from '../machine/reset';
-import { layout, program, run } from '../machine/state';
+import { layout, program, run, type MachineLine } from '../machine/state';
 import { updateDisassembly, updateMachineCode } from '../ui/disassembly';
 import { editor, log, setStatus } from '../ui/editor';
 import { editorState } from '../ui/editor-state';
@@ -14,6 +13,8 @@ import { highlightCurrentLine, updateStats } from '../ui/execution';
 import { updateMemSubTabs, updateMemoryView } from '../ui/memory-register-views';
 import { resetPeriphFoldState } from '../ui/peripherals';
 import { updateToolbarButtonStates } from '../ui/run-control';
+import { byId } from '../ui/dom';
+import { errorMessage } from '../errors';
 
 /* ============================================================
    C variable <-> memory location correspondence (best-effort)
@@ -33,7 +34,7 @@ import { updateToolbarButtonStates } from '../ui/run-control';
    same way, from the a0.. spill sequence right at function entry.
    ============================================================ */
 
-export function stripCCommentsAndStrings(line) {
+export function stripCCommentsAndStrings(line: string | string[]) {
   let out = '';
   let i = 0;
   let inBlockComment = false;
@@ -64,12 +65,12 @@ export function stripCCommentsAndStrings(line) {
   return out;
 }
 
-export function buildCVariableLocations(sourceText, mc) {
+export function buildCVariableLocations(sourceText: string, mc: any[]) {
   cProgram.functionLocals = new Map();
   if (!sourceText || !mc || !mc.length) return;
   const rawLines = sourceText.split('\n');
   const cleanLines = rawLines.map(stripCCommentsAndStrings);
-  const funcs = [];
+  const funcs: { name: string; startLine: number; endLine: number; params: string[]; vars: { name: string; declLine: number; kind: 'local' }[] }[] = [];
   const sigRe = /^[ \t]*(?:static\s+|inline\s+)?[A-Za-z_][\w\s\*]*?\b(\w+)\s*\(([^;{}]*)\)\s*\{?\s*$/;
   const NOT_FUNCS = new Set(['if', 'for', 'while', 'switch', 'return', 'sizeof', 'else']);
   for (let i = 0; i < cleanLines.length; i++) {
@@ -90,10 +91,10 @@ export function buildCVariableLocations(sourceText, mc) {
       }
     }
     if (endLine === -1) continue;
-    const params = [];
+    const params: any[] = [];
     const paramsRaw = m[2].trim();
     if (paramsRaw && paramsRaw !== 'void') {
-      paramsRaw.split(',').forEach(p => {
+      paramsRaw.split(',').forEach((p) => {
         const pm = p.trim().match(/(\w+)\s*$/);
         if (pm) params.push(pm[1]);
       });
@@ -118,7 +119,7 @@ export function buildCVariableLocations(sourceText, mc) {
   // Resolve each function's address range from `labels` (set by assemble()).
   const withAddr = funcs
     .map(fn => ({ fn, addr: (typeof program.labels !== 'undefined' && program.labels[fn.name] !== undefined) ? program.labels[fn.name] >>> 0 : null }))
-    .filter(x => x.addr !== null)
+    .filter((x): x is { fn: typeof x.fn; addr: number } => x.addr !== null)
     .sort((a, b) => a.addr - b.addr);
   const haltAddr = (typeof program.labels !== 'undefined' && program.labels['__halt'] !== undefined) ? program.labels['__halt'] >>> 0 : null;
 
@@ -131,10 +132,10 @@ export function buildCVariableLocations(sourceText, mc) {
     // where s0 itself gets set up - reading s0-relative addresses before
     // that point (regs[8] is still whatever the previous frame left it at)
     // produces addresses that look like garbage.
-    const paramOffsets = [];
-    let framePtrAddr = null;
-    const inRange = mc.filter(it => it.address >= addr && it.address < endAddr).slice(0, 20);
-    inRange.forEach(it => {
+    const paramOffsets: number[] = [];
+    let framePtrAddr: number | null = null;
+    const inRange = mc.filter((it) => it.address >= addr && it.address < endAddr).slice(0, 20);
+    inRange.forEach((it) => {
       if (framePtrAddr === null && /^\s*addi\s+s0\s*,\s*sp\s*,/.test(it.text || '')) {
         framePtrAddr = it.address;
       }
@@ -145,16 +146,16 @@ export function buildCVariableLocations(sourceText, mc) {
       }
     });
 
-    const vars = [];
+    const vars: CLocalVar[] = [];
     fn.params.forEach((pname, i) => {
       if (paramOffsets[i] !== undefined) vars.push({ name: pname, offset: paramOffsets[i], kind: 'param' });
     });
 
-    const findStoreOffset = (cLine) => {
+    const findStoreOffset = (cLine: number) => {
       const pcs = cProgram.lineToPcs.get(cLine);
       if (!pcs) return null;
       for (const p of pcs) {
-        const item = mc.find(it => it.address === p);
+        const item = mc.find((it) => it.address === p);
         if (!item || !item.text) continue;
         const sm = /\bs[bhw]\s+[^,]+,\s*(-?\d+)\((s0|sp)\)/.exec(item.text || '');
         if (sm) return parseInt(sm[1], 10);
@@ -185,14 +186,14 @@ export function buildCVariableLocations(sourceText, mc) {
   });
 }
 
-export function getCurrentCFunction(pcVal) {
+export function getCurrentCFunction(pcVal: number) {
   for (const [name, info] of cProgram.functionLocals) {
     if (pcVal >= info.startAddr && pcVal < info.endAddr) return { name, ...info };
   }
   return null;
 }
 
-export function getCVarAtSourceLine(cLine, varName) {
+export function getCVarAtSourceLine(cLine: number, varName: string) {
   for (const [, info] of cProgram.functionLocals) {
     if (cLine < info.startLine || cLine > info.endLine) continue;
     const v = info.vars.find(x => x.name === varName);
@@ -201,12 +202,12 @@ export function getCVarAtSourceLine(cLine, varName) {
   return null;
 }
 
-export function highlightFirstCLine(mc) {
+export function highlightFirstCLine(mc: MachineLine[]) {
   let firstCLine = -1;
   if (program.labels && program.labels['main'] !== undefined) {
     const mainAddr = program.labels['main'];
     if (cProgram.pcToLine.has(mainAddr)) {
-      firstCLine = cProgram.pcToLine.get(mainAddr);
+      firstCLine = cProgram.pcToLine.get(mainAddr) ?? -1;
     }
   }
   if (firstCLine === -1) {
@@ -221,7 +222,7 @@ export function highlightFirstCLine(mc) {
   highlightCurrentLine();
 }
 
-export function warnAboutLibgccHelpers(asm, optLevel) {
+export function warnAboutLibgccHelpers(asm: any, optLevel: string) {
   const names = new Set();
   for (const item of (asm || [])) {
     const t = (item && item.text) || '';
@@ -231,7 +232,7 @@ export function warnAboutLibgccHelpers(asm, optLevel) {
   }
   if (!names.size) return;
   const list = Array.from(names).sort().join(', ');
-  const mBox = document.getElementById('godboltUseM');
+  const mBox = byId<HTMLInputElement>('godboltUseM');
   const mOn = mBox ? mBox.checked : false;
   if (mOn) return;   // the helpers would only appear without M, but be safe
   log(`\u26a0\ufe0f This program multiplies or divides, but "Include M extension" is off, ` +
@@ -246,7 +247,7 @@ export function warnAboutLibgccHelpers(asm, optLevel) {
   setStatus(`\u26a0\ufe0f Multiply/divide without the M extension \u2014 ${list} cannot be resolved`, 'warn');
 }
 
-export async function compileAndAssembleC(cSourceText) {
+export async function compileAndAssembleC(cSourceText?: undefined) {
   const source = (typeof cSourceText === 'string') ? cSourceText : (editor ? editor.value : '');
   if (!source.trim()) {
     log('No C code to compile.', 'error');
@@ -254,9 +255,9 @@ export async function compileAndAssembleC(cSourceText) {
     return null;
   }
 
-  const compilerSelect = document.getElementById('godboltCompilerSelect');
-  const optSelect = document.getElementById('godboltOptSelect');
-  const archInput = document.getElementById('godboltArchFlags');
+  const compilerSelect = byId<HTMLSelectElement>('godboltCompilerSelect');
+  const optSelect = byId<HTMLSelectElement>('godboltOptSelect');
+  const archInput = byId<HTMLInputElement>('godboltArchFlags');
 
   const compilerId = compilerSelect ? compilerSelect.value : 'rv32-cclang2010';
   const optLevel = optSelect ? optSelect.value : '-O0';
@@ -306,7 +307,7 @@ export async function compileAndAssembleC(cSourceText) {
         log(`Godbolt HTTP ${resp.status} status.`, 'warn');
       }
     } catch (err) {
-      log(`Godbolt connection notice: ${err.name === 'AbortError' ? 'timeout' : err.message}`, 'info');
+      log(`Godbolt connection notice: ${(err as Error).name === 'AbortError' ? 'timeout' : errorMessage(err)}`, 'info');
     }
   }
 
@@ -334,9 +335,9 @@ export async function compileAndAssembleC(cSourceText) {
   if (godboltData.code !== 0 && (!godboltData.asm || godboltData.asm.length === 0)) {
     let errText = '';
     if (godboltData.stderr && Array.isArray(godboltData.stderr)) {
-      errText = godboltData.stderr.map(e => e.text).join('\n');
+      errText = godboltData.stderr.map((e: { text: { text: any; }; }) => e.text).join('\n');
     } else if (godboltData.buildResult && godboltData.buildResult.stderr) {
-      errText = godboltData.buildResult.stderr.map(e => e.text).join('\n');
+      errText = godboltData.buildResult.stderr.map((e: { text: { text: any; }; }) => e.text).join('\n');
     }
     log(`C Compilation Errors:\n${errText || 'Non-zero exit code from compiler'}`, 'error');
     setStatus('C Compilation Failed — see console log', 'error');
@@ -370,7 +371,7 @@ export async function compileAndAssembleC(cSourceText) {
         const n = parseImm(toks[1]);
         if (n > 0) estimatedDataBytes += n;
       } else if (DATA_DIRECTIVE_WIDTH[mn]) {
-        const count = t.slice(first.length).split(',').filter(s => s.trim().length > 0).length;
+        const count = t.slice(first.length).split(',').filter((s: { trim: () => { (): any; new(): any; length: number; }; }) => s.trim().length > 0).length;
         estimatedDataBytes += count * DATA_DIRECTIVE_WIDTH[mn];
       } else if (mn === '.ascii' || mn === '.asciz' || mn === '.asciiz' || mn === '.string') {
         const qIdx = t.search(/["']/);
@@ -457,13 +458,13 @@ export async function compileAndAssembleC(cSourceText) {
       if (gItem && gItem.source && typeof gItem.source.line === 'number') {
         const cLine = gItem.source.line;
         item.cLine = cLine;
-        item.cCol = gItem.source.column || 1;
         cProgram.pcToLine.set(item.address, cLine);
-        if (!cProgram.lineToPcs.has(cLine)) {
-          cProgram.lineToPcs.set(cLine, []);
+        let pcs = cProgram.lineToPcs.get(cLine);
+        if (!pcs) {
+          cProgram.lineToPcs.set(cLine, pcs = []);
           cProgram.lineToFirstPc.set(cLine, item.address);
         }
-        cProgram.lineToPcs.get(cLine).push(item.address);
+        pcs.push(item.address);
       }
     }
   }
@@ -493,8 +494,8 @@ export async function compileAndAssembleC(cSourceText) {
 
 // Only the text segment. Counting every assembled item would count the
 // image example's 130 rows of pixel data as instructions too.
-export function countInstructions(mc) {
-  return (mc || []).filter(i => !i.error && i.bytes && i.address < layout.dataBase).length;
+export function countInstructions(mc: MachineLine[]) {
+  return (mc || []).filter((i) => !i.error && i.bytes && i.address < layout.dataBase).length;
 }
 
 // Which libgcc arithmetic helpers the compiled output calls, if any.

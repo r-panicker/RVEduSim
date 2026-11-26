@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Main execution control: the cycle model, the Settings modal (Compiler,
 // Linker, Simulator), memory-image downloads, current-line highlighting,
 // breakpoints, assembly and single-instruction execution.
@@ -15,7 +14,7 @@ import { decodeAndExecute, fetchInstruction } from '../machine/execute';
 import { readMem } from '../machine/memory';
 import { DEFAULT_BASE, DEFAULT_DATA_BASE } from '../machine/memory-map';
 import { PIPE_BP_DEFAULT, PIPE_HAZ_DEFAULT, pipeline } from '../machine/pipeline';
-import { cpu, layout, program, run, uart, ui } from '../machine/state';
+import { cpu, layout, program, run, uart, ui, type CycleConfig } from '../machine/state';
 import { uartTickDelivery } from '../machine/uart';
 import { updateDisassembly, updateMachineCode } from './disassembly';
 import { RISCV_INSTRUCTIONS_SET, editor, log, setExecLineEffect, setPipeStagesEffect, setStatus } from './editor';
@@ -27,8 +26,10 @@ import { updatePeripherals } from './peripherals';
 import { pipeInitControls, pipeSetMode, pipeSyncControls } from './pipeline-controls';
 import { assembleOnly, resetAll } from './run-control';
 import { hdlDownloadTestbench, hdlDownloadVcd, hdlRefreshRegPathHint, hdlShowCycles, setHdlDetail, setHdlRegPath, setHdlSimulator } from './waveform';
+import { byId } from './dom';
+import { errorMessage } from '../errors';
 
-export function instrCycles(instr32) {
+export function instrCycles(instr32: number) {
   const opcode = instr32 & 0x7F;
   const funct7 = (instr32 >>> 25) & 0x7F;
   switch (opcode) {
@@ -52,7 +53,7 @@ export function formatPC() {
 }
 
 export function updateStats() {
-  const el = document.getElementById('statsBar');
+  const el = byId('statsBar');
   if (el) {
     el.innerHTML = `Cycles: ${cpu.totalCycles} &nbsp;|&nbsp; Instr: ${cpu.instructionCount}` +
       ` &nbsp;|&nbsp; PC: <span class="stat-pc">${formatPC()}</span>`;
@@ -70,7 +71,7 @@ export function hideExecMarker() {
 }
 
 // Cycle configuration
-export const CYCLE_FIELD_DEFS = [
+export const CYCLE_FIELD_DEFS: [keyof CycleConfig, string][] = [
   ['basic', 'ALU / Shift / LUI / AUIPC'],
   ['muldiv', 'Multiply / Divide (M-extension)'],
   ['load', 'Load (LW / LH / FLW / FLD)'],
@@ -86,7 +87,7 @@ export const CYCLE_FIELD_DEFS = [
 export const STMT_STEP_IDS = ['simStatementStep'];
 export function syncStatementStepBoxes() {
   STMT_STEP_IDS.forEach(id => {
-    const el = document.getElementById(id);
+    const el = byId<HTMLInputElement>(id);
     if (el) el.checked = !!run.statementStepping;
   });
 }
@@ -94,23 +95,23 @@ export function syncStatementStepBoxes() {
 export function buildCyclesPanel() {
   pipeInitControls();
   STMT_STEP_IDS.forEach(id => {
-    const el = document.getElementById(id);
+    const el = byId<HTMLInputElement>(id);
     if (!el) return;
     el.checked = !!run.statementStepping;
     el.onchange = () => { run.statementStepping = el.checked; syncStatementStepBoxes(); };
   });
 
-  const maxInstrEl = document.getElementById('simMaxInstrPerRun');
+  const maxInstrEl = byId<HTMLInputElement>('simMaxInstrPerRun');
   if (maxInstrEl) {
-    maxInstrEl.value = (typeof run.maxInstructions === 'number' && run.maxInstructions > 0) ? run.maxInstructions : 100000000;
+    maxInstrEl.value = String((typeof run.maxInstructions === 'number' && run.maxInstructions > 0) ? run.maxInstructions : 100000000);
     maxInstrEl.onchange = () => {
       const v = parseInt(maxInstrEl.value, 10);
       run.maxInstructions = (v > 0) ? v : 100000000;
-      maxInstrEl.value = run.maxInstructions;
+      maxInstrEl.value = String(run.maxInstructions);
     };
   }
 
-  const body = document.getElementById('cyclesConfigBody');
+  const body = byId('cyclesConfigBody');
   let html = '';
   for (const [key, label] of CYCLE_FIELD_DEFS) {
     html += '<div class="cycle-field"><label for="cf-' + key + '">' + label + '</label>' +
@@ -118,10 +119,11 @@ export function buildCyclesPanel() {
   }
   body.innerHTML = html;
   for (const [key] of CYCLE_FIELD_DEFS) {
-    document.getElementById('cf-' + key).addEventListener('change', e => {
-      const v = parseInt(e.target.value, 10);
+    const input = byId<HTMLInputElement>('cf-' + key);
+    input.addEventListener('change', () => {
+      const v = parseInt(input.value, 10);
       run.cycleConfig[key] = (v > 0 && v <= 1000) ? v : 1;
-      e.target.value = run.cycleConfig[key];
+      input.value = String(run.cycleConfig[key]);
     });
   }
 }
@@ -148,7 +150,7 @@ export function resetCyclesConfig() {
 // The Simulation tab shows the active engine's settings only.
 export function refreshSimSettingsScope() {
   const hdl = (typeof ui.engine !== 'undefined' && ui.engine === 'hdl');
-  const js = document.getElementById('simGroupJs'), hw = document.getElementById('simGroupHdl');
+  const js = byId('simGroupJs'), hw = byId('simGroupHdl');
   if (js) js.hidden = hdl;
   if (hw) hw.hidden = !hdl;
   pipeSyncControls();
@@ -179,7 +181,7 @@ export function countVisit() {
     encodeURIComponent(location.pathname) + '&r=' + encodeURIComponent(document.referrer) + '&rnd=' + Date.now();
 }
 export function showVisitCount() {
-  const el = document.getElementById('visitCount');
+  const el = byId('visitCount');
   if (!el || !visitCounterOn()) return;
   fetch('https://' + GOATCOUNTER_SITE + '.goatcounter.com/counter/' + encodeURIComponent(location.pathname) + '.json')
     .then(r => r.ok ? r.json() : null)
@@ -189,27 +191,27 @@ export function showVisitCount() {
 
 export function openCreditsModal() {
   showVisitCount();
-  const ov = document.getElementById('creditsOverlay');
+  const ov = byId('creditsOverlay');
   if (ov) { ov.classList.add('open'); ov.style.display = ''; }
 }
 
 export function openBpFigure() {
-  const ov = document.getElementById('bpFigOverlay');
+  const ov = byId('bpFigOverlay');
   if (ov) ov.classList.add('open');
 }
 
 export function closeBpFigure() {
-  const ov = document.getElementById('bpFigOverlay');
+  const ov = byId('bpFigOverlay');
   if (ov) ov.classList.remove('open');
 }
 
 export function closeCreditsModal() {
-  const ov = document.getElementById('creditsOverlay');
+  const ov = byId('creditsOverlay');
   if (ov) { ov.classList.remove('open'); ov.style.display = ''; }
 }
 
 export function openSettingsModal(initialTab = 'compiler') {
-  const ov = document.getElementById('settingsOverlay');
+  const ov = byId('settingsOverlay');
   if (!ov) return;
   buildMemSegmentsPanel();
   buildCyclesPanel();
@@ -220,14 +222,14 @@ export function openSettingsModal(initialTab = 'compiler') {
 }
 
 export function closeSettingsModal() {
-  const ov = document.getElementById('settingsOverlay');
+  const ov = byId('settingsOverlay');
   if (ov) {
     ov.classList.remove('open');
     ov.style.display = '';
   }
 }
 
-export function switchSettingsTab(tabName) {
+export function switchSettingsTab(tabName: string) {
   ui.settingsTab = tabName;
   document.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
@@ -238,21 +240,21 @@ export function switchSettingsTab(tabName) {
   if (activeContent) activeContent.classList.add('active');
 }
 
-export function parseHexAddr(str, fallback) {
+export function parseHexAddr(str: any, fallback: number) {
   let v = parseInt(String(str || '').trim(), 16);
   if (isNaN(v) || v < 0) v = fallback;
   return v & ~3; // word align
 }
 
 export function updateLinkerStackPreview() {
-  const g = id => {
-    const el = document.getElementById(id);
+  const g = (id: string) => {
+    const el = byId<HTMLInputElement>(id);
     return el ? el.value : '';
   };
   const dBase = parseHexAddr(g('ms-data'), layout.dataBase);
   const dSize = parseHexAddr(g('ms-datasize'), layout.dataSize);
   const stackTop = (dBase + dSize) >>> 0;
-  const stackInput = document.getElementById('ms-stack');
+  const stackInput = byId<HTMLInputElement>('ms-stack');
   if (stackInput) {
     stackInput.value = '0x' + stackTop.toString(16);
   }
@@ -262,7 +264,7 @@ export function updateLinkerStackPreview() {
 // The Linker segment sizes follow from them, and the stack pointer the C
 // startup shim loads follows from the data size, so selecting an example is
 // enough to set up a layout the program actually fits in.
-export function applyExampleMemoryConfig(key) {
+export function applyExampleMemoryConfig(key: string) {
   const d = EXAMPLE_DEPTHS[key];
   if (!d) return;
   const newCode = Math.pow(2, d.irom) >>> 0;
@@ -281,12 +283,12 @@ export function applyExampleMemoryConfig(key) {
 }
 
 export function buildMemSegmentsPanel() {
-  const codeEl = document.getElementById('ms-code');
-  const codeSizeEl = document.getElementById('ms-codesize');
-  const dataEl = document.getElementById('ms-data');
-  const dataSizeEl = document.getElementById('ms-datasize');
-  const stackEl = document.getElementById('ms-stack');
-  const mmioEl = document.getElementById('ms-mmio');
+  const codeEl = byId<HTMLInputElement>('ms-code');
+  const codeSizeEl = byId<HTMLInputElement>('ms-codesize');
+  const dataEl = byId<HTMLInputElement>('ms-data');
+  const dataSizeEl = byId<HTMLInputElement>('ms-datasize');
+  const stackEl = byId<HTMLInputElement>('ms-stack');
+  const mmioEl = byId<HTMLInputElement>('ms-mmio');
 
   if (codeEl) codeEl.value = '0x' + (layout.baseAddress >>> 0).toString(16);
   if (codeSizeEl) codeSizeEl.value = '0x' + (layout.codeSize >>> 0).toString(16);
@@ -298,7 +300,7 @@ export function buildMemSegmentsPanel() {
 
 export function getCyclesFromPanel() {
   for (const [key] of CYCLE_FIELD_DEFS) {
-    const el = document.getElementById('cf-' + key);
+    const el = byId<HTMLInputElement>('cf-' + key);
     if (el) {
       const v = parseInt(el.value, 10);
       run.cycleConfig[key] = (v > 0 && v <= 1000) ? v : 1;
@@ -308,8 +310,8 @@ export function getCyclesFromPanel() {
 
 export function applyAndCloseSettings() {
   // 1. Apply Linker / Memory Segments
-  const g = id => {
-    const el = document.getElementById(id);
+  const g = (id: string) => {
+    const el = byId<HTMLInputElement>(id);
     return el ? el.value : '';
   };
   // Only a changed memory layout needs the program reassembled;
@@ -327,21 +329,21 @@ export function applyAndCloseSettings() {
   layout.stackBase = parseHexAddr(g('ms-stack'), defaultStack);
   layout.mmioBase = parseHexAddr(g('ms-mmio'), layout.mmioBase);
 
-  const memAddrEl = document.getElementById('memAddr');
+  const memAddrEl = byId<HTMLInputElement>('memAddr');
   if (memAddrEl) memAddrEl.value = '0x' + (layout.baseAddress >>> 0).toString(16);
 
   // 2. Apply Simulator CPI, Statement Stepping & Max Instructions
   getCyclesFromPanel();
   // Either copy is authoritative; they are mirrored on change.
-  const stmtEl = document.getElementById('simStatementStep');
+  const stmtEl = byId<HTMLInputElement>('simStatementStep');
   if (stmtEl) run.statementStepping = stmtEl.checked;
   syncStatementStepBoxes();
 
-  const maxInstrEl = document.getElementById('simMaxInstrPerRun');
+  const maxInstrEl = byId<HTMLInputElement>('simMaxInstrPerRun');
   if (maxInstrEl) {
     const v = parseInt(maxInstrEl.value, 10);
     run.maxInstructions = (v > 0) ? v : 100000000;
-    maxInstrEl.value = run.maxInstructions;
+    maxInstrEl.value = String(run.maxInstructions);
   }
 
   closeSettingsModal();
@@ -351,10 +353,10 @@ export function applyAndCloseSettings() {
 
 export function resetCurrentSettingsTab() {
   if (ui.settingsTab === 'compiler') {
-    const compSelect = document.getElementById('godboltCompilerSelect');
-    const optSelect = document.getElementById('godboltOptSelect');
-    const archInput = document.getElementById('godboltArchFlags');
-    const useMCheck = document.getElementById('godboltUseM');
+    const compSelect = byId<HTMLSelectElement>('godboltCompilerSelect');
+    const optSelect = byId<HTMLSelectElement>('godboltOptSelect');
+    const archInput = byId<HTMLInputElement>('godboltArchFlags');
+    const useMCheck = byId<HTMLInputElement>('godboltUseM');
     const flags = () => [compSelect, optSelect, archInput].map(el => el ? el.value : '').join('|') +
       (useMCheck && useMCheck.checked ? '|M' : '');
     const before = flags();
@@ -369,8 +371,8 @@ export function resetCurrentSettingsTab() {
   } else if (ui.settingsTab === 'linker') {
     // Only the fields: Apply compares them against the live layout to
     // decide whether to reassemble, so it must still see the old one.
-    const set = (id, v) => {
-      const el = document.getElementById(id);
+    const set = (id: string, v: number) => {
+      const el = byId<HTMLInputElement>(id);
       if (el) el.value = '0x' + (v >>> 0).toString(16);
     };
     set('ms-code', DEFAULT_BASE);
@@ -385,13 +387,13 @@ export function resetCurrentSettingsTab() {
   } else if (ui.settingsTab === 'simulator') {
     // Settings only - the loaded sources are the user's work, and Clear
     // files is right there for them.
-    const set = (id, v, prop) => {
-      const el = document.getElementById(id);
-      if (el) el[prop] = v;
+    const set = (id: string, v: string) => {
+      const el = byId<HTMLInputElement | HTMLSelectElement>(id);
+      if (el) el.value = v;
     };
     Object.assign(hdlCyclesFor, HDL_CYCLES_DEFAULT);
-    set('hdlGeneration', '2005', 'value');
-    set('hdlRegPath', '', 'value');
+    set('hdlGeneration', '2005');
+    set('hdlRegPath', '');
     setHdlSimulator('icarus');
     setHdlDetail('full', true);
     hdlShowCycles();
@@ -415,7 +417,7 @@ export function reloadAfterLayoutChange() {
   }
 }
 
-export function downloadTextFile(name, text) {
+export function downloadTextFile(name: string, text: BlobPart) {
   const blob = new Blob([text], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -428,7 +430,7 @@ export function downloadTextFile(name, text) {
 }
 
 // Build a Verilog $readmemh-format dump of code and data memories.
-export function buildMemFileText(items) {
+export function buildMemFileText(items: string | any[]) {
   if (!items.length) return '';
   let result = '';
   let lastAddr = -1;
@@ -449,13 +451,13 @@ export function buildMemFileText(items) {
   return result;
 }
 
-export function segmentItems(isData) {
+export function segmentItems(isData: boolean) {
   return program.machineCode
     .filter(i => !i.error && i.bytes && (i.address >= layout.dataBase) === isData)
     .sort((a, b) => a.address - b.address);
 }
 
-export function dumpSegment(isData) {
+export function dumpSegment(isData: boolean) {
   const items = segmentItems(isData);
   const what = isData ? 'data' : 'text';
   if (!items.length) { setStatus(`No ${isData ? 'data' : 'code'} segment loaded`, 'error'); return; }
@@ -467,7 +469,7 @@ export function dumpSegment(isData) {
 // Everything the page can hand back as a file. `ready` decides whether the
 // entry is offered; picking one saves it and the menu snaps back to its
 // label, so it reads as a menu of actions rather than a setting.
-export const DOWNLOADS = {
+export const DOWNLOADS: Record<string, { ready: () => boolean; save: () => void }> = {
   irom: {
     ready: () => segmentItems(false).length > 0,
     save: () => dumpSegment(false)
@@ -487,7 +489,7 @@ export const DOWNLOADS = {
 };
 
 export function refreshDownloadMenu() {
-  const sel = document.getElementById('downloadSelect');
+  const sel = byId<HTMLSelectElement>('downloadSelect');
   if (!sel) return;
   for (const opt of sel.options) {
     if (!opt.value) continue;
@@ -496,7 +498,7 @@ export function refreshDownloadMenu() {
   }
 }
 
-export function handleDownloadPick(sel) {
+export function handleDownloadPick(sel: { value: string; }) {
   const d = DOWNLOADS[sel.value];
   sel.value = '';
   if (d) d.save();
@@ -514,12 +516,12 @@ export function saveFile() {
   setStatus(`Saved ${filename}`, 'success');
 }
 
-export function sourceLineForPc(addr) {
+export function sourceLineForPc(addr: number): number {
   if (editorState.language === 'c') {
-    if (cProgram.pcToLine && cProgram.pcToLine.has(addr)) return cProgram.pcToLine.get(addr);
+    if (cProgram.pcToLine && cProgram.pcToLine.has(addr)) return cProgram.pcToLine.get(addr) ?? -1;
     if (program.labels && program.labels['main'] !== undefined && addr < program.labels['main'] && cProgram.pcToLine) {
       const mainAddr = program.labels['main'];
-      if (cProgram.pcToLine.has(mainAddr)) return cProgram.pcToLine.get(mainAddr);
+      if (cProgram.pcToLine.has(mainAddr)) return cProgram.pcToLine.get(mainAddr) ?? -1;
     }
     return -1;
   }
@@ -530,13 +532,14 @@ export function sourceLineForPc(addr) {
 export function pipeStageLines() {
   if (!pipeline.on || ui.engine === 'hdl' || !pipeline.regs || !program.assembled) return [];
   const byLine = new Map();
-  const add = (addr, letter) => {
+  const add = (addr: number, letter: string) => {
     const line = sourceLineForPc(addr >>> 0);
     if (line < 1) return;
     byLine.set(line, (byLine.has(line) ? byLine.get(line) + ' ' : '') + letter);
   };
   if (!run.finished && readMem(cpu.pc >>> 0, 4, true)) add(cpu.pc, 'F');
-  ['D', 'E', 'M', 'W'].forEach(k => { if (pipeline.regs[k]) add(pipeline.regs[k].pc, k); });
+  const regs = pipeline.regs;
+  (['D', 'E', 'M', 'W'] as const).forEach(k => { const r = regs[k]; if (r) add(r.pc, k); });
   return Array.from(byLine.entries()).sort((a, b) => a[0] - b[0]);
 }
 
@@ -552,7 +555,7 @@ export function highlightCurrentLine() {
 
 // CodeMirror's scrollIntoView also scrolls every scrollable ancestor, so
 // on a phone each step would drag the page back up to the editor.
-export function centreEditorLine(pos) {
+export function centreEditorLine(pos: any) {
   const sc = editorState.cm.scrollDOM;
   if (!sc.clientHeight) return;
   const blk = editorState.cm.lineBlockAt(pos);
@@ -561,7 +564,7 @@ export function centreEditorLine(pos) {
   sc.scrollLeft = 0;
 }
 
-export function findNextValidInstructionLine(targetLine) {
+export function findNextValidInstructionLine(targetLine: number) {
   const totalLines = editorState.cm ? editorState.cm.state.doc.lines : (editor ? editor.value.split('\n').length : 1);
   if (targetLine < 1) targetLine = 1;
   if (targetLine > totalLines) targetLine = totalLines;
@@ -593,7 +596,7 @@ export function findNextValidInstructionLine(targetLine) {
 
   // 1. If currently assembled and code is up to date, use program.machineCode source mapping
   if (program.assembled && Array.isArray(program.machineCode) && program.machineCode.length > 0 && editorState.lastAssembledCode === (editor ? editor.value : null)) {
-    const validLines = [];
+    const validLines: any[] = [];
     for (const item of program.machineCode) {
       if (!item.error && item.line && !validLines.includes(item.line)) {
         validLines.push(item.line);
@@ -609,7 +612,7 @@ export function findNextValidInstructionLine(targetLine) {
   }
 
   // 2. Parse source lines to find next executable instruction
-  function checkLineIsInstruction(lineNo) {
+  function checkLineIsInstruction(lineNo: number) {
     let text = '';
     if (editorState.cm) {
       if (lineNo < 1 || lineNo > editorState.cm.state.doc.lines) return false;
@@ -662,7 +665,7 @@ export function findNextValidInstructionLine(targetLine) {
   return targetLine;
 }
 
-export function toggleBreakpoint(requestedLine) {
+export function toggleBreakpoint(requestedLine: number) {
   if (!requestedLine || requestedLine < 1) {
     log('Invalid breakpoint line number.', 'warn');
     return;
@@ -717,8 +720,8 @@ export function prepareAssembly() {
     }
     return mc;
   } catch (e) {
-    log(`Assembly error: ${e.message}`, 'error');
-    setStatus('Error: ' + e.message, 'error');
+    log(`Assembly error: ${errorMessage(e)}`, 'error');
+    setStatus('Error: ' + errorMessage(e), 'error');
     return null;
   }
 }
@@ -741,8 +744,8 @@ export function uartClockTick() {
     uartTickDelivery();
     if (uart.pending.length !== before) {
       if (!uart.pending.length) {
-        const btn = document.getElementById('uartSendBtn');
-        const statusEl = document.getElementById('uartAutoSendStatus');
+        const btn = byId<HTMLButtonElement>('uartSendBtn');
+        const statusEl = byId('uartAutoSendStatus');
         if (btn) {
           btn.innerText = 'Send';
           btn.style.background = '';
@@ -758,14 +761,14 @@ export function uartClockTick() {
   }
 }
 
-export function firstExecutableLine(mc) {
+export function firstExecutableLine(mc: any) {
   for (const item of mc) {
     if (!item.error && item.bytes) return item.line;
   }
   return -1;
 }
 
-export function highlightFirstLine(mc) {
+export function highlightFirstLine(mc: any[]) {
   run.currentLine = firstExecutableLine(mc);
   highlightCurrentLine();
 }

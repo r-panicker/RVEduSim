@@ -367,6 +367,7 @@ setTimeout(async () => {
       await win.runHdlSimulation();
       await sleep(300);
       t = win.getHdlTrace();
+      check('…and the status line names that line (' + st().slice(0, 60) + ')', new RegExp('stopped at breakpoint \\(line ' + bpLine + ',').test(st()));
       check('A breakpoint stops it on its line, in the first chunk (' + t.budget + ' cycles)',
         bpLine > 0 && win.sourceLineForPc(t.steps[win.getHdlIndex()].pc) === bpLine && t.budget < 100000);
       win.toggleBreakpoint(bpLine);

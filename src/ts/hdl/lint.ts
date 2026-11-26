@@ -1,4 +1,3 @@
-// @ts-nocheck
 // ================================================================
 // Synthesis lint
 // ================================================================
@@ -15,7 +14,7 @@ export const HDL_LINT_OK_TASKS = /^\$(readmemh|readmemb|signed|unsigned|clog2|bi
 
 // Split a module body into its `always` blocks, with the line each starts
 // on. Brace/`begin`-`end` matching is enough - these are flat RTL blocks.
-export function hdlAlwaysBlocks(src) {
+export function hdlAlwaysBlocks(src: string) {
   const blocks = [];
   const re = /\balways\b\s*(@\s*\(([^)]*)\)|@\s*\*|@\*)?/g;
   let m;
@@ -46,11 +45,11 @@ export function hdlAlwaysBlocks(src) {
 }
 
 // One uploaded file -> a list of {line, level, msg}.
-export function hdlLintFile(name, rawSrc) {
+export function hdlLintFile(name: string, rawSrc: string) {
   const src = hdlStripNoise(rawSrc);
-  const found = [];
-  const lineOf = idx => src.slice(0, idx).split('\n').length;
-  const add = (line, level, msg) => found.push({ file: name, line: line, level: level, msg: msg });
+  const found: { file: any; line: any; level: any; msg: any; }[] = [];
+  const lineOf = (idx: number | undefined) => src.slice(0, idx).split('\n').length;
+  const add = (line: number, level: string, msg: string) => found.push({ file: name, line: line, level: level, msg: msg });
 
   // Delays are discarded by synthesis. A `#` is only a delay when a
   // number follows it: `#(` is a parameter list or override.
@@ -93,7 +92,7 @@ export function hdlLintFile(name, rawSrc) {
       // A blocking assignment in a clocked block races every other block
       // reading that signal on the same edge. Loop headers are exempt:
       // `for (i = 0; i < N; i = i + 1)` has to be blocking.
-      const noLoops = body.replace(/\bfor\s*\([^)]*\)/g, m0 => m0.replace(/[^\n]/g, ' '));
+      const noLoops = body.replace(/\bfor\s*\([^)]*\)/g, (m0) => m0.replace(/[^\n]/g, ' '));
       const bm = /(^|\n)[^\n;]*?[A-Za-z_]\w*(\s*\[[^\]]*\])?\s*=(?!=)/.exec(noLoops);
       if (bm && !/<=/.test(bm[0])) {
         add(b.line + noLoops.slice(0, bm.index).split('\n').length - 1, 'warn',
@@ -125,7 +124,7 @@ export function hdlLintFile(name, rawSrc) {
 
 // Lint every uploaded source except anything that looks like a testbench.
 export function hdlSynthLint() {
-  const out = [];
+  const out: any[] = [];
   for (const f of hdlSources.files) {
     if (/(^|[_\-])tb\.v$|_tb\.|testbench/i.test(f.name)) continue;
     out.push.apply(out, hdlLintFile(f.name, f.src));
@@ -142,7 +141,7 @@ export function hdlSynthLint() {
 
 // Report to the console. Called when sources are loaded, so the feedback
 // arrives before the first run rather than after it.
-export function hdlReportLint(quietWhenClean) {
+export function hdlReportLint(quietWhenClean: boolean) {
   if (!hdlSources.files.length) return 0;
   const hits = hdlSynthLint();
   if (!hits.length) {

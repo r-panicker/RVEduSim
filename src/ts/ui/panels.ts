@@ -20,6 +20,7 @@ import { syncWaveformPanelHost, updateLocalsPanelAvailability, updateWaveformPan
 import { updateLocalsView } from './locals';
 import { updateMemSubTabs, updateMemoryView } from './memory-register-views';
 import { initPeripherals, updatePeripherals } from './peripherals';
+import { byId } from './dom';
 export const PANEL_DOCK_KEY = 'rvsim.panelDock.v1';
 export const PANEL_DEFS = [
   { name: 'registers', label: 'Registers' },
@@ -39,13 +40,17 @@ export const DOCK_TWO_COL_WIDTH_PCT = 0.5;
 // persisted widths + the 6px splitter never overflow the dock — the drag
 // floor, the splitter-drag floor, and the persisted-state clamp all use it.
 export const MIN_COL_W = 90;
-export let panelDock = null;
+// Where each panel is: shown or not, docked or floating, its floating
+// rectangle and its docked sizes; order is the dock's order. Saved as is.
+export interface PanelState { visible: boolean; floating: boolean; x: number; y: number; w: number; h: number; basis: number; wbasis: number }
+export type PanelDock = { order: string[] } & { [name: string]: PanelState };
+export let panelDock: PanelDock | null = null;
 export let floatDrag = null;
-export let dockSavedWidth = null;
+export let dockSavedWidth: number | null = null;
 // In the tabbed mobile view (≤800px) exactly one panel is shown at a time;
 // `mobileTab` tracks which one. It is ephemeral — it never changes the
 // persisted desktop panel visibility/layout.
-export let mobileTab = null;
+export let mobileTab: string | null = null;
 
 export function panelDockDefaults() {
   // Per-panel seeds. Anything in PANEL_DEFS without an entry here still
@@ -87,7 +92,7 @@ export function loadPanelDock() {
     // Keep the user's ordering for the panels it names, then append any
     // panel it does not know about (a layout saved before that panel
     // existed).
-    const known = saved.order.filter(n => PANEL_DEFS.some(p => p.name === n));
+    const known = saved.order.filter((n: string) => PANEL_DEFS.some(p => p.name === n));
     const missing = PANEL_DEFS.map(p => p.name).filter(n => !known.includes(n));
     if (known.length) def.order = known.concat(missing);
   }
@@ -103,7 +108,7 @@ export function savePanelDock() {
 export function dockUsesTwoColumns() {
   if (!panelDock) return false;
   if ((window.innerWidth || 1200) <= 800) return false;
-  const docked = panelDock.order.filter(n => panelDock[n].visible && !panelDock[n].floating);
+  const docked = panelDock.order.filter((n: string | number) => panelDock[n].visible && !panelDock[n].floating);
   return docked.length > 2;
 }
 
@@ -117,13 +122,13 @@ export function mobileMode() {
 export function ensureMobileTab() {
   if (!panelDock) return;
   if (mobileTab && panelDock[mobileTab] && panelDock[mobileTab].visible) return;
-  const first = panelDock.order.find(n => panelDock[n] && panelDock[n].visible);
+  const first = panelDock.order.find((n: string | number) => panelDock[n] && panelDock[n].visible);
   mobileTab = first || 'registers';
 }
 
 // Mobile chip clicks switch the single visible tab, mutually exclusive,
 // without touching the persisted desktop panel visibility.
-export function setMobileTab(name) {
+export function setMobileTab(name: string | null) {
   if (!panelDock || !panelDock[name]) return;
   mobileTab = name;
   applyPanelDock();
@@ -132,7 +137,7 @@ export function setMobileTab(name) {
 }
 
 export function updateMobileFindBtn() {
-  const b = document.getElementById('mobileFindBtn');
+  const b = byId<HTMLButtonElement>('mobileFindBtn');
   if (b) b.hidden = !(mobileMode() && PANEL_FIND.has(mobileTab));
 }
 
@@ -188,7 +193,7 @@ export function clampGridRowWidths() {
   if (!rp) return;
   const availW = rp.clientWidth;
   if (!(availW > 0)) return;
-  const dockedNames = panelDock.order.filter(n => panelDock[n].visible && !panelDock[n].floating);
+  const dockedNames = panelDock.order.filter((n: string | number) => panelDock[n].visible && !panelDock[n].floating);
   const mid = Math.ceil(dockedNames.length / 2);
   const row1 = dockedNames.slice(0, mid);
   const row2 = dockedNames.slice(mid);
@@ -196,7 +201,7 @@ export function clampGridRowWidths() {
   [row1, row2].forEach((rowNames) => {
     if (rowNames.length < 2) return; // single panel row — full width
     let total = 0;
-    rowNames.forEach(n => { total += (panelDock[n].wbasis || 0); });
+    rowNames.forEach((n: string | number) => { total += (panelDock[n].wbasis || 0); });
     if (total <= 0 || total + 6 <= availW) return;
     // Scale the pair down to fit the dock while keeping each column at
     // least MIN_COL_W: give each its minimum, then split the remaining
@@ -270,11 +275,11 @@ export const PANEL_COLS = {
   ],
 };
 
-export function panelColWidthKey(panel) { return 'rvsim.panelColW.' + panel; }
+export function panelColWidthKey(panel: string) { return 'rvsim.panelColW.' + panel; }
 export const panelColWidthCache = {};
 // Pinned (user-dragged) widths for a panel, keyed by column. A column
 // absent from this map is laid out automatically.
-export function panelColWidths(panel) {
+export function panelColWidths(panel: string | number) {
   if (!panelColWidthCache[panel]) {
     let out = {};
     try {
@@ -286,18 +291,18 @@ export function panelColWidths(panel) {
   }
   return panelColWidthCache[panel];
 }
-export function savePanelColWidths(panel) {
+export function savePanelColWidths(panel: any) {
   try { localStorage.setItem(panelColWidthKey(panel), JSON.stringify(panelColWidths(panel))); }
   catch (e) { /* storage unavailable */ }
 }
 
-export function panelBodyEl(panel) {
+export function panelBodyEl(panel: string) {
   const el = panelEl(panel);
   return el ? (el.querySelector(':scope > .panel-body') || el) : null;
 }
 // Usable width inside the panel: clientWidth includes padding (and
 // already excludes any vertical scrollbar), so take the padding off.
-export function panelContentWidth(panel) {
+export function panelContentWidth(panel: any) {
   const body = panelBodyEl(panel);
   if (!body || !body.clientWidth) return 0;
   let padL = 0, padR = 0;
@@ -326,8 +331,8 @@ export function measureMemHexNatural() {
   return memHexNaturalW;
 }
 
-export function columnFloor(panel, key) {
-  const c = PANEL_COLS[panel].find(x => x.key === key);
+export function columnFloor(panel: string, key: string) {
+  const c = PANEL_COLS[panel].find((x: { key: string; }) => x.key === key);
   let floor = c ? c.min : 40;
   if (panel === 'memory' && key === 'hex' && memHexNaturalW > 0) {
     floor = Math.max(floor, memHexNaturalW);
@@ -336,34 +341,34 @@ export function columnFloor(panel, key) {
 }
 
 // Resolve every column to a px width for the panel's current size.
-export function computedColWidths(panel) {
+export function computedColWidths(panel: string | number) {
   const cols = PANEL_COLS[panel];
   const pinned = panelColWidths(panel);
-  const isPinned = (c) => Number.isFinite(Number(pinned[c.key]));
-  const w = cols.map(c => isPinned(c)
+  const isPinned = (c: { key: string | number; }) => Number.isFinite(Number(pinned[c.key]));
+  const w = cols.map((c: { key: any; fit?: any; }) => isPinned(c)
     ? Math.max(columnFloor(panel, c.key), Number(pinned[c.key]))
     : c.fit);
-  const total = w.reduce((a, b) => a + b, 0);
+  const total = w.reduce((a: any, b: any) => a + b, 0);
   const avail = panelContentWidth(panel);
   // Surplus goes only to the unpinned grow columns; a pinned column
   // keeps exactly the width it was dragged to.
-  const growTotal = cols.reduce((s, c) => s + (isPinned(c) ? 0 : c.grow), 0);
+  const growTotal = cols.reduce((s: any, c: { grow: any; }) => s + (isPinned(c) ? 0 : c.grow), 0);
   if (avail > total && growTotal > 0) {
     const extra = avail - total;
-    cols.forEach((c, i) => { if (!isPinned(c) && c.grow) w[i] += extra * c.grow / growTotal; });
+    cols.forEach((c: { grow: number; }, i: string | number) => { if (!isPinned(c) && c.grow) w[i] += extra * c.grow / growTotal; });
   }
-  return w.map(x => Math.round(x));
+  return w.map((x: number) => Math.round(x));
 }
 
 // Push the computed widths into the DOM. The tables carry a <colgroup>
 // (one <col> per column) and the Memory panel a set of custom
 // properties; both also get a min-width equal to the column total, so a
 // panel too narrow to hold them scrolls instead of crushing a column.
-export function applyPanelColLayout(panel) {
+export function applyPanelColLayout(panel: string) {
   const w = computedColWidths(panel);
-  const total = w.reduce((a, b) => a + b, 0);
+  const total = w.reduce((a: any, b: any) => a + b, 0);
   if (panel === 'memory') {
-    [document.getElementById('memView'), document.getElementById('memColHeader')].forEach(el => {
+    [byId('memView'), byId('memColHeader')].forEach(el => {
       if (!el) return;
       el.style.setProperty('--mem-addr-w', w[0] + 'px');
       el.style.setProperty('--mem-hex-w', w[1] + 'px');
@@ -373,7 +378,7 @@ export function applyPanelColLayout(panel) {
     return;
   }
   const tbl = (panel === 'registers')
-    ? document.getElementById('regTable')
+    ? byId<HTMLTableElement>('regTable')
     : (disassemblyDisplay && disassemblyDisplay.querySelector('.code-list'));
   if (!tbl) return;
   const colEls = tbl.querySelectorAll('colgroup > col');
@@ -382,7 +387,7 @@ export function applyPanelColLayout(panel) {
   tbl.style.minWidth = total + 'px';
 }
 
-export function resetPanelColWidths(panel) {
+export function resetPanelColWidths(panel: string | number) {
   panelColWidthCache[panel] = {};
   savePanelColWidths(panel);
   applyPanelColLayout(panel);
@@ -398,14 +403,14 @@ export let panelColResizersAttached = false;
 export function initPanelColResizers() {
   if (!panelColResizersAttached) {
     panelColResizersAttached = true;
-    let drag = null;
+    let drag: { pinnedAll: any; panel: any; key: any; startW: any; startX: any; handle: any; idx?: any; } | null = null;
     document.addEventListener('pointerdown', (e) => {
       const handle = e.target.closest && e.target.closest('.col-resizer');
       if (!handle) return;
       const panel = handle.dataset.panel, key = handle.dataset.col;
       if (!panel || !PANEL_COLS[panel] || !key) return;
       e.preventDefault();
-      const idx = PANEL_COLS[panel].findIndex(c => c.key === key);
+      const idx = PANEL_COLS[panel].findIndex((c: { key: any; }) => c.key === key);
       drag = {
         handle, panel, key, idx,
         startX: e.clientX,
@@ -429,7 +434,7 @@ export function initPanelColResizers() {
         drag.pinnedAll = true;
         const widths = computedColWidths(drag.panel);
         const pinned = panelColWidths(drag.panel);
-        PANEL_COLS[drag.panel].forEach((c, i) => { pinned[c.key] = widths[i]; });
+        PANEL_COLS[drag.panel].forEach((c: { key: string | number; }, i: string | number) => { pinned[c.key] = widths[i]; });
       }
       const pinned = panelColWidths(drag.panel);
       pinned[drag.key] = Math.max(columnFloor(drag.panel, drag.key), Math.round(drag.startW + (e.clientX - drag.startX)));
@@ -480,13 +485,13 @@ export function initPanelColResizers() {
   Object.keys(PANEL_COLS).forEach(applyPanelColLayout);
 }
 
-export function panelEl(name) { return document.getElementById('tab-' + name); }
+export function panelEl(name: string) { return document.getElementById('tab-' + name); }
 
-export function isPanelVisible(name) {
+export function isPanelVisible(name: string) {
   return !!(panelDock && panelDock[name] && panelDock[name].visible);
 }
 
-export function refreshPanel(name) {
+export function refreshPanel(name: string) {
   try {
     if (name === 'registers') updateRegisters();
     else if (name === 'memory') { if (typeof updateMemSubTabs === 'function') updateMemSubTabs(); updateMemoryView(); }
@@ -516,7 +521,7 @@ export const PANEL_FIND_PLACEHOLDER = {
 // missing data rather than a filter.
 export const panelFindText = {};
 
-export function buildPanelFindBar(name) {
+export function buildPanelFindBar(name: string) {
   const bar = document.createElement('div');
   bar.className = 'panel-find';
   bar.id = 'panelFind-' + name;
@@ -535,21 +540,21 @@ export function buildPanelFindBar(name) {
   return bar;
 }
 
-export function panelFindBar(name) { return document.getElementById('panelFind-' + name); }
+export function panelFindBar(name: string) { return document.getElementById('panelFind-' + name); }
 
-export function panelFindBtn(name) {
+export function panelFindBtn(name: any) {
   const el = panelEl(name);
   return el && el.querySelector(':scope > .panel-hdr [data-panel-act="find"]');
 }
 
-export function setPanelFind(name, text) {
+export function setPanelFind(name: string | number, text: string) {
   panelFindText[name] = text || '';
   const btn = panelFindBtn(name);
   if (btn) btn.classList.toggle('active', !!panelFindText[name]);
   refreshPanel(name);
 }
 
-export function togglePanelFind(name) {
+export function togglePanelFind(name: string) {
   const bar = panelFindBar(name);
   if (!bar) return;
   if (bar.hidden) {
@@ -560,7 +565,7 @@ export function togglePanelFind(name) {
   }
 }
 
-export function closePanelFind(name) {
+export function closePanelFind(name: any) {
   const bar = panelFindBar(name);
   if (!bar) return;
   bar.hidden = true;
@@ -570,15 +575,15 @@ export function closePanelFind(name) {
 }
 
 // True when there is no filter, so callers can guard a row unconditionally.
-export function panelFindMatch(name, haystack) {
+export function panelFindMatch(name: string, haystack: string) {
   const q = panelFindText[name];
   if (!q) return true;
   return String(haystack).toLowerCase().includes(q.toLowerCase());
 }
 
-export function panelFindActive(name) { return !!panelFindText[name]; }
+export function panelFindActive(name: string) { return !!panelFindText[name]; }
 
-export function setPanelFindCount(name, shown, total) {
+export function setPanelFindCount(name: string, shown: string | number, total: string | number) {
   const bar = panelFindBar(name);
   if (!bar) return;
   const el = bar.querySelector('.panel-find-count');
@@ -632,7 +637,7 @@ export function ensurePanelChrome() {
   });
 }
 
-export function observeFloatResize(name) {
+export function observeFloatResize(name: string) {
   const el = panelEl(name);
   if (!el || el._roAttached || typeof ResizeObserver === 'undefined') return;
   el._roAttached = true;
@@ -649,7 +654,7 @@ export function observeFloatResize(name) {
 }
 
 export function applyPanelDock() {
-  const stack = document.getElementById('panelStack');
+  const stack = byId('panelStack');
   if (!stack || !panelDock) return;
 
   // Preserve focus + caret across the relayout below. Re-appending panel
@@ -685,8 +690,8 @@ export function applyPanelDock() {
   });
   stack.querySelectorAll('.panel-vsplitter, .panel-hsplitter').forEach(s => s.remove());
 
-  const dockedNames = panelDock.order.filter(n => panelDock[n].visible && !panelDock[n].floating);
-  const floatingNames = panelDock.order.filter(n => panelDock[n].visible && panelDock[n].floating);
+  const dockedNames = panelDock.order.filter((n: string | number) => panelDock[n].visible && !panelDock[n].floating);
+  const floatingNames = panelDock.order.filter((n: string | number) => panelDock[n].visible && panelDock[n].floating);
   const twoCols = dockUsesTwoColumns();
   const mobile = mobileMode();
   syncWaveformPanelHost();
@@ -700,7 +705,7 @@ export function applyPanelDock() {
 
   // Reorder every panel node to match panelDock.order (direct children of
   // the stack in the single-column layout), then set docked/floating state.
-  panelDock.order.forEach(name => {
+  panelDock.order.forEach((name: string | null) => {
     const el = panelEl(name);
     if (!el) return;
     stack.appendChild(el);
@@ -826,7 +831,7 @@ export function applyPanelDock() {
     }
   });
 
-  floatingNames.forEach(name => keepFloatInView(name));
+  floatingNames.forEach((name: string) => keepFloatInView(name));
   savePanelDock();
   // Bring focus back to the field that was being typed in (e.g. the UART
   // console) now that the panels have been moved/re-appended, so the mobile
@@ -835,7 +840,7 @@ export function applyPanelDock() {
   updateMobileFindBtn();
 }
 
-export function keepFloatInView(name) {
+export function keepFloatInView(name: string) {
   const st = panelDock[name];
   const el = panelEl(name);
   if (!st || !el) return;
@@ -849,7 +854,7 @@ export function keepFloatInView(name) {
   el.style.top = st.y + 'px';
 }
 
-export function setPanelVisible(name, vis) {
+export function setPanelVisible(name: string, vis: boolean) {
   if (!panelDock || !panelDock[name]) return;
   panelDock[name].visible = vis;
   if (!vis) panelDock[name].floating = false;
@@ -857,12 +862,12 @@ export function setPanelVisible(name, vis) {
   if (vis) refreshPanel(name);
 }
 
-export function togglePanel(name) {
+export function togglePanel(name: string) {
   if (!panelDock || !panelDock[name]) return;
   setPanelVisible(name, !panelDock[name].visible);
 }
 
-export function togglePanelFloat(name) {
+export function togglePanelFloat(name: string) {
   const st = panelDock && panelDock[name];
   if (!st || !st.visible) return;
   st.floating = !st.floating;
@@ -874,7 +879,7 @@ export function togglePanelFloat(name) {
   refreshPanel(name);
 }
 
-export function onFloatDragStart(e, name) {
+export function onFloatDragStart(e: PointerEvent, name: string) {
   const st = panelDock && panelDock[name];
   if (!st || !st.floating) return;
   if (e.target.closest('.panel-hdr-btn')) return;
@@ -889,7 +894,7 @@ export function onFloatDragStart(e, name) {
   e.preventDefault();
 }
 
-export function onFloatDragMove(e) {
+export function onFloatDragMove(e: { clientX: number; clientY: number; }) {
   if (!floatDrag) return;
   const st = panelDock[floatDrag.name];
   const el = panelEl(floatDrag.name);
@@ -914,9 +919,9 @@ export function onFloatDragEnd() {
 
 // Row splitter: drags to redistribute the height of the two docked panels
 // (or dock rows in the 2×2 grid) above and below it.
-export function attachVSplitter(sp) {
-  let dragging = false, startY = 0, aboveEl = null, belowEl = null, aboveH = 0, belowH = 0;
-  sp.addEventListener('pointerdown', (e) => {
+export function attachVSplitter(sp: Element) {
+  let dragging = false, startY = 0, aboveEl: { offsetHeight: number; style: { flex: string; }; } | null = null, belowEl: { offsetHeight: number; style: { flex: string; }; } | null = null, aboveH = 0, belowH = 0;
+  sp.addEventListener('pointerdown', (e: { clientY: number; pointerId: any; preventDefault: () => void; }) => {
     aboveEl = sp.previousElementSibling;
     belowEl = sp.nextElementSibling;
     if (!aboveEl || !belowEl) return;
@@ -929,7 +934,7 @@ export function attachVSplitter(sp) {
     document.body.style.userSelect = 'none';
     e.preventDefault();
   });
-  sp.addEventListener('pointermove', (e) => {
+  sp.addEventListener('pointermove', (e: { clientY: number; }) => {
     if (!dragging) return;
     const dy = e.clientY - startY;
     aboveEl.style.flex = '0 0 ' + Math.max(90, aboveH + dy) + 'px';
@@ -946,7 +951,7 @@ export function attachVSplitter(sp) {
     if (pair.length === 2) {
       panelDock.rowHeights = pair.map(el => el.offsetHeight);
     } else {
-      panelDock.order.forEach(n => {
+      panelDock.order.forEach((n: string) => {
         const el = panelEl(n);
         if (el && el.classList.contains('panel-docked')) panelDock[n].basis = el.offsetHeight;
       });
@@ -957,15 +962,15 @@ export function attachVSplitter(sp) {
   sp.addEventListener('pointercancel', stop);
   sp.addEventListener('dblclick', () => {
     panelDock.rowHeights = undefined;
-    panelDock.order.forEach(n => { panelDock[n].basis = 0; });
+    panelDock.order.forEach((n: string | number) => { panelDock[n].basis = 0; });
     applyPanelDock();
   });
 }
 
 // Column splitter: drags to redistribute the width of the two columns
 // within one row of the 2×2 grid.
-export function attachHSplitter(sp) {
-  let dragging = false, startX = 0, lastX = 0, leftEl = null, rightEl = null;
+export function attachHSplitter(sp: Element) {
+  let dragging = false, startX = 0, lastX = 0, leftEl: { offsetWidth: number; style: { flex: string; }; } | null = null, rightEl: { offsetWidth: number; style: { flex: string; }; } | null = null;
   // The flex-basis values at pointerdown. Tracked explicitly because a
   // shrinkable basis (`0 1 Npx`) means `offsetWidth` reflects the RENDERED
   // (possibly shrunk) width, not the value we want to persist. They are
@@ -974,7 +979,7 @@ export function attachHSplitter(sp) {
   // mirroring the row splitter; accumulating the delta into the snapshot
   // would compound on every move and make a small drag shoot to the extreme.
   let leftBasis = 0, rightBasis = 0;
-  sp.addEventListener('pointerdown', (e) => {
+  sp.addEventListener('pointerdown', (e: { clientX: number; pointerId: any; preventDefault: () => void; }) => {
     leftEl = sp.previousElementSibling;
     rightEl = sp.nextElementSibling;
     if (!leftEl || !rightEl) return;
@@ -988,7 +993,7 @@ export function attachHSplitter(sp) {
     document.body.style.userSelect = 'none';
     e.preventDefault();
   });
-  sp.addEventListener('pointermove', (e) => {
+  sp.addEventListener('pointermove', (e: { clientX: number; }) => {
     if (!dragging) return;
     lastX = e.clientX;
     const dx = lastX - startX;
@@ -1038,7 +1043,7 @@ export function attachHSplitter(sp) {
   sp.addEventListener('pointerup', stop);
   sp.addEventListener('pointercancel', stop);
   sp.addEventListener('dblclick', () => {
-    panelDock.order.forEach(n => { panelDock[n].wbasis = 0; });
+    panelDock.order.forEach((n: string | number) => { panelDock[n].wbasis = 0; });
     applyPanelDock();
   });
 }
@@ -1061,7 +1066,7 @@ export function initPanelDock() {
     });
   });
   applyPanelDock();
-  panelDock.order.forEach(name => { if (isPanelVisible(name)) refreshPanel(name); });
+  panelDock.order.forEach((name: string) => { if (isPanelVisible(name)) refreshPanel(name); });
   updateLocalsPanelAvailability();
   updateWaveformPanelAvailability();
   // Wire up the intra-panel column-resize separators (Registers /
@@ -1091,7 +1096,7 @@ export function initPanelDock() {
     if (document.body.dataset.booted) updateDatapathPanelAvailability();
     // Re-apply when crossing the mobile/desktop breakpoint so the layout
     // switches between the tabbed mobile view and the dock/grid view.
-    if (mobileMode() || (panelDock && panelDock.order.some(n => panelDock[n].visible))) {
+    if (mobileMode() || (panelDock && panelDock.order.some((n: string | number) => panelDock[n].visible))) {
       applyPanelDock();
     }
   });
@@ -1107,7 +1112,7 @@ export function updateLineNumbers() {
 // Quotes are escaped as well as the tag characters: most callers here
 // interpolate into a double-quoted attribute, where a bare quote in a
 // signal path or a file name would end the attribute early.
-export function escapeHtml(s) {
+export function escapeHtml(s: string | any[] | null) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
@@ -1162,7 +1167,7 @@ export const INT_REG_DESC = [
     'Temporary Register 6 (Caller-saved)'
 ];
 
-export function fpRegDesc(i) {
+export function fpRegDesc(i: string | number) {
   if (i < 8) return 'FP Temporary ' + i;
   if (i < 10) return 'FP Saved Register ' + (i - 8);
   if (i < 12) return 'FP Argument ' + (i - 10) + ' / Return ' + (i - 10);
@@ -1178,8 +1183,8 @@ export const FP_ABI_NAMES = [
   'ft8', 'ft9', 'ft10', 'ft11'];
 
 export function registerDocs() {
-  const out = [];
-  const abiLabel = i => (i === 8 ? 's0/fp' : ABI_NAMES[i]);
+  const out: { name: string; type: string; format: string; desc: string; meta: string; }[] = [];
+  const abiLabel = (i: number) => (i === 8 ? 's0/fp' : ABI_NAMES[i]);
   ABI_NAMES.forEach((abi, i) => {
     out.push({ name: abi, type: 'register', format: `${i === 8 ? 's0 / fp' : abi} (x${i})`,
                desc: INT_REG_DESC[i], meta: `ABI Register x${i}` });
@@ -1315,7 +1320,7 @@ export const RISCV_AUTOCOMPLETE_DOCS = [
   ...registerDocs()
 ];
 
-export function getAssemblyLineContext(currentLine) {
+export function getAssemblyLineContext(currentLine: string) {
   // Strip comments
   let codeOnly = currentLine.split('#')[0];
 
@@ -1354,14 +1359,14 @@ export function getAssemblyLineContext(currentLine) {
 // document, which is usually the same document as last time.
 export let editorSymbolsFor = null, editorSymbolsCache = [];
 
-export function extractEditorSymbols(code) {
+export function extractEditorSymbols(code: null) {
   if (code === editorSymbolsFor) return editorSymbolsCache;
   editorSymbolsFor = code;
   editorSymbolsCache = scanEditorSymbols(code);
   return editorSymbolsCache;
 }
 
-export function scanEditorSymbols(code) {
+export function scanEditorSymbols(code: string) {
   const symbols = [];
   const seen = new Set();
   const lines = code.split('\n');
@@ -1486,7 +1491,7 @@ export function updateRegisters() {
   dpOnStateChange();
 }
 
-export function setRegDecSigned(signed) {
+export function setRegDecSigned(signed: any) {
   ui.regDecSigned = !!signed;
   updateRegisters();
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Inputs changed while a recording is in hand: each goes on the timeline
 // and the run is replayed.
 
@@ -17,7 +16,8 @@ import { ui } from '../machine/state';
 // change was recorded with the old input and is gone either way, so the
 // new recording reaches one Cycles past it rather than all the way back
 // to where the old one ended.
-export async function hdlResimulate(keepIdx) {
+export async function hdlResimulate(keepIdx: number) {
+  if (!hdlRec.trace) return;
   const budget = Math.min(hdlRec.trace.budget, hdlCurrentCycle() + hdlConfig.cycleBudget);
   const t = await hdlBuildTrace(budget, { quiet: true });
   if (!t) return;
@@ -28,7 +28,7 @@ export async function hdlResimulate(keepIdx) {
 // dropped, or the recording would stop matching the switches on screen.
 // The change goes onto the timeline either way; the replay is coalesced.
 
-export function hdlQueueResim(what) {
+export function hdlQueueResim(what: string) {
   if (hdlActivity.running) { hdlRec.pendingResim = true; return; }
   const at = hdlRec.idx;
   hdlWithBusy(async () => {
@@ -42,7 +42,7 @@ export function hdlQueueResim(what) {
   });
 }
 
-export function hdlOnInputChanged(code, value) {
+export function hdlOnInputChanged(code: number, value: number) {
   if (ui.engine !== 'hdl') return;
   if (hdlActivity.live) {
     hdlLiveSend('in ' + code + ' ' + (value >>> 0));
@@ -61,7 +61,7 @@ export function hdlOnInputChanged(code, value) {
 
 // The bytes are already on the timeline by the time this runs; all that
 // is left is to replay the run so the hardware sees them.
-export function hdlOnUartInput(count) {
+export function hdlOnUartInput(count?: string | number | undefined) {
   if (ui.engine !== 'hdl' || !hdlRec.trace || !count) return;
   hdlQueueResim('re-simulated with ' + count + ' more UART byte(s)');
 }

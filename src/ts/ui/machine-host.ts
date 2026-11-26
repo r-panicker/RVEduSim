@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Connects the machine (src/ts/machine) to the page: its messages go to the
 // console, and the panels redraw when it says what has changed. Installed
 // before anything runs; each call goes through the page's function by name

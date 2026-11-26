@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Loading a file from the file picker, and the page set-up that can run
 // before the editor is mounted.
 
@@ -10,9 +9,10 @@ import { setLanguageMode } from './examples-language';
 import { openSettingsModal } from './execution';
 import { initPanelDock, updateEditor, updateLineNumbers } from './panels';
 import { assembleOnly, resetAll, updateToolbarButtonStates } from './run-control';
+import { byId } from './dom';
 
 // Load file from file input
-export function loadFile(event) {
+export function loadFile(event: { target: { files: any[]; value: string; }; }) {
   const file = event.target.files[0];
   if (!file) return;
 
@@ -36,7 +36,7 @@ export function loadFile(event) {
   const reader = new FileReader();
   reader.onload = function (e) {
     editorState.fileName = file.name;
-    editor.value = e.target.result;
+    editor.value = reader.result as string;
     editorState.lastAssembledCode = null;
     program.assembled = false;
     editor.scrollTop = 0;
@@ -55,9 +55,9 @@ export function loadFile(event) {
     updateToolbarButtonStates();
 
     // Display loaded filename in example dropdown
-    const select = document.getElementById('exampleSelect');
+    const select = byId<HTMLSelectElement>('exampleSelect');
     if (select) {
-      let opt = document.getElementById('tempFileOption');
+      let opt = document.getElementById('tempFileOption') as HTMLOptionElement | null;
       if (!opt) {
         opt = document.createElement('option');
         opt.id = 'tempFileOption';
@@ -78,12 +78,11 @@ export function loadFile(event) {
   event.target.value = '';
 }
 
-// This runs before CodeMirror exists - editor.value's setter no-ops until
-// cmEditor is mounted - so it can only wire up the splitters and panel
+// Run once the page has loaded every module (main.ts), in page order. It
+// runs before CodeMirror exists (editor.value's setter does nothing until
+// the editor is mounted), so it only wires up the splitters and panel
 // docking. Anything touching the editor or the status line belongs in
 // bootSimulator() (ui/datapath.ts), which runs after the mount.
-
-// Run once the page has loaded every module (main.ts), in page order.
 export function onFileIoLoad() {
   initSplitter();
   initPanelDock();

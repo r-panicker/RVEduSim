@@ -32,7 +32,7 @@ export function hdlLiveCapable() {
   return hdlConfig.simulator === 'verilator' && !!(window.rvNative && window.rvNative.vlLive);
 }
 export function hdlLiveHz() { return clock.pace === 'real' ? cpuHz() : 0; }
-export function hdlLiveSend(line) { if (hdlActivity.live) window.rvNative.vlLiveSend(hdlActivity.live.id, line); }
+export function hdlLiveSend(line: string) { if (hdlActivity.live) window.rvNative.vlLiveSend(hdlActivity.live.id, line); }
 export function hdlLiveStop() {
   if (!hdlActivity.live || hdlActivity.live.stopSent) return;
   hdlActivity.live.stopSent = true;
@@ -40,7 +40,7 @@ export function hdlLiveStop() {
   hdlStatus('pausing...', 'busy');
 }
 // Inputs the model applied go onto the timeline with the cycle it chose.
-export function hdlLiveTakeInputs(parser) {
+export function hdlLiveTakeInputs(parser: { trace?: any; feed?: (text: any) => void; takeInputs: any; finish?: () => any; }) {
   for (const e of parser.takeInputs()) {
     if ('byte' in e) hdlRec.rx.push(e);
     else hdlRec.stim.push(e);
@@ -113,7 +113,7 @@ export async function hdlRunLive() {
     updateToolbarButtonStates();
     // A run from a checkpoint holds back what it prints until the stretch
     // before `from` has been checked against the recording.
-    const launch = c => {
+    const launch = (c: { k: string; txt: any; mem: { forEach: (arg0: (m: any, i: string) => void) => void; }; } | null) => {
       const id = live.id = ++hdlActivity.jobSeq;
       hdlNativeJobs.add(id);
       const p = plus.concat('+TRACEFROM=' + (c ? c.k : from), ckOn() ? ['+CKEVERY=' + HDL_VL_CK_EVERY] : []);
@@ -121,7 +121,7 @@ export async function hdlRunLive() {
       if (c) {
         p.push('+CKLOAD=' + c.k);
         f['ck_load.txt'] = c.txt;
-        c.mem.forEach((m, i) => { f['ck_load_m' + i + '.mem'] = m; });
+        c.mem.forEach((m: any, i: string) => { f['ck_load_m' + i + '.mem'] = m; });
       }
       live.ck = c;
       live.split = c ? hdlJoinSplit(from) : null;
@@ -205,7 +205,7 @@ export async function hdlRunLive() {
       if (liveWave && !waveStopped && !waveBusy && performance.now() - lastWave > 500) {
         waveBusy = true;
         lastWave = performance.now();
-        window.rvNative.vlLiveRead(live.id, 'dump.vcd', HDL_LIVE_VCD_MAX).then(b => {
+        window.rvNative.vlLiveRead(live.id, 'dump.vcd', HDL_LIVE_VCD_MAX).then((b: { data: any; }) => {
           waveBusy = false;
           if (!b || hdlActivity.live !== live) return;
           // Running faster than a waveform can be followed: the model
@@ -224,7 +224,7 @@ export async function hdlRunLive() {
         }, () => { waveBusy = false; });
       }
     };
-    const replaying = c => hdlStatus(!resume ? 'starting live...' : c
+    const replaying = (c: { k: { toLocaleString: () => string; }; } | null) => hdlStatus(!resume ? 'starting live...' : c
       ? 'replaying cycles ' + c.k.toLocaleString() + ' to ' + from.toLocaleString() + '...'
       : 'replaying to cycle ' + from.toLocaleString() + '...', 'busy');
     replaying(ck);
@@ -281,7 +281,7 @@ export async function hdlRunLive() {
       const c = ckOn() && t.budget > HDL_VCD_WINDOW ? hdlVlCkPick(t, joinKey, t.budget - HDL_VCD_WINDOW) : null;
       let s = null;
       if (c) {
-        c.mem.forEach((m, i) => { wf['ck_load_m' + i + '.mem'] = m; });
+        c.mem.forEach((m: any, i: string) => { wf['ck_load_m' + i + '.mem'] = m; });
         s = await hdlRunModel(compiled.model, Object.assign({ 'ck_load.txt': c.txt }, wf),
           hdlPlusargs(t.budget, lvl).concat('+TRACEFROM=' + c.k, '+CKLOAD=' + c.k));
         if (epoch !== hdlRec.epoch) return null;
@@ -316,7 +316,7 @@ export async function hdlRunLive() {
 // Run once the page has loaded every module (main.ts), in page order.
 export function onLiveLoad() {
   if (window.rvNative && window.rvNative.onVlLiveData) {
-    window.rvNative.onVlLiveData((id, text) => {
+    window.rvNative.onVlLiveData((id: any, text: any) => {
       const live = hdlActivity.live;
       if (!live || live.id !== id) return;
       if (!live.split) { live.parser.feed(text); return; }

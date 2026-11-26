@@ -16,7 +16,7 @@
 // stay off for those sources.
 
 import { HDL_VCD_WINDOW, hdlLog } from './engine';
-import { hdlCheckpoints, hdlSources } from './state';
+import { hdlCheckpoints, hdlSources, type HdlTrace, type HdlTimeline } from './state';
 import { hdlTraceParser } from './trace';
 import { hdlStripNoise } from './verilog';
 export const HDL_CK_EVERY = 1024;    // cycles between checkpoints, to start with
@@ -33,7 +33,7 @@ export const HDL_CK_VERIFY = 16;     // fewest cycles of the old recording a rep
 export const HDL_VL_CK_EVERY = 200000;
 
 // The testbench's own state, beside the design's.
-export function hdlCkTbState(rb, dbuf) {
+export function hdlCkTbState(rb: null, dbuf: boolean) {
   return {
     scalars: ['DIP', 'PB', 'UART_RX', 'UART_RX_valid', 'ACCEL_Data', 'ACCEL_DReady', 'RESET',
               'cyc', 'stim_i', 'rx_i', 'pc_prev', 'led_prev', 'ss_prev']
@@ -44,31 +44,31 @@ export function hdlCkTbState(rb, dbuf) {
 
 export const HDL_CK_CYC_LINE = hdlCkTbState(null, false).scalars.indexOf('cyc');
 
-export function hdlVlCkPick(t, key, limit) {
+export function hdlVlCkPick(t: { joinKey: any; vlCks: any[]; }, key: string, limit: number) {
   if (!t || t.joinKey !== key || !t.vlCks) return null;
-  return t.vlCks.find(c => c.k > 0 && c.k <= limit) || null;
+  return t.vlCks.find((c) => c.k > 0 && c.k <= limit) || null;
 }
-export function hdlVlCkFailed(k, key) {
+export function hdlVlCkFailed(k: string, key: any) {
   hdlCheckpoints.vlOff = key;
   hdlLog('A replay from the checkpoint at cycle ' + k + ' did not match the recording, so this ' +
     'design holds state the checkpoints do not save, or an initial block in it assigns with <= ' +
     '(which Verilator reports as MULTIDRIVEN), which lands after the checkpoint is restored. Checkpoints ' +
     'are off for these sources; this run, and every later one, starts from reset.', 'warn');
 }
-export function hdlVlCkMerge(kept, found) {
+export function hdlVlCkMerge(kept: string | any[], found: { [x: string]: { mem: any; }; }) {
   const list = kept.slice();
   for (const k in found) if (found[k].txt) list.push({ k: +k, txt: found[k].txt, mem: found[k].mem });
-  list.sort((a, b) => b.k - a.k);
-  return list.filter((c, i) => i === 0 || c.k !== list[i - 1].k).slice(0, 2);
+  list.sort((a: { k: number; }, b: { k: number; }) => b.k - a.k);
+  return list.filter((c: { k: any; }, i: number) => i === 0 || c.k !== list[i - 1].k).slice(0, 2);
 }
 
 // A run from a checkpoint at k prints from k (+TRACEFROM) and is joined
 // on at `from`; what it printed before that goes aside, to be checked
 // against the recording. Records are routed by their own cycle, which can
 // trail the order they are printed in by one.
-export function hdlJoinSplit(from) {
+export function hdlJoinSplit(from: number) {
   let partial = '', past = false, seen = 0;
-  const route = parts => {
+  const route = (parts: string[]) => {
     const main = [], over = [];
     for (const l of parts) {
       const c = hdlRecCycle(l);
@@ -77,11 +77,11 @@ export function hdlJoinSplit(from) {
       else if (c >= from || l.startsWith('@@C')) { if (c >= from) past = true; main.push(l); }
       else over.push(l);
     }
-    const j = a => a.length ? a.join('\n') + '\n' : '';
+    const j = (a: any[]) => a.length ? a.join('\n') + '\n' : '';
     return { main: j(main), over: j(over), seen };
   };
   return {
-    feed(text) {
+    feed(text: string) {
       const parts = (partial + text).split('\n');
       partial = parts.pop();
       return route(parts);
@@ -95,12 +95,12 @@ export function hdlJoinSplit(from) {
 // The records of a recording from cycle lo up to hi, each with its own
 // cycle, in an order that does not depend on how they were grouped into
 // steps. UART acknowledgements carry no cycle once parsed, and are left out.
-export function hdlRecordList(t, lo, hi) {
-  const out = [];
-  const add = r => { if (r[1] >= lo && r[1] < hi) out.push(JSON.stringify(r)); };
+export function hdlRecordList(t: HdlTrace, lo: number, hi: number) {
+  const out: string[] = [];
+  const add = (r: any[]) => { if (r[1] >= lo && r[1] < hi) out.push(JSON.stringify(r)); };
   // @@C is printed by the wall clock (Verilator) or on request (+PCLOG),
   // so a replay need not repeat it.
-  const per = list => { for (const [k, f] of list) if (k !== 'C') add([k, parseInt(f[0], 10)].concat(f.slice(1))); };
+  const per = (list: any) => { for (const [k, f] of list) if (k !== 'C') add([k, parseInt(f[0], 10)].concat(f.slice(1))); };
   per(t.pre);
   const steps = t.steps;
   let a = 0, b = steps.length;
@@ -116,8 +116,8 @@ export function hdlRecordList(t, lo, hi) {
 }
 // Where a check against recording t can start: a recording folded into a
 // snapshot no longer holds what came before it.
-export function hdlCheckFrom(t, k) { return Math.max(k, t.base ? t.base.cyc + 2 : 0); }
-export function hdlJoinCheck(oldRecs, overText, lo, hi) {
+export function hdlCheckFrom(t: { base: { cyc: number; }; }, k: number) { return Math.max(k, t.base ? t.base.cyc + 2 : 0); }
+export function hdlJoinCheck(oldRecs: string | any[] | null, overText: string, lo: number, hi: number) {
   if (/^@@K/m.test(overText)) return false;
   const p = hdlTraceParser();
   p.feed(overText);
@@ -127,7 +127,7 @@ export function hdlJoinCheck(oldRecs, overText, lo, hi) {
 
 // The restore happens 1 ns into the run, so its waveform's times move by
 // 10k ns, as in hdlVcdJoin.
-export function hdlShiftVcd(text, k) {
+export function hdlShiftVcd(text: string, k: number) {
   if (!text || !k) return text;
   const ts = /\$timescale\s+(\d+)\s*(s|ms|us|ns|ps|fs)\s+\$end/.exec(text);
   const unit = ts ? +ts[1] * { s: 1, ms: 1e-3, us: 1e-6, ns: 1e-9, ps: 1e-12, fs: 1e-15 }[ts[2]] : 1e-9;
@@ -135,7 +135,7 @@ export function hdlShiftVcd(text, k) {
   const defs = text.indexOf('$enddefinitions');
   if (defs < 0) return text;
   const at = text.indexOf('$end', defs + 15) + 4;
-  return text.slice(0, at) + text.slice(at).replace(/^#(\d+)$/gm, (_, t) => '#' + (+t + shift));
+  return text.slice(0, at) + text.slice(at).replace(/^#(\d+)$/gm, (_: any, t: string | number) => '#' + (+t + shift));
 }
 
 export function hdlCkModules() {
@@ -154,7 +154,7 @@ export function hdlCkModules() {
 }
 
 // Index just past the parenthesised group that opens at s[i].
-export function hdlCkSkipGroup(s, i) {
+export function hdlCkSkipGroup(s: string | any[], i: number) {
   let depth = 0;
   for (; i < s.length; i++) {
     if (s[i] === '(') depth++;
@@ -164,7 +164,7 @@ export function hdlCkSkipGroup(s, i) {
 }
 
 // Split on the commas that are not inside brackets, braces or parentheses.
-export function hdlCkSplit(s) {
+export function hdlCkSplit(s: string | any[]) {
   const parts = [];
   let depth = 0, from = 0;
   for (let i = 0; i < s.length; i++) {
@@ -178,7 +178,7 @@ export function hdlCkSplit(s) {
 }
 
 // The names a declaration declares, after its keyword: `[7:0] a, b [0:3] = ...`.
-export function hdlCkDeclarators(text) {
+export function hdlCkDeclarators(text: string) {
   let t = text.replace(/^\s*(signed|unsigned)\b/, '');
   for (let m; (m = /^\s*\[[^\]]*\]/.exec(t)) !== null;) t = t.slice(m[0].length);
   t = t.replace(/^\s*(signed|unsigned)\b/, '');
@@ -189,12 +189,12 @@ export function hdlCkDeclarators(text) {
 }
 
 // One module's regs and the instances it contains.
-export function hdlCkScan(body, mods) {
+export function hdlCkScan(body: string | string[], mods: Map<any, any>) {
   // A generate block that declares nothing and instantiates none of the
   // design's modules (a parameter check, say) holds no state; any other
   // would put regs at names this scan cannot work out.
   let stateful = false;
-  body = body.replace(/\bgenerate\b([\s\S]*?)\bendgenerate\b/g, (all, inner) => {
+  body = body.replace(/\bgenerate\b([\s\S]*?)\bendgenerate\b/g, (all: any, inner: string) => {
     if (/\b(reg|logic|integer)\b/.test(inner) ||
         [...mods.keys()].some(n => new RegExp('\\b' + n + '\\b').test(inner))) stateful = true;
     return ' ';
@@ -258,7 +258,7 @@ export function hdlCkScan(body, mods) {
 
 // Whether a memory is ever assigned: its name, then one or more index
 // groups (which can nest, as in DMEM[ALUResult[9:2]][7:0]), then = or <=.
-export function hdlCkWritten(body, id) {
+export function hdlCkWritten(body: string | any[], id: string | any[]) {
   for (let at = body.indexOf(id); at >= 0; at = body.indexOf(id, at + 1)) {
     if (/[\w$.]/.test(body[at - 1] || '') || /[\w$]/.test(body[at + id.length] || '')) continue;
     let q = at + id.length, groups = 0;
@@ -280,7 +280,7 @@ export function hdlCkWritten(body, id) {
 // The regs that can carry a value from one cycle to the next: those
 // assigned in an always block that is not combinational (@*,
 // always_comb), or in a task. The rest are worked out again from these.
-export function hdlCkHeld(body) {
+export function hdlCkHeld(body: string) {
   const held = new Set();
   const re = /\b(always_ff|always_latch|always_comb|always|task)\b/g;
   const stop = /\b(always_ff|always_latch|always_comb|always|initial|assign|task|function|endmodule)\b/g;
@@ -306,12 +306,12 @@ export function hdlCkHeld(body) {
 // heldOnly (Verilator), so are the regs hdlCkHeld finds combinational:
 // naming a signal from another module keeps Verilator from optimising
 // it, which costs a long run more than the checkpoints save.
-export function hdlCkState(heldOnly) {
+export function hdlCkState(heldOnly: boolean) {
   const mods = hdlCkModules();
   if (!mods.has('Wrapper')) return { off: 'there is no Wrapper' };
-  const scalars = [], arrays = [];
-  const name = (path, id) => path + '.' + id + (id[0] === '\\' ? ' ' : '');
-  const walk = (mod, path, depth) => {
+  const scalars: string[] = [], arrays: string[] = [];
+  const name = (path: string, id: string | string[]) => path + '.' + id + (id[0] === '\\' ? ' ' : '');
+  const walk = (mod: string, path: string, depth: number) => {
     if (depth > 64) throw new Error('its hierarchy is too deep');
     const body = mods.get(mod);
     const s = hdlCkScan(body, mods);
@@ -338,7 +338,7 @@ export function hdlCkState(heldOnly) {
 // The checkpoint module: a separate top level, so it stays out of the
 // waveform and out of the testbench the Download menu saves. Binary,
 // because hex cannot say which bits of a digit are x or z.
-export function hdlBuildCkModule(state, rb, dbuf, vl) {
+export function hdlBuildCkModule(state: { off: any; scalars?: undefined; arrays?: undefined; } | { scalars: any[]; arrays: any[]; off?: undefined; }, rb: string | null, dbuf: boolean, vl: boolean) {
   const T = 'cg3207_hdl_tb.';
   const tb = hdlCkTbState(rb, dbuf);
   const sc = tb.scalars.map(n => T + n).concat(state.scalars);
@@ -396,7 +396,7 @@ endmodule
 // the replay turns checkpoints off), and the save runs when a flag set
 // at the falling edge rises. It writes to two files in turn, so that a
 // run leaves its two newest.
-export function hdlBuildVlCkModule(sc, ar) {
+export function hdlBuildVlCkModule(sc: any[], ar: any[]) {
   const T = 'cg3207_hdl_tb.';
   return `\`timescale 1ns / 1ps
 /* verilator tracing_off */
@@ -416,10 +416,10 @@ module cg3207_hdl_ck;
       n = 0;
       fd = $fopen("ck_load.txt", "r");
       if (fd) begin
-${sc.map(p => `        n = n + $fscanf(fd, "%b\\n", ${p});`).join('\n')}
+${sc.map((p) => `        n = n + $fscanf(fd, "%b\\n", ${p});`).join('\n')}
         $fclose(fd);
       end
-${ar.map((p, i) => `      $readmemb("ck_load_m${i}.mem", ${p});`).join('\n')}
+${ar.map((p: any, i: any) => `      $readmemb("ck_load_m${i}.mem", ${p});`).join('\n')}
       if (n != ${sc.length}) begin
         $display("@@K %0d", n);
         $finish;
@@ -432,9 +432,9 @@ ${ar.map((p, i) => `      $readmemb("ck_load_m${i}.mem", ${p});`).join('\n')}
     slot = (${T}cyc / every) % 2;
     $sformat(name, "ck_s%0d.txt", slot);
     fd = $fopen(name, "w");
-${sc.map(p => `    $fwrite(fd, "%b\\n", ${p});`).join('\n')}
+${sc.map((p) => `    $fwrite(fd, "%b\\n", ${p});`).join('\n')}
     $fclose(fd);
-${ar.map((p, i) => `    $sformat(name, "ck_s%0d_m${i}.mem", slot);\n    $writememb(name, ${p});`).join('\n')}
+${ar.map((p: any, i: any) => `    $sformat(name, "ck_s%0d_m${i}.mem", slot);\n    $writememb(name, ${p});`).join('\n')}
   end
 endmodule
 `;
@@ -442,38 +442,38 @@ endmodule
 
 // The first cycle at which two input timelines differ, or Infinity. A
 // checkpoint taken before it holds for both.
-export function hdlTimelineDiff(a, b) {
+export function hdlTimelineDiff(a: HdlTimeline, b: HdlTimeline) {
   let diff = Infinity;
-  const walk = (x, y, same) => {
+  const walk = (x: string | any[], y: string | any[], same: { (p: any, q: any): boolean; (p: any, q: any): boolean; (arg0: any, arg1: any): any; }) => {
     for (let i = 0; i < Math.max(x.length, y.length); i++) {
       if (i < x.length && i < y.length && same(x[i], y[i])) continue;
       diff = Math.min(diff, i < x.length ? x[i].cycle : Infinity, i < y.length ? y[i].cycle : Infinity);
       return;
     }
   };
-  const byCycle = l => l.slice().sort((p, q) => p.cycle - q.cycle);
-  walk(byCycle(a.stim), byCycle(b.stim), (p, q) => p.cycle === q.cycle && p.code === q.code && p.value === q.value);
-  walk(a.rx, b.rx, (p, q) => p.cycle === q.cycle && p.byte === q.byte);
+  const byCycle = (l: { cycle: number; }[]) => l.slice().sort((p: { cycle: number; }, q: { cycle: number; }) => p.cycle - q.cycle);
+  walk(byCycle(a.stim), byCycle(b.stim), (p: { cycle: any; code: any; value: any; }, q: { cycle: any; code: any; value: any; }) => p.cycle === q.cycle && p.code === q.code && p.value === q.value);
+  walk(a.rx, b.rx, (p: { cycle: any; byte: any; }, q: { cycle: any; byte: any; }) => p.cycle === q.cycle && p.byte === q.byte);
   return diff;
 }
 
 // The cycle a record belongs to; @@N and @@F, which close a run, come
 // after every cycle of it.
-export function hdlRecCycle(line) {
+export function hdlRecCycle(line: string) {
   const m = /^@@([A-Z]) (\d+)/.exec(line);
   return m ? (m[1] === 'N' || m[1] === 'F' ? Infinity : +m[2]) : null;
 }
 
 // A dump as text. vvp on Windows writes it with CRLF line ends; the
 // readers here match timestamps as whole lines, so they are made plain.
-export function hdlVcdFromBytes(bytes, dec) {
+export function hdlVcdFromBytes(bytes: any, dec?: TextDecoder | undefined) {
   const s = (dec || new TextDecoder()).decode(bytes);
   return s.indexOf('\r') < 0 ? s : s.replace(/\r\n/g, '\n');
 }
 
-export function hdlVcdId(l) { return /^[bBrR]/.test(l) ? l.slice(l.indexOf(' ') + 1) : l.slice(1); }
+export function hdlVcdId(l: string | string[]) { return /^[bBrR]/.test(l) ? l.slice(l.indexOf(' ') + 1) : l.slice(1); }
 
-export function hdlVcdFold(s, end, vals, fixed) {
+export function hdlVcdFold(s: string, end: number, vals: Map<any, any>, fixed: { delete: (arg0: any) => void; } | null) {
   for (let i = 0; i < end;) {
     let j = s.indexOf('\n', i);
     if (j < 0 || j > end) j = end;
@@ -488,13 +488,13 @@ export function hdlVcdFold(s, end, vals, fixed) {
 }
 
 // Where the first timestamp after `t` starts, searching forward or back.
-export function hdlVcdAfter(s, t) {
+export function hdlVcdAfter(s: string | any[], t: number) {
   const re = /^#(\d+)$/gm;
   let m;
   while ((m = re.exec(s)) !== null) if (+m[1] > t) return m.index;
   return s.length;
 }
-export function hdlVcdCut(s, t) {
+export function hdlVcdCut(s: string | string[], t: number) {
   let keep = s.length;
   for (let p = s.length; p > 0;) {
     const i = s.lastIndexOf('\n#', p - 1), at = i + 1;
@@ -506,7 +506,7 @@ export function hdlVcdCut(s, t) {
   }
   return keep;
 }
-export function hdlVcdLast(s) {
+export function hdlVcdLast(s: string) {
   const i = s.lastIndexOf('\n#');
   const m = i < 0 ? null : /^#(\d+)$/m.exec(s.slice(i + 1, s.indexOf('\n', i + 1) < 0 ? s.length : s.indexOf('\n', i + 1)));
   return m ? +m[1] : 0;
@@ -521,7 +521,7 @@ export function hdlVcdLast(s) {
 // time 0: what the testbench reads from its plusargs (the cycle budget,
 // how many input changes there are) can differ between runs, and the
 // newest run's time-0 values are the ones that hold for the whole.
-export function hdlVcdDoc(text, raw) {
+export function hdlVcdDoc(text: string, raw?: boolean | undefined) {
   if (!text || typeof text !== 'string') return text || null;
   const d = text.indexOf('$enddefinitions');
   if (d < 0) return text;
@@ -548,14 +548,14 @@ export function hdlVcdDoc(text, raw) {
   return raw ? doc : hdlVcdWindow(doc);
 }
 
-export function hdlVcdText(v) {
+export function hdlVcdText(v: { vals: any[]; defs: string; at: string; parts: any[]; }) {
   if (!v || typeof v === 'string') return v || null;
   const init = [...v.vals.values()];
   return v.defs + (/\n$/.test(v.defs) ? '' : '\n') + '#' + v.at + '\n$dumpvars\n' + init.join('\n') + (init.length ? '\n' : '') +
-    '$end\n' + v.parts.map(p => p.text).join('');
+    '$end\n' + v.parts.map((p) => p.text).join('');
 }
 
-export function hdlVcdWindow(v) {
+export function hdlVcdWindow(v: { defs?: any; unit: any; at: any; vals: any; fixed: any; parts: any; end: any; }) {
   const span = Math.round(HDL_VCD_WINDOW * 10e-9 / v.unit);
   if (v.end - v.at <= span * 1.25) return v;
   const to = v.end - span;
@@ -574,11 +574,11 @@ export function hdlVcdWindow(v) {
 // The restore happens 1 ns into the new run, against 10 ns per cycle (the
 // testbench's `always #5`) plus 1 ns in the old one, so its times move
 // by 10k ns.
-export function hdlVcdJoin(a, b, k) {
+export function hdlVcdJoin(a: { at: number; vals: Iterable<readonly [unknown, unknown]> | null | undefined; fixed: Iterable<unknown> | null | undefined; parts: string | any[]; defs: any; unit: any; end: number; }, b: any, k: number) {
   const nb = hdlVcdDoc(b, true);
   if (!nb || typeof nb === 'string') return nb;
   const shift = Math.round(10 * k * 1e-9 / nb.unit);
-  const moved = nb.parts.map(p => ({ t: p.t + shift, text: p.text.replace(/^#(\d+)$/gm, (_, t) => '#' + (+t + shift)) }));
+  const moved = nb.parts.map((p: { t: number; text: string; }) => ({ t: p.t + shift, text: p.text.replace(/^#(\d+)$/gm, (_: any, t: string | number) => '#' + (+t + shift)) }));
   a = hdlVcdDoc(a, true);
   // A join before the window's start has nothing left to join onto; the
   // new run alone covers the window.
@@ -598,11 +598,11 @@ export function hdlVcdJoin(a, b, k) {
                         end: moved.length ? nb.end + shift : Math.min(a.end, shift) });
 }
 
-export function hdlStitchVcd(a, b, k) { return hdlVcdText(hdlVcdJoin(a, b, k)); }
+export function hdlStitchVcd(a: any, b: any, k: any) { return hdlVcdText(hdlVcdJoin(a, b, k)); }
 
 // Keep the newest checkpoints at an even spacing that doubles as the
 // recording grows, plus the last one, which is where an extension starts.
-export function hdlCkAdd(found) {
+export function hdlCkAdd(found: { [x: string]: any; }) {
   for (const k in found) if (found[k].txt) hdlCheckpoints.set.at.set(+k, found[k]);
   while (hdlCheckpoints.set.at.size > HDL_CK_KEEP) {
     hdlCheckpoints.set.every *= 2;

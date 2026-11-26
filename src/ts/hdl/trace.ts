@@ -7,12 +7,12 @@ import { hdlEnsureCompiled, hdlRxFile, hdlStimFile } from './compile';
 import { HDL_VCD_WINDOW, hdlLog, hdlRunModel, hdlSimulate, hdlStatus, loadHdlEngine } from './engine';
 import { hdlMemFiles, hdlRequiredDepths, hdlSyncReferenceWrapperDepths } from './memory-images';
 import { hdlCutTrace, hdlTrimTrace } from './seek';
-import { hdlBuild, hdlCheckpoints, hdlConfig, hdlRec } from './state';
+import { hdlBuild, hdlCheckpoints, hdlConfig, hdlRec, type HdlStep, type HdlTrace } from './state';
 import { hdlPostSynthCheck } from './synthesis';
 import { hdlFindWrapper, hdlHash, hdlHex32 } from './verilog';
 import { RT_FOLLOW_HZ, cpuHz } from '../machine/clock';
 import { loadProgram } from '../machine/reset';
-import { clock, layout, program } from '../machine/state';
+import { clock, layout, MachineLine, program } from '../machine/state';
 import { setStatus } from '../ui/editor';
 import { refreshDownloadMenu } from '../ui/execution';
 
@@ -24,14 +24,14 @@ import { refreshDownloadMenu } from '../ui/execution';
 // trace already recorded, which a run with +TRACEFROM extends. A step's
 // write lists share one frozen empty array until the step has a write,
 // since a long recording is mostly steps with none.
-export const HDL_NONE = Object.freeze([]);
-export function hdlTraceParser(base) {
-  const t = base || { steps: [], pre: [], preAcks: 0, final: null, next: null, userOutput: '' };
-  const userLines = [];
-  const inputs = [];          // @@V / @@U: inputs a live run applied, with their cycles
-  let cur = t.steps.length ? t.steps[t.steps.length - 1] : null;
+export const HDL_NONE = Object.freeze([]) as never[];
+export function hdlTraceParser(base?: HdlTrace) {
+  const t: HdlTrace = base || { steps: [], pre: [], preAcks: 0, final: null, next: null, userOutput: '', budget: 0 };
+  const userLines: any[] = [];
+  const inputs: { cycle: number; code?: number; value?: number; byte?: number; }[] = [];          // @@V / @@U: inputs a live run applied, with their cycles
+  let cur: HdlStep | null = t.steps.length ? t.steps[t.steps.length - 1] : null;
   let partial = '';
-  const line = l => {
+  const line = (l: string) => {
     const m = /^@@([ILSTOMWFNABPUVC])\s+(.*)$/.exec(l);
     if (!m) { if (l.trim()) userLines.push(l); return; }
     const k = m[1];
@@ -81,7 +81,7 @@ export function hdlTraceParser(base) {
   };
   return {
     trace: t,
-    feed(text) {
+    feed(text: string) {
       const parts = (partial + text).split('\n');
       partial = parts.pop();
       for (const l of parts) line(l);
@@ -98,14 +98,14 @@ export function hdlTraceParser(base) {
   };
 }
 
-export function hdlParseTrace(stdout) {
+export function hdlParseTrace(stdout: string) {
   const p = hdlTraceParser();
   p.feed(String(stdout || ''));
   return p.finish();
 }
 
 // The run environment, shared by the RTL run and the post-synthesis run.
-export function hdlPlusargs(budget, traceLvl) {
+export function hdlPlusargs(budget: string | number, traceLvl: string | number) {
   const plus = [
     '+CYCLES=' + budget,
     '+TRACE=' + traceLvl,
@@ -128,7 +128,7 @@ export function hdlPlusargs(budget, traceLvl) {
 // Run the cached binary with the current environment. Only the
 // simulation runs; preprocessing and compilation are already done.
 // With `from` ({ k, txt, mem }), the run starts from that checkpoint.
-export async function hdlRunVvp(budget, traceLvl, memFiles, from, extra) {
+export async function hdlRunVvp(budget: number, traceLvl: number, memFiles: any, from: { k: string; txt: any; mem: any[]; } | null, extra: string[]) {
   const plus = hdlPlusargs(budget, traceLvl).concat(extra || []);
   const files = Object.assign({}, memFiles, {
     'stim.mem': hdlStimFile(),
@@ -141,7 +141,7 @@ export async function hdlRunVvp(budget, traceLvl, memFiles, from, extra) {
   if (from) {
     plus.push('+CKLOAD=' + from.k);
     files['ck_load.txt'] = from.txt;
-    from.mem.forEach((m, i) => { files['ck_load_m' + i + '.mem'] = m; });
+    from.mem.forEach((m: any, i: string) => { files['ck_load_m' + i + '.mem'] = m; });
   }
   const s = hdlBuild.vvpCache.model
     ? await hdlRunModel(hdlBuild.vvpCache.model, files, plus)
@@ -157,7 +157,7 @@ export async function hdlRunVvp(budget, traceLvl, memFiles, from, extra) {
 // What every run needs before it starts: the memory images from a
 // pristine program, a refusal if the program does not fit the Wrapper,
 // and the compiled design.
-export async function hdlPrepareRun(opts) {
+export async function hdlPrepareRun(opts: { quiet?: any; chunk?: any; }) {
   opts = opts || {};
   const wrapper = hdlFindWrapper();
   if (!wrapper) throw new Error('No `module Wrapper` found among the loaded sources.');
@@ -174,7 +174,7 @@ export async function hdlPrepareRun(opts) {
   hdlSyncReferenceWrapperDepths();
   const memKey = [program.machineCode, layout.baseAddress, layout.dataBase, wrapper.src];
   let mem;
-  if (hdlBuild.memCache && hdlBuild.memCache.key.every((v, i) => v === memKey[i])) {
+  if (hdlBuild.memCache && hdlBuild.memCache.key.every((v: string | number | MachineLine[], i: string | number) => v === memKey[i])) {
     mem = hdlBuild.memCache.mem;
   } else {
     loadProgram(program.machineCode);
@@ -216,7 +216,7 @@ export async function hdlPrepareRun(opts) {
 
 // Counted from reset, a trimmed recording included. Without the
 // architectural trace nothing counts instructions, so only cycles are said.
-export function hdlRunSummary(t, cycles) {
+export function hdlRunSummary(t: HdlTrace, cycles: any) {
   const n = (t.offset || 0) + t.steps.length;
   return (n ? n.toLocaleString() + ' instructions in ' : '') + Number(cycles).toLocaleString() + ' cycles';
 }
@@ -224,8 +224,11 @@ export function hdlRunSummary(t, cycles) {
 // Build (or rebuild) the trace for the current program, sources and
 // input timeline. Everything downstream is a view onto what this
 // produces, so a run, a step and an input change all funnel through it.
-export async function hdlBuildTrace(budget, opts) {
-  opts = opts || {};
+// fresh: record from reset even if the recording could be joined on;
+// chunk: one chunk of a run in chunks; quiet: no status messages.
+export interface BuildTraceOptions { fresh?: boolean; chunk?: boolean; quiet?: boolean }
+
+export async function hdlBuildTrace(budget: number, opts: BuildTraceOptions = {}) {
   const epoch = hdlRec.epoch;
   const prep = await hdlPrepareRun(opts);
   if (!prep) return null;
@@ -267,9 +270,9 @@ export async function hdlBuildTrace(budget, opts) {
     for (const k of hdlCheckpoints.set.at.keys()) if (k <= joinAt - HDL_CK_VERIFY && k < budget && k > best) best = k;
     if (best > 0) ck = Object.assign({ k: best }, hdlCheckpoints.set.at.get(best));
   }
-  const vlKept = joinAt && vlCkOn() && hdlRec.trace.vlCks ? hdlRec.trace.vlCks.filter(c => c.k <= joinAt - HDL_CK_VERIFY) : [];
+  const vlKept = joinAt && vlCkOn() && hdlRec.trace.vlCks ? hdlRec.trace.vlCks.filter((c: { k: number; }) => c.k <= joinAt - HDL_CK_VERIFY) : [];
   // A run from a checkpoint prints nothing before it anyway.
-  const args = c => (joinAt && !c ? ['+TRACEFROM=' + joinAt] : [])
+  const args = (c: null) => (joinAt && !c ? ['+TRACEFROM=' + joinAt] : [])
     .concat(vlCkOn() ? ['+CKEVERY=' + HDL_VL_CK_EVERY] : []);
 
   if (!opts.chunk) hdlStatus(ck ? 'simulating cycles ' + ck.k + ' to ' + budget + '...'
