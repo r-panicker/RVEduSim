@@ -337,13 +337,14 @@ if (process.argv[2] === '--checkpoints') {
     clearInterval(watch);
     const log2 = consoleText(doc);
     console.log('    first build and 40,000 cycles: ' + tBuild + ' ms');
+    if (!tv) console.log('    the build or run failed; the console says:\n      ' + log2.slice(-30).join('\n      '));
     check('The status line follows the build (' + [...seen].filter(s => /Verilator/.test(s)).length + ' messages)',
       [...seen].some(s => /Verilator: compiling the model \(\d+ of \d+ files\)/.test(s)) && [...seen].some(s => /Verilator: linking/.test(s)));
     check('The console says Verilator is two-state', log2.some(l => /two-state logic/.test(l)));
     check('…and how long the build took', log2.some(l => /Verilator build [\d.]+ s/.test(l)));
     if (!PREBUILT) check('Its warnings are counted by kind', log2.some(l => /Verilator COMBDLY ×\d+: /.test(l)));
     const ti = await ic.win.hdlStartTrace(40000);
-    check('It records the same ' + tv.steps.length + ' instructions, register and memory writes as Icarus',
+    check('It records the same ' + (tv ? tv.steps.length : 0) + ' instructions, register and memory writes as Icarus',
       !!tv && !!ti && arch(tv) === arch(ti));
     win.hdlSeek(tv.steps.length);
     check('The LEDs show the switches (0x' + win.getLedState().toString(16) + ')', win.getLedState() === 0xad);
