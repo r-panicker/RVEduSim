@@ -1,13 +1,9 @@
 // Builds the page from src/: the markup in src/index.html, the styles in
 // src/styles (in the order of order.json) and the scripts in src/ts.
 //
-// The scripts are ES modules, entered at src/ts/main.ts, and classic scripts,
-// listed in src/ts/classic.json. esbuild bundles the modules first; main.ts
-// puts their exports on window. The classic scripts follow, joined in order
-// as one script sharing one global scope, with the types stripped and,
-// minified, their top-level names kept, since the markup's inline handlers
-// and the tests call them by name. A module can use a classic script's
-// globals only once the page has loaded, not while it is being loaded.
+// The scripts are ES modules, bundled by esbuild from src/ts/main.ts into
+// one script; minified, the names inside it are shortened, and main.ts puts
+// every module's exports on window under their own names.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -19,11 +15,9 @@ const read = f => fs.readFileSync(f, 'utf8');
 
 function buildPage({ minify = true } = {}) {
   const TS = path.join(SRC, 'ts');
-  let js = buildSync({
+  const js = buildSync({
     entryPoints: [path.join(TS, 'main.ts')], bundle: true, format: 'iife', minify, legalComments: 'none', write: false
   }).outputFiles[0].text;
-  const classic = JSON.parse(read(path.join(TS, 'classic.json')));
-  js += transformSync(classic.map(f => read(path.join(TS, f))).join('\n'), { loader: 'ts', minify, legalComments: 'none' }).code;
   const order = JSON.parse(read(path.join(SRC, 'styles', 'order.json')));
   const cssSrc = order.map(f => read(path.join(SRC, 'styles', f))).join('\n');
   const css = minify ? transformSync(cssSrc, { loader: 'css', minify: true }).code : cssSrc;

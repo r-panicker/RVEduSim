@@ -146,7 +146,7 @@ setTimeout(async () => {
 
       let steps = 0;
       const maxSteps = testCase.isInfinite ? 200 : 1000;
-      while (steps < maxSteps && !win.programFinished && win.getPc() !== 0) {
+      while (steps < maxSteps && !win.run.finished && win.getPc() !== 0) {
         win.executeOne();
         steps++;
         const currentInst = win.fetchInstruction(win.getPc());

@@ -447,7 +447,7 @@ setTimeout(async () => {
     ev('resetAll()');
     win.runProgram();
     for (let i = 0; i < 100 && ev('run.running'); i++) await sleep(20);
-    check('Run finishes the program', ev('programFinished') === true);
+    check('Run finishes the program', ev('run.finished') === true);
     check('with the same registers as stepping', JSON.stringify(Array.from(ev('cpu.regs'))) === JSON.stringify(fRegs));
     check('and the stats bar shows CPI', /CPI: \d+\.\d\d/.test(doc.getElementById('statsBar').textContent),
       doc.getElementById('statsBar').textContent);
@@ -458,15 +458,15 @@ setTimeout(async () => {
     win.runProgram();
     for (let i = 0; i < 100 && ev('run.running'); i++) await sleep(20);
     check('a breakpoint stops the run with its instruction in Execute',
-      !ev('programFinished') && ev('sourceLineForPc(pipeline.regs.E.pc)') === overLine, ev('pipeline.regs.E && sourceLineForPc(pipeline.regs.E.pc)'));
+      !ev('run.finished') && ev('sourceLineForPc(pipeline.regs.E.pc)') === overLine, ev('pipeline.regs.E && sourceLineForPc(pipeline.regs.E.pc)'));
     ev('run.breakpoints = new Set()');
 
     ev('resetAll()');
-    while (!ev('programFinished') && ev('cpu.totalCycles') < 5000) win.stepOnce();
-    check('stepping to the end marks the program finished', ev('programFinished') === true && ev('pipeline.regs.exited') === true);
+    while (!ev('run.finished') && ev('cpu.totalCycles') < 5000) win.stepOnce();
+    check('stepping to the end marks the program finished', ev('run.finished') === true && ev('pipeline.regs.exited') === true);
     check('Step is then disabled', doc.getElementById('btnStep').disabled === true);
     win.stepBack();
-    check('Back from the end un-finishes it', ev('programFinished') === false && !doc.getElementById('btnStep').disabled);
+    check('Back from the end un-finishes it', ev('run.finished') === false && !doc.getElementById('btnStep').disabled);
 
     // [5] The diagram and the timeline.
     console.log('\n[5] The pipelined diagram and the timeline');
@@ -620,18 +620,18 @@ setTimeout(async () => {
     ev("setMobileTab('registers')");
     check('another tab with the toolbar in view: no floating bar, header controls back',
       bar.hidden && !doc.body.classList.contains('float-dp'));
-    ev('floatStepsWanted = true; updateFloatSteps()');
+    ev('setToolbarOutOfView(true)');
     check('toolbar Step scrolled away while pipelined: the strip\'s cycle controls float',
       !bar.hidden && bar.dataset.mode === 'dp');
     ev('pipeSetMode(false)');
-    ev('floatStepsWanted = true; updateFloatSteps()');
+    ev('setToolbarOutOfView(true)');
     check('single-cycle, same: the toolbar\'s Back and Step, with no ▶▶',
       !bar.hidden && bar.dataset.mode === 'tb' && barBtns()[1].textContent === '⏭' && barBtns()[2].hidden,
       `hidden=${bar.hidden} mode=${bar.dataset.mode} tab=${ev('mobileTab')} arch=${ev('pipeline.arch')} dpVis=${ev('panelDock.datapath.visible')}`);
     const pc0 = ev('cpu.pc');
     barBtns()[1].click();
     check('and ⏭ steps an instruction', ev('cpu.pc') !== pc0 && ev('cpu.totalCycles') === 1);
-    ev('floatStepsWanted = false');
+    ev('setToolbarOutOfView(false)');
     win.innerWidth = 1400;
     ev('applyPanelDock(); updateDatapathPanelAvailability(); updateFloatSteps()');
     check('desktop: no floating bar', bar.hidden && !doc.body.classList.contains('float-dp'));

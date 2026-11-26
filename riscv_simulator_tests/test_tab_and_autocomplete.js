@@ -42,7 +42,7 @@ const win = dom.window;
 setTimeout(() => {
   try {
     console.log('Testing CodeMirror 6 instance...');
-    const cm = win.cmEditor;
+    const cm = win.editorState.cm;
     if (!cm) throw new Error('cmEditor not initialized');
 
     // Test 1: Tab behavior on collapsed cursor after a word

@@ -9,7 +9,7 @@ segment sizes from them, and HDL mode refuses a program that does not fit the
 loaded `Wrapper.v`.
 
 `dip_led` and `dip_led_c` are also built into the page
-(`src/ts/13-tabs-examples-language.ts`), so the
+(`src/ts/ui/examples-language.ts`), so the
 page has a working example with no server. Change a row for either and update
 the baked copy to match.
 

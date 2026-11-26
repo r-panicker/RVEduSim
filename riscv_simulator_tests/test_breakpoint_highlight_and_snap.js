@@ -93,7 +93,7 @@ setTimeout(async () => {
 
     // Test 4: Verify breakpoint state in CodeMirror 6 editor
     console.log('\n--- Test 4: CodeMirror 6 Breakpoint Field Verification ---');
-    const cm = win.cmEditor;
+    const cm = win.editorState.cm;
     if (!cm) throw new Error('cmEditor not found');
 
     // Run assemble and step to line 4

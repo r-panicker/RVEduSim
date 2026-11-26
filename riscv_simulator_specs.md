@@ -4,7 +4,7 @@
 
 | File | What it is |
 |---|---|
-| [`src/`](src/) | The simulator's source: `index.html` (the markup), `styles/*.css` (in the order of `styles/order.json`) and `ts/` (the modules, entered at `ts/main.ts`, and the classic scripts listed in `ts/classic.json`). Assembling, simulating and the HDL engine run in the browser. The **DIP to LED** example (assembly and C) is built in; every other example, and C compilation, need the page served over `http://`. |
+| [`src/`](src/) | The simulator's source: `index.html` (the markup), `styles/*.css` (in the order of `styles/order.json`) and `ts/` (ES modules, entered at `ts/main.ts`). Assembling, simulating and the HDL engine run in the browser. The **DIP to LED** example (assembly and C) is built in; every other example, and C compilation, need the page served over `http://`. |
 | [`tools/page.js`](tools/page.js), [`tools/build.js`](tools/build.js) | The build: `npm run build` writes `dist/` (`index.html`, a minified `app.js` and `app.css`). `dist/` is not committed; the Pages workflow and the desktop app build it. |
 | [`examples/`](examples/) | All other examples: `asm/*.asm`, `c/*.c`, fetched when selected. `examples/hdl/` holds `Wrapper.v` and `RV_reference.v`, a prebuilt gate-level netlist of a reference core. |
 | [`examples/index.txt`](examples/index.txt) | The Example menu: one markdown-style table row per example, giving its key, language, label, file, the `IROM`/`DMEM` depth bits it needs, and a description. Adding a row and a file adds an example; the HTML is not edited. The file is `.txt` so static site generators serve it verbatim rather than render it. |
@@ -21,46 +21,43 @@ however the page is served.
 
 ### Source and build
 
-The scripts in `src/ts/` are TypeScript, of two kinds.
+The scripts in `src/ts/` are ES modules in folders by layer:
 
-- **Modules**, in folders by layer (`isa/`, `asm/`, `machine/`, `ui/`), are ES modules, strictly
-  typed, that import what they use. `main.ts` is their entry point: esbuild bundles from it, and
-  it puts the modules' exports on `window` for the classic scripts, the markup's inline handlers
-  (`onclick="runProgram()"`) and the tests.
-- **Classic scripts**, the numbered files listed in `src/ts/classic.json`, share one global
-  scope, as the parts of one script, so a function declared in one is visible in all of them.
-  They are joined in that order after the modules, with the types stripped and, when minified,
-  their top-level names kept. Each starts with `// @ts-nocheck` until it is typed. A module that
-  calls one declares it (`declare function updateStats(): void`) and may call it only once the
-  page has loaded.
+- `isa/`, `asm/`: the instruction set, operand parsing and the assembler.
+- `machine/`: the functional model (state, memory and MMIO, execution, the peripherals, the
+  control unit and the pipeline), with no page around it.
+- `c/`: compiling C through Compiler Explorer, and how its lines and variables map to the program.
+- `hdl/`: HDL mode (state, sources, testbench, engine, runs, recordings, checkpoints, synthesis,
+  the cross-check).
+- `ui/`: the editor, panels, peripherals, waveform, datapath drawing and the rest of the page.
+
+`main.ts` is the entry point. esbuild bundles from it into one script; main.ts puts every
+module's exports on `window` as getters (so a variable reads its current value), for the
+markup's inline handlers (`onclick="runProgram()"`) and the tests, and then runs the load-time
+work of the modules that have any (`on…Load()`) in page order, ending with the boot
+(`ui/datapath.ts`). A module does nothing but declare at load: event listeners, `window` aliases
+and the boot are in its `on…Load()`.
 
 The simulator's state is in `machine/state.ts`, one object per part: `cpu` (registers, PC,
 counters), `memory`, `layout` (segment bases and sizes), `program` (machine code, labels,
 symbols), `run` (running, breakpoints, the current line, the CPI table), `stepHistory` (what
 Back undoes), `board` (LEDs, 7-segment, switches, buttons), `accel`, `uart`, `oled`, `clock`
 and `ui`. Code reads and writes these objects (`cpu.pc`, `uart.rxFull`), never copies of their
-fields. `machine/memory-map.ts` holds the MMIO addresses and `machine/mmio.ts` the table of what
-each register does.
+fields; no module assigns another module's variables. `machine/memory-map.ts` holds the MMIO
+addresses and `machine/mmio.ts` the table of what each register does. HDL mode's state is in
+`hdl/state.ts` (`hdlConfig`, `hdlSources`, `hdlRec`, `hdlBuild`, `hdlCheckpoints`,
+`hdlActivity`), the editor's in `ui/editor-state.ts` (`editorState`) and the compiled C program's
+in `c/state.ts` (`cProgram`).
 
-HDL mode's state is in `hdl/state.ts`: `hdlConfig` (the settings), `hdlSources` (the loaded files
-and folder), `hdlRec` (the recording, the position in it, the input timeline, the inputs at
-cycle 0), `hdlBuild` (compiled design, memory images, the waveform), `hdlCheckpoints` and
-`hdlActivity` (what is running: a live run, a run in chunks, Real-time playback). Which engine runs
-the program is `ui.engine`. `hdl/testbench.ts` generates the testbench and `hdl/verilog.ts` holds the
-helpers that read Verilog source as text.
+The machine tells the page what it needs through `machine/host.ts`, one interface (log a line,
+the peripherals or OLED changed, UART output, a register was touched, read a syscall's input,
+the source line of an address) that `ui/machine-host.ts` connects to the console and panels;
+with no host installed it runs silently. Where HDL mode or the datapath drawing take part in a
+shared action (Step, Reset, refreshing the registers or the toolbar), the shared function calls
+them by name.
 
-The machine (`machine/`) is the functional model with no page around it: `memory.ts` (RAM pages and
-the MMIO window, with the step journal and `observeWrites` for the HDL cross-check), `execute.ts`
-(fetch, decode and execute, FP, atomics, the RARS syscalls), `reset.ts` (reset and loading a
-program), `oled.ts`, `uart.ts`, `peripherals.ts` (the snapshots Back restores), `control.ts` (the
-single-cycle decoder table, extender, ALU and PC logic as the course's RTL computes them, shared
-by the pipeline and the datapath drawing) and `pipeline.ts` (the 5-stage model, its state in one
-`pipeline` object: `arch`, `on`, `hazards`, `predictor`, the stage registers `regs`). It tells the page
-what it needs through `machine/host.ts`, one interface (log a line, the peripherals or OLED changed,
-UART output, a register was touched, read a syscall's input) that `02-machine-host.ts` connects to
-the console and panels at load; with no host installed it runs silently.
-
-`npm run typecheck` runs `tsc` over all of `src/ts`. The styles are joined in the order of
+`npm run typecheck` runs `tsc` over all of `src/ts` under `strict`; a module that starts with
+`// @ts-nocheck` is not yet typed. The styles are joined in the order of
 `src/styles/order.json`. `dist/index.html` names `app.js` and `app.css` with a hash of their
 content (`app.js?v=…`), so a browser never runs a cached copy of an older build.
 
@@ -1170,7 +1167,7 @@ Each section title shows the register addresses; status bits (`RX_VALID`, `TX_RE
 
 ## 9. Example programs
 
-There are 13 examples, 7 in assembly and 6 in C. `dip_led` and `dip_led_c` are built into the page (`src/ts/13-tabs-examples-language.ts`); the rest are fetched from `examples/asm/` or `examples/c/` when selected, which requires the page to be served over `http://`.
+There are 13 examples, 7 in assembly and 6 in C. `dip_led` and `dip_led_c` are built into the page (`src/ts/ui/examples-language.ts`); the rest are fetched from `examples/asm/` or `examples/c/` when selected, which requires the page to be served over `http://`.
 
 The **Example** menu is built at startup from `examples/index.txt` by `loadExampleIndex()`. The file is plain text so that static site generators serve it verbatim. Its table has one row per example:
 

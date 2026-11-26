@@ -107,8 +107,8 @@ setTimeout(async () => {
     win.runProgram();
 
     setTimeout(async () => {
-      if (win.programFinished || win.cpu.pc > 0) {
-        console.log(`✅ Simulation ran successfully with custom maxInstructionsPerCycle (25,000). Finished: ${win.programFinished}`);
+      if (win.run.finished || win.cpu.pc > 0) {
+        console.log(`✅ Simulation ran successfully with custom maxInstructionsPerCycle (25,000). Finished: ${win.run.finished}`);
       } else {
         throw new Error('Simulation did not execute properly with custom maxInstructionsPerCycle');
       }

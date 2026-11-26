@@ -14,7 +14,7 @@ import type { TimedByte, TimedInput } from './state';
 import { hdlFindWrapper, hdlHex32, hdlModuleBody } from './verilog';
 
 // The register bank's path: the Settings override, or what discovery finds
-// (21-hdl-memory-images.ts).
+// (hdl/memory-images.ts).
 declare function hdlRegBankPath(): string | null;
 
 // One run's inputs, baked into a testbench that is downloaded to run on its

@@ -54,7 +54,7 @@ setTimeout(async () => {
 
     // 1. Editor Instance & Compatibility Facade
     console.log('\n[1] Testing CodeMirror 6 Editor & Facade...');
-    const cm = win.cmEditor;
+    const cm = win.editorState.cm;
     if (!cm) throw new Error('cmEditor not found on window');
     if (!win.editor) throw new Error('window.editor facade not found');
 
@@ -245,6 +245,23 @@ setTimeout(async () => {
       throw new Error('Byte mode: data segment byte span MUST be contenteditable="true"');
     }
     console.log('Byte mode: code span read-only, data span contenteditable="true"');
+
+    // A byte holds two hex digits: a third is refused unless it replaces a
+    // selection.
+    win.startMemByteEdit(dataSpan);
+    dataSpan.textContent = '12';
+    const third = new win.KeyboardEvent('keydown', { key: '3', cancelable: true });
+    win.handleMemByteEditKey(third, dataSpan);
+    if (!third.defaultPrevented) throw new Error('Byte mode: a third digit was accepted in a byte cell');
+    const range = doc.createRange();
+    range.selectNodeContents(dataSpan);
+    win.getSelection().removeAllRanges();
+    win.getSelection().addRange(range);
+    const over = new win.KeyboardEvent('keydown', { key: '3', cancelable: true });
+    win.handleMemByteEditKey(over, dataSpan);
+    if (over.defaultPrevented) throw new Error('Byte mode: typing over a selected byte was refused');
+    win.cancelMemByteEdit(dataSpan);
+    console.log('Byte mode: a byte cell takes two digits, or replaces a selection');
 
     // Leave the view in the mode the page ships with.
     win.setMemViewMode('word');

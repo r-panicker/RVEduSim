@@ -348,9 +348,8 @@ setTimeout(async () => {
       doc.getElementById('hdlSynth').closest('#simGroupHdl') !== null);
     {
       // Cycles per Run is kept apart for post-synthesis runs, which are
-      // recorded in one go; the download is stubbed out.
-      const load = win.loadYosysEngine;
-      win.loadYosysEngine = () => Promise.resolve();
+      // recorded in one go. (Turning synthesis on starts loading Yosys, which
+      // jsdom cannot, and only logs that it failed.)
       const cyc = () => doc.getElementById('hdlCycles').value;
       const icarus = cyc();
       win.setHdlSynth(true);
@@ -361,7 +360,6 @@ setTimeout(async () => {
       win.setHdlSynth(true);
       const back = cyc();
       win.setHdlSynth(false);
-      win.loadYosysEngine = load;
       check('Post-synthesis runs default to 50,000 cycles, remembered apart from Icarus\'s (' +
         [icarus, on, off, back].join(', ') + ')',
         icarus === '200000' && on === '50000' && off === '200000' && back === '60000');

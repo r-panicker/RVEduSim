@@ -90,6 +90,8 @@ export const run = {
   statementStepping: false,
   // Instructions executed per batch before the page gets control back.
   maxInstructions: 100000000,
+  timerId: null as ReturnType<typeof setTimeout> | null,   // the next batch of a run
+  finished: false,                  // the program has exited or run off its end
 };
 
 // One OLED write a step made, for Back: the whole page a present copied
@@ -199,4 +201,5 @@ export const ui = {
   disasmView: 'word' as 'word' | 'bytes',   // a 32-bit word per 4 bytes, or separate bytes
   regDecSigned: true,                        // the Registers panel's Dec column
   engine: 'js' as 'js' | 'hdl',              // which engine runs the program
+  clockLedLit: true,                         // LED[8], which holds its level while the clock is stopped
 };

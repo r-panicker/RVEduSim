@@ -61,8 +61,8 @@ setTimeout(async () => {
   try {
     console.log('\n--- JSDOM Test 1: Verification of DOM & Editor ---');
     console.log('Window Title:', document.title);
-    console.log('cmEditor exists on window:', !!window.cmEditor);
-    if (!window.cmEditor) {
+    console.log('cmEditor exists on window:', !!window.editorState.cm);
+    if (!window.editorState.cm) {
       throw new Error('CodeMirror 6 EditorView was not mounted!');
     }
 

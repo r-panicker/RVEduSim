@@ -87,8 +87,8 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   console.log('\n[1] Testing ImageDisplay_autoadvance_accel.asm in ASM Mode...');
   const imgAsmSource = fs.readFileSync(path.resolve(__dirname, '../examples/asm/ImageDisplay_autoadvance_accel.asm'), 'utf8');
   win.setLanguageMode('asm');
-  win.cmEditor.dispatch({
-    changes: { from: 0, to: win.cmEditor.state.doc.length, insert: imgAsmSource }
+  win.editorState.cm.dispatch({
+    changes: { from: 0, to: win.editorState.cm.state.doc.length, insert: imgAsmSource }
   });
   const mcAsm = await win.assembleOnly();
   console.log(`  - Assembled ASM: ${mcAsm.length} instructions.`);

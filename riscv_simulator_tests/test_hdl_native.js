@@ -388,7 +388,8 @@ setTimeout(async () => {
       win.setClkDivBits(5);
 
       win.resetAll();
-      check('…and is lit after Reset', await until(() => (win.updatePeripherals(), clk()), 2000));
+      const litAfterReset = await until(() => (win.updatePeripherals(), clk()), 2000);
+      check('…and is lit after Reset' + (litAfterReset ? '' : ' (' + win.eval('JSON.stringify({ running: run.running, live: !!hdlActivity.live, chunked: !!hdlActivity.chunked, play: !!hdlActivity.play, lit: ui.clockLedLit })') + ')'), litAfterReset);
 
       await fresh();
       win.setHdlTrace(false);

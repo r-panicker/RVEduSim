@@ -294,7 +294,7 @@
 }
 
 /* Every column's width comes from the <colgroup>, written by
-   applyPanelColLayout() in 08-panels.ts, with no CSS width here, so
+   applyPanelColLayout() in ui/panels.ts, with no CSS width here, so
    nothing competes with the computed layout. A percentage width would
    break it: in a fixed-layout table where *every* column has a specified
    width, surplus space is shared out in proportion to those widths, so

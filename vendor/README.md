@@ -34,7 +34,7 @@ Each engine tries its sources in order and takes the first that answers:
 
 Pinned versions, so nothing changes underfoot. Re-run only when you mean to
 upgrade, and change the pins in `src/ts/` to match: the verisim commit in
-`HDL_ENGINE_SOURCES` (`18-hdl-engine.ts`) and `HDL_YOSYS_VERSION` (`25-hdl-synthesis.ts`). A new verisim build may come from another
+`HDL_ENGINE_SOURCES` (`hdl/engine.ts`) and `HDL_YOSYS_VERSION` (`hdl/synthesis.ts`). A new verisim build may come from another
 Icarus commit; `IVERILOG_REV` in `electron/scripts/build-iverilog.sh` should then follow it,
 so the browser and desktop engines stay the same.
 
@@ -47,7 +47,7 @@ for f in ivlpp.js ivlpp.wasm ivl.js ivl.wasm vvp.js vvp.wasm; do
   curl -fsSL -o "verisim/$f" "https://cdn.jsdelivr.net/gh/senolgulgonul/verisim@$C/$f"
 done
 
-# Yosys — must match HDL_YOSYS_VERSION in src/ts/25-hdl-synthesis.ts
+# Yosys — must match HDL_YOSYS_VERSION in src/ts/hdl/synthesis.ts
 V=0.68.1207
 for f in bundle.js yosys.core.wasm yosys.core2.wasm yosys.core3.wasm \
          yosys.core4.wasm yosys-resources.0.tar; do
