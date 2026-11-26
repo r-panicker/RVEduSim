@@ -14,14 +14,12 @@
  */
 const fs = require('fs');
 const path = require('path');
-let JSDOM;
-try { JSDOM = require('jsdom').JSDOM; }
-catch (e) { JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM; }
+const { JSDOM } = require('jsdom');
 
 const ROOT = path.resolve(__dirname, '..');
 const RV = require('./core_dir').coreDir('oneoff_oled_modes');
 const ENGINE = process.env.HDL_ENGINE_DIR || path.join(ROOT, 'vendor', 'verisim');
-const html = fs.readFileSync(path.join(ROOT, 'riscv_simulator.html'), 'utf8');
+const html = require('./page').html();
 const CM6 = fs.readFileSync(path.join(__dirname, 'cm6_bundle.min.js'), 'utf8');
 const DESIGN = ['ALU.v', 'Decoder.v', 'Extend.v', 'MCycle.v', 'PC_Logic.v', 'ProgramCounter.v',
                 'RegFile.v', 'Shifter.v', 'RV.v', 'Wrapper.v'];
@@ -34,7 +32,7 @@ const check = (label, cond) => {
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously', resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {

@@ -1,0 +1,29 @@
+/* ---- Waveform strip (HDL mode) ------------------------------------- */
+/* Both the strip and its grab bar are absent until the dock is opened,
+   so nothing about the page changes for anyone not using it. */
+.wave-resizer {
+  height: 6px;
+  flex: 0 0 6px;
+  cursor: ns-resize;
+  background: #181825;
+  border-top: 1px solid #313244;
+  position: relative;
+  display: none;
+}
+
+.wave-resizer::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 28px;
+  height: 2px;
+  margin-left: -14px;
+  border-radius: 1px;
+  background: #45475a;
+}
+
+.wave-resizer:hover::after,
+.wave-resizer.dragging::after { background: #89b4fa; }
+
+body.wave-open .wave-resizer { display: block; }

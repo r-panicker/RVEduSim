@@ -2,25 +2,16 @@ const fs = require('fs');
 const { installGodboltCache } = require('./godbolt_cache');
 const { installExamplesFetch } = require('./examples_fetch');
 const path = require('path');
-let JSDOM;
-try {
-  JSDOM = require('jsdom').JSDOM;
-} catch (e) {
-  try {
-    JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM;
-  } catch (e2) {
-    JSDOM = require('/home/rajesh/.gemini/antigravity-ide/brain/7780d698-8baa-4d51-9b54-596f69dcec55/scratch/node_modules/jsdom').JSDOM;
-  }
-}
+const { JSDOM } = require('jsdom');
 
-const html = fs.readFileSync(path.resolve(__dirname, '../riscv_simulator.html'), 'utf8');
+const html = require('./page').html();
 const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously',
   resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true; // prevent the loader from fetching the CDN bundle (jsdom layout limitations); tests pre-inject the local bundle
     // Pre-inject CodeMirror 6 so the app can boot even when the CDN is
@@ -204,18 +195,17 @@ setTimeout(async () => {
     // read-only registers like DIP/PB are also non-editable here, covered by
     // test_mmio_editability_and_content_column.js instead of this generic
     // Code/Data check.)
-    // The mechanism differs between the two display modes this checks: since
-    // v23.5 the view opens in WORD mode, where a cell is edited through the
-    // word overlay (an onclick calling startMemWordCellEdit) rather than by
-    // being contenteditable, so asserting contenteditable unconditionally
-    // failed against the default mode.
+    // The mechanism differs between the two display modes this checks: in
+    // Word mode, the default, a cell is edited through the word overlay (an
+    // onclick calling startMemWordCellEdit) rather than by being
+    // contenteditable; in Byte mode the cell itself is contenteditable.
     console.log('\n[9] Testing Memory View read-only code / editable data (word + byte modes)...');
     const doc = win.document;
     const cellAt = addr => doc.getElementById('memView').querySelector(`[data-addr="${addr}"]`);
     const showCode = () => { doc.getElementById('memAddr').value = '0x00400000'; win.memGo('code'); };
     const showData = () => { doc.getElementById('memAddr').value = '0x10010000'; win.memGo('data'); };
 
-    // --- Word mode (the default since v23.5) ---
+    // --- Word mode (the default) ---
     win.setMemViewMode('word');
     showCode();
     const codeWord = cellAt(0x00400000);
@@ -271,8 +261,8 @@ setTimeout(async () => {
     console.log('\n[10] Testing Toolbar Structure and Buttons...');
     const toolbar = doc.getElementById('mainToolbar');
     if (!toolbar) throw new Error('mainToolbar element not found');
-    // The controls themselves rather than a count, which moved when the two
-    // memory-dump buttons became entries in the Download menu.
+    // The controls by id rather than a count, so a failure names the missing
+    // one. The memory dumps are entries in the Download menu, checked below.
     const expectRow1 = ['langBtnAsm', 'langBtnC', 'engBtnJs', 'engBtnHdl', 'btnOpen',
                         'btnSave', 'btnUndo', 'btnRedo', 'btnFind'];
     const expectRow2 = ['btnAssemble', 'runPauseBtn', 'btnStep', 'btnBack', 'btnReset',
@@ -297,14 +287,14 @@ setTimeout(async () => {
     console.log('Download menu offers:', dlValues.join(', '));
     console.log('✅ Toolbar layout structure verified!');
 
-    // 11. Operands that used to be accepted silently
+    // 11. Operands that must be rejected rather than accepted silently
     console.log('\n[11] Testing assembler strictness and disassembly register naming...');
     const asmErrors = () => (win.eval('machineCode') || [])
       .filter(m => m.error).map(m => String(m.error));
     const assembleText = (src) => { win.editor.value = src; win.assembleOnly(); };
 
-    // A bare number is not a register: `add t0, t0, 1` used to assemble as
-    // `add t0, t0, x1`, which is silently wrong.
+    // A bare number is not a register: `add t0, t0, 1` must not assemble as
+    // `add t0, t0, x1`, which would be silently wrong.
     assembleText('.text\nmain:\nadd t0, t0, 1\n');
     if (win.eval('assembled')) throw new Error('`add t0, t0, 1` still assembles');
     const numErr = doc.getElementById('console').textContent;
@@ -405,7 +395,7 @@ setTimeout(async () => {
     console.log(`Status row metrics: ${statsEl.textContent.replace(/\s+/g, ' ').trim()}`);
     console.log('✅ Assembler strictness, disassembly naming and PC readout verified!');
 
-    // 12. The rest of the "accepted silently" audit
+    // 12. More operands, immediates and labels that must not be accepted silently
     console.log('\n[12] Testing operand arity, range checks and label rules...');
     const consoleText = () => doc.getElementById('console').textContent;
     const tryAsm = (src) => {
@@ -429,7 +419,7 @@ setTimeout(async () => {
       return r;
     };
 
-    // Missing operands used to be filled in with x0 / 0; surplus ones dropped.
+    // Missing operands are an error rather than filled in with x0 / 0, and so are surplus ones.
     mustReject('add with 2 operands',  'add t0, t1',          'add takes 3 operands');
     mustReject('add with 4 operands',  'add t0, t1, t2, t3',  'add takes 3 operands');
     mustReject('addi with 2 operands', 'addi t0, t1',         'addi takes 3 operands');
@@ -446,16 +436,16 @@ setTimeout(async () => {
     mustAccept('jalr with 1 operand',  'jalr ra');
     console.log('Operand counts are checked; missing operands are no longer invented');
 
-    // A shift amount over 31 was masked to 0x1F: `slli t0, t1, 32` shifted by 0.
+    // A shift amount over 31 is an error; masked to 0x1F, `slli t0, t1, 32` would shift by 0.
     mustReject('shift by 32', 'slli t0, t1, 32', 'shift amount 32 is out of range');
     mustReject('shift by 99', 'srli t0, t1, 99', 'shift amount 99 is out of range');
     mustAccept('shift by 31', 'slli t0, t1, 31');
-    // lui's immediate was truncated to 20 bits in silence.
+    // lui's immediate must fit 20 bits rather than be truncated in silence.
     mustReject('lui over 20 bits', 'lui t0, 0x100000', 'does not fit the 20 bits');
     mustAccept('lui at the limit', 'lui t0, 0xFFFFF');
     console.log('Shift amounts and lui immediates are range-checked');
 
-    // A value too wide for its directive was truncated in silence.
+    // A value too wide for its directive is an error, not truncated in silence.
     mustReject('.byte 256',     '.data\nv: .byte 256',      'does not fit in .byte');
     mustReject('.half 65536',   '.data\nv: .half 65536',    'does not fit in .half');
     mustReject('.word too big', '.data\nv: .word 0x1FFFFFFFF', 'does not fit in .word');
@@ -464,7 +454,7 @@ setTimeout(async () => {
     mustAccept('.word 0xFFFF00A0', '.data\nv: .word 4294901920');
     console.log('Data directives reject values that would be truncated');
 
-    // A duplicate label silently redefined; a register-named label was unreachable.
+    // A duplicate label would silently redefine the first; a register-named label could not be reached.
     mustReject('duplicate label', 'a: nop\na: nop', 'defined more than once');
     mustReject('label named t0',  't0: nop\nj t0',  'is a register name');
     console.log('Duplicate and register-named labels are rejected');
@@ -534,9 +524,8 @@ setTimeout(async () => {
 
     // The overflow warnings state the size once, and the advice lives in the
     // console rather than being repeated in the status bar.
-    // circle_accel used to overflow the default 0x200 code segment, which is
-    // what this checked. Selecting it now sets the segment from its row in
-    // examples/index.txt, so it fits - the overflow has to be forced instead.
+    // Selecting circle_accel sets the code segment from its row in
+    // examples/index.txt, so it fits; the overflow is forced by shrinking it.
     await win.loadExample('circle_accel');
     doc.getElementById('ms-codesize').value = '0x100';
     win.eval('applyAndCloseSettings()');
@@ -591,7 +580,7 @@ setTimeout(async () => {
 
     // 15. A symbol offset is a number in the assembler's own syntax, and the
     //     escaper has to survive an attribute. Both are silent when wrong:
-    //     `sym+1f` resolved to `sym+1`, and a quote ended an attribute early.
+    //     `sym+1f` would resolve to `sym+1`, and a raw quote ends an attribute early.
     console.log('\n[15] Testing symbol-offset numbers and HTML attribute escaping...');
     win.setLanguageMode('asm');
     const asmSym = (expr) => {
@@ -632,8 +621,8 @@ setTimeout(async () => {
     console.log('symbol offsets accept 0x-hex and decimal, reject bare hex');
 
     // Every operand the Native column prints has to be one the assembler
-    // would take back. `la` printed the address the auipc stands for rather
-    // than the 20-bit field, which is well outside what auipc encodes.
+    // would take back. For `la` that is the auipc's 20-bit field, not the
+    // address it stands for, which is well outside what auipc encodes.
     const nativesOf = (src) => {
       doc.getElementById('console').innerHTML = '';
       win.editor.value = src;
@@ -677,7 +666,7 @@ setTimeout(async () => {
     console.log('escapeHtml covers quotes and round-trips through an attribute');
     console.log('✅ Symbol offsets and attribute escaping verified!');
 
-    // 16. Faults that assembled or ran without a word: each of these produced
+    // 16. Faults that would assemble or run without a word: each would give
     //     a wrong number and nothing on screen to say so.
     console.log('\n[16] Testing assembler, execution and edit-field corner cases...');
     const assembleSrc = (src) => {
@@ -696,12 +685,12 @@ setTimeout(async () => {
       return (r) => win.eval(`regs[${r}]`);
     };
 
-    // %lo of an address with bit 31 set: the subtraction form came out 2**32.
+    // %lo of an address with bit 31 set must wrap to 32 bits, not come out 2**32 too large.
     let reg = runToHalt('.equ U, 0xFFFF0064\n.text\nmain: lui t0, %hi(U)\n    addi t0, t0, %lo(U)\nhalt: j halt\n');
     if ((reg(5) >>> 0) !== 0xFFFF0064) {
       throw new Error(`%hi/%lo of 0xFFFF0064 built 0x${(reg(5) >>> 0).toString(16)}`);
     }
-    // A typo in li's operand assembled as li 0.
+    // A typo in li's operand is an error, not li 0.
     if (assembleSrc('.text\nmain: li t0, nosuch\nhalt: j halt\n')) {
       throw new Error('li with an undefined symbol assembled');
     }
@@ -713,27 +702,27 @@ setTimeout(async () => {
     }
     reg = runToHalt('.text\nmain: li t0, 0b101\n    li t1, -0x800\nhalt: j halt\n');
     if (reg(5) !== 5 || reg(6) !== -2048) throw new Error('li 0b101 / li -0x800 loaded the wrong values');
-    // A continuation line after .short: pass 1 sized it, pass 2 rejected it,
-    // and every later label pointed two bytes away from its data.
+    // A continuation line after .short: both passes have to size it the same,
+    // or every later label points two bytes away from its data.
     reg = runToHalt('.data\na: .short 1\n    2\nb: .word 0x12345678\n.text\n' +
                     'main: la t0, b\n    lw t1, 0(t0)\nhalt: j halt\n');
     if ((reg(6) >>> 0) !== 0x12345678) {
       throw new Error(`lw from the label after a .short continuation read 0x${(reg(6) >>> 0).toString(16)}`);
     }
-    // .space in hex reserved nothing (parseInt(..., 10) of "0x10" is 0).
+    // .space takes a hex size (parseInt(..., 10) of "0x10" would reserve nothing).
     assembleSrc('.data\nbuf: .space 0x10\nafter: .word 1\n.text\nmain: j main\n');
     if (win.eval('labels.after - labels.buf') !== 16) {
       throw new Error('.space 0x10 did not reserve 16 bytes');
     }
     console.log('%lo, li, data continuation and .space verified');
 
-    // amomin/amomax compare signed; memory was read back unsigned.
+    // amomin/amomax compare signed, so memory has to be read back signed.
     reg = runToHalt('.data\nv: .word -1\nw: .word -1\n.text\nmain: la t0, v\n    li t1, 5\n' +
                     '    amomin.w t2, t1, (t0)\n    lw t3, 0(t0)\n    la t0, w\n' +
                     '    amomax.w t2, t1, (t0)\n    lw t4, 0(t0)\nhalt: j halt\n');
     if (reg(28) !== -1) throw new Error(`amomin.w of -1 and 5 stored ${reg(28)}`);
     if (reg(29) !== 5) throw new Error(`amomax.w of -1 and 5 stored ${reg(29)}`);
-    // fclass.s / fclass.d never wrote rd; fcvt.w.s wrapped instead of saturating.
+    // fclass.s / fclass.d write rd; fcvt.w.s saturates rather than wrapping.
     reg = runToHalt('.data\nbig: .word 0x7f000000\nninf: .word 0xff800000\n.text\nmain: li t1, 5\n' +
                     '    fcvt.s.w f1, t1\n    fclass.s a0, f1\n    fcvt.d.w f2, t1\n    fclass.d a1, f2\n' +
                     '    la t0, big\n    flw f3, 0(t0)\n    fcvt.w.s a2, f3\n    fcvt.wu.s a3, f3\n' +
@@ -747,9 +736,9 @@ setTimeout(async () => {
     if (reg(14) !== 0x001 || reg(15) !== -0x80000000) {
       throw new Error(`-inf gave fclass ${reg(14)} and fcvt.w.s ${reg(15)}`);
     }
-    // The unsigned conversions were encoded as the double-precision signed
-    // ones, so fcvt.wu.s read the D register file. And the rounding mode in
-    // funct3 was ignored in favour of truncation.
+    // The unsigned conversions have encodings of their own, distinct from the
+    // double-precision signed ones, and the rounding mode in funct3 is
+    // honoured rather than always truncating.
     reg = runToHalt('.data\nv: .word 0x402ccccd\nh: .word 0x40200000\n.text\nmain: la t0, v\n' +
                     '    flw f1, 0(t0)\n    fcvt.w.s a0, f1\n    fcvt.w.s a1, f1, rtz\n' +
                     '    fcvt.wu.s a2, f1, rtz\n    la t0, h\n    flw f2, 0(t0)\n    fcvt.w.s a3, f2\n' +
@@ -773,8 +762,8 @@ setTimeout(async () => {
     }
     console.log('amomin/amomax, fclass and fcvt saturation verified');
 
-    // Editing a7 in the Registers panel also overwrote an FP double register,
-    // and the edit popup read a decimal as hex.
+    // Editing a7 in the Registers panel must not touch an FP double register,
+    // and the edit popup reads a decimal as decimal, not hex.
     assembleSrc('.text\nmain: j main\n');
     win.eval('dregs[1] = 1.5');
     const a7Cell = doc.querySelector('#regBody tr:nth-child(18) td[data-type="hex"]');
@@ -796,7 +785,7 @@ setTimeout(async () => {
     console.log('register edits touch only the register, and read decimal as decimal');
     console.log('✅ Assembler, execution and edit-field corner cases verified!');
 
-    // 17. Encodings checked against GNU as, and the open items from [16].
+    // 17. Encodings checked against GNU as, the FP register file, atomics and MMIO edges.
     console.log('\n[17] Testing encodings, the FP register file, atomics and MMIO edges...');
     const words = (src) => {
       if (!assembleSrc(src)) throw new Error('did not assemble: ' + src);
@@ -805,8 +794,8 @@ setTimeout(async () => {
     };
     // Every mnemonic in the instruction table, plus the optional operand
     // forms, against what GNU as encodes (gnu_encodings.json says how it was
-    // produced). This is what caught funct5 written as funct7 for the atomics,
-    // the unsigned FP conversions sharing the D forms' funct7, and bare fence.
+    // produced). It covers fields that are easy to get wrong, such as the
+    // atomics' funct5, the unsigned FP conversions' funct7 and bare fence.
     const gnuRef = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'gnu_encodings.json'), 'utf8'));
     for (const [src, hex] of gnuRef.encodings) {
       const got = words('.text\nmain: ' + src + '\n')[0];
@@ -821,8 +810,8 @@ setTimeout(async () => {
     if (JSON.stringify(ours) !== JSON.stringify(rarsImage)) {
       throw new Error('DIP_to_LED does not assemble to the RARS image in AA_IROM_DIP_to_LED.mem');
     }
-    // call's jalr carried no offset, so a callee that was not 4 KB-aligned from
-    // the call site was missed.
+    // call's jalr carries the low 12 bits of the offset, so a callee that is
+    // not 4 KB-aligned from the call site is still reached.
     reg = runToHalt('.text\nmain: call f\nhalt: j halt\n    nop\nf:  li a0, 7\n    ret\n');
     if (reg(10) !== 7) throw new Error('call to a function 12 bytes away never reached it');
     // la/call/tail rows get the immediate readings every other row has.
@@ -853,9 +842,8 @@ setTimeout(async () => {
     if (reg(15) !== 1) throw new Error('a second sc.w reused a spent reservation');
     console.log('one FP register file with NaN boxing; lr.w/sc.w reservation');
 
-    // A word straddling into the MMIO window went wholly to memory: the two
-    // bytes at 0xFFFF0000 read back as whatever was stored there, not as
-    // UART_RX_VALID.
+    // A word straddling into the MMIO window is split: the two bytes at
+    // 0xFFFF0000 read back as UART_RX_VALID, not as whatever was stored there.
     assembleSrc('.text\nmain: li t0, 0xFFFEFFFE\n    li t1, 0x00AB1234\n    sw t1, 0(t0)\n' +
                 '    lw a0, 0(t0)\nhalt: j halt\n');
     win.eval('uartRxFull = true; uartRxByte = 0x41');

@@ -7,25 +7,18 @@
 const fs = require('fs');
 const path = require('path');
 const { installExamplesFetch } = require('./examples_fetch');
-let JSDOM;
-try {
-  JSDOM = require('jsdom').JSDOM;
-} catch (e) {
-  JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM;
-}
+const { JSDOM } = require('jsdom');
 
 console.log('===========================================================');
 console.log('🚀 TESTING THE OLED PRESENT / DRAW RACE WARNING');
 console.log('===========================================================');
-
-const htmlPath = path.resolve(__dirname, '../riscv_simulator.html');
-const htmlContent = fs.readFileSync(htmlPath, 'utf8');
+const htmlContent = require('./page').html();
 const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 const dom = new JSDOM(htmlContent, {
   runScripts: 'dangerously',
   resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {

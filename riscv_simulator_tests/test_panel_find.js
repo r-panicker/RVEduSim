@@ -2,20 +2,15 @@
 // rows. Peripherals has controls rather than rows, so it has no filter.
 const fs = require('fs');
 const path = require('path');
-let JSDOM;
-try {
-  JSDOM = require('jsdom').JSDOM;
-} catch (e) {
-  JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM;
-}
+const { JSDOM } = require('jsdom');
 
-const html = fs.readFileSync(path.resolve(__dirname, '../riscv_simulator.html'), 'utf8');
+const html = require('./page').html();
 const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously',
   resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {

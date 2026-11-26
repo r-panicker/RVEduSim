@@ -1,0 +1,756 @@
+/* ============================================================
+   Shared data-panel column chrome (Registers / Memory /
+   Disassembly). One header design and one boundary separator
+   across all three panels, so they read as one system. The
+   Peripherals panel has neither.
+   ============================================================ */
+.reg-table th,
+.code-list th,
+.mem-col-h {
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #9399b2;
+  background: #1e1e2e;
+  border-bottom: 1px solid #313244;
+  text-align: left;
+  vertical-align: bottom;
+  /* Right padding clears the boundary separator so a header label
+     never runs into the line. */
+  padding: 5px 11px 4px 6px;
+  user-select: none;
+  /* Headers may wrap freely — that is a one-off cost paid once at the
+     top of the panel, unlike the data rows below them. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Registers' columns are narrow enough that a wrapped header only costs
+   height for no gain, unlike Memory/Disassembly - override after the
+   shared rule above so it actually wins. */
+.reg-table th {
+  white-space: nowrap;
+}
+
+/* All three headers stay pinned while their rows scroll under them.
+   The scrollport is the shared `.panel-body`, so `top: 0` parks each
+   header at the top of the panel while the toolbar/legend above it
+   scrolls away. Only the vertical axis is pinned — the header still
+   scrolls sideways in step with the data when a narrow panel scrolls
+   horizontally. Each carries an opaque background so the rows passing
+   beneath never show through. */
+.reg-table th,
+.code-list th,
+.mem-col-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* A <th>'s own sticky position stops holding once its panel is short
+   enough to actually need scrolling (only exposed once a panel gets
+   genuinely short, e.g. the mobile view's bounded panel body) - the
+   <thead> row group needs position: sticky too, or the whole header
+   row scrolls away with the data under it. */
+.reg-table thead,
+.code-list thead {
+  position: sticky;
+  top: 0;
+}
+
+/* The boundary separator between two columns. Drawn as an always-visible
+   hairline so the column edges are discoverable at a glance instead of
+   having to be hunted for, and it thickens to mauve under the pointer.
+   The hit area (11px) is deliberately much wider than the line it draws. */
+.col-resizer {
+  position: absolute;
+  top: 0;
+  bottom: -1px;
+  right: -5px;
+  width: 11px;
+  cursor: col-resize;
+  z-index: 3;
+  touch-action: none;
+}
+
+.col-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: #45475a;
+  transition: background 0.12s, width 0.12s;
+}
+
+.col-resizer:hover::after,
+.col-resizer.dragging::after {
+  width: 3px;
+  background: #cba6f7;
+}
+
+/* Column resizing is a desktop/mouse affordance — hide the handles in
+   the tabbed mobile view, where each panel is already full-width and
+   the columns auto-fit the viewport. */
+@media (max-width: 800px) {
+  .col-resizer {
+    display: none;
+  }
+}
+
+/* Memory View
+   One flex-wrap flow, not fixed rows: Addr/subtabs/refresh, Rows/Byte-Word
+   and the legend text all pack left to right and only spill onto another
+   line when they don't fit - each group stays whole (never split
+   mid-group) so a narrow panel loses rows of vertical space, not readable
+   text, before it starts wrapping. */
+.mem-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 4px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #313244;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-weight: 500;
+}
+
+.mem-tool-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.mem-tool-label {
+  color: #6c7086;
+  font-size: 12px;
+  font-weight: 550;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.mem-toolbar input {
+  background: #313244;
+  border: 1px solid #45475a;
+  color: #cdd6f4;
+  padding: 4px 6px;
+  font-size: 12.5px;
+  font-weight: 550;
+  font-family: 'Consolas', 'Roboto Mono', monospace;
+  width: 110px;
+  border-radius: 3px;
+}
+
+.mem-toolbar input#memRows {
+  width: 52px;
+}
+
+.mem-toolbar button {
+  background: #313244;
+  border: 1px solid #45475a;
+  color: #cdd6f4;
+  padding: 4px 9px;
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: inherit;
+}
+
+.mem-toolbar button:hover {
+  background: #45475a;
+}
+
+.mem-toolbar button.mem-refresh-btn {
+  background: transparent;
+  border-color: #45475a;
+  color: #a6adc8;
+  font-size: 14px;
+  padding: 3px 10px;
+}
+
+.mem-toolbar button.mem-refresh-btn:hover {
+  background: #45475a;
+  color: #cdd6f4;
+}
+
+.mem-toolbar button.gear {
+  background: #45475a;
+  color: #f5c2e7;
+  font-size: 14px;
+  padding: 3px 10px;
+}
+
+.mem-toolbar button.gear:hover {
+  background: #585b70;
+}
+
+/* Segmented Byte/Word display-mode toggle */
+.mem-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: #181825;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+  user-select: none;
+}
+
+.mem-view-mode-btn {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: #6c7086 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  padding: 3px 12px !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  font-family: inherit !important;
+  box-shadow: none !important;
+  transition: all 0.15s ease !important;
+}
+
+.mem-view-mode-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #a6adc8 !important;
+}
+
+.mem-view-mode-btn.active {
+  background: #313244 !important;
+  color: #cba6f7 !important;
+  border-color: #45475a !important;
+  font-weight: 700 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Column-header labels above the memory hex dump (Addr / Content (Hex) /
+   Content (ASCII)). Both this bar and .mem-view read the same
+   --mem-addr-w / --mem-hex-w / --mem-ascii-w custom properties, which
+   applyPanelColLayout() writes to each of them (a custom property is not
+   inherited past an element that declares its own value, and this bar is
+   a sibling of .mem-view, not a descendant). Neither scrolls on its own —
+   the shared .panel-body does, so the header and the rows under it always
+   scroll together. The background is on this bar rather than only on the
+   cells so the gaps between the flex children stay opaque while rows
+   scroll beneath the pinned header. */
+.mem-col-header {
+  display: flex;
+  align-items: flex-end;
+  margin-bottom: 4px;
+  background: #1e1e2e;
+}
+
+.mem-col-h[data-mem-col="addr"] {
+  flex: 0 0 auto;
+  width: var(--mem-addr-w);
+  text-align: center;
+}
+
+.mem-col-h[data-mem-col="hex"] {
+  flex: 0 0 auto;
+  width: var(--mem-hex-w);
+  text-align: center;
+}
+
+.mem-col-h[data-mem-col="ascii"] {
+  flex: 1 1 auto;
+  min-width: var(--mem-ascii-w);
+  text-align: center;
+}
+
+.mem-view {
+  font-family: 'Consolas', 'Roboto Mono', 'SF Mono', monospace;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.6;
+  word-wrap: break-word;
+  /* Per-column widths, written by applyPanelColLayout(). The defaults
+     here apply until it first runs. */
+  --mem-addr-w: 106px;
+  --mem-hex-w: 244px;
+  --mem-ascii-w: 90px;
+}
+
+.mem-view .addr {
+  color: #9399b2;
+  font-weight: 550;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  width: var(--mem-addr-w);
+  text-align: center;
+}
+
+.mem-view span.val {
+  color: #f5c2e7;
+  cursor: text;
+  display: inline-block;
+  min-width: 2ch;
+  text-align: center;
+  border-radius: 2px;
+  margin: 0 1px;
+}
+
+.mem-view span.val.readonly-code {
+  color: #f5c2e7;
+  cursor: default !important;
+  opacity: 0.88;
+}
+
+.mem-view span.val:hover:not(.readonly-code) {
+  background: rgba(203, 166, 247, 0.2);
+}
+
+.mem-view span.val.changed {
+  color: #ffe08f;
+  font-weight: bold;
+}
+
+.mem-view span.val.editing {
+  background: #f5c2e7;
+  color: #1e1e2e;
+  outline: 1px solid #cba6f7;
+}
+
+.mem-view span.ascii {
+  color: #74c7ec;
+  cursor: pointer;
+}
+
+/* The 4 ASCII bytes of one word, kept together as one unbreakable unit -
+   matching .mem-row-bytes's grouping in the Hex column - so a narrow
+   panel wraps between words, never mid-word. Without this each byte is
+   an independent inline-block and wraps whenever it happens to run out
+   of room, scattering one word's characters across two lines. */
+.mem-ascii-group {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.mem-view div {
+  margin: 2px 0;
+  /* Flex row: Addr (fixed) · hex block (natural, never wraps its data) ·
+     ASCII (flexible). When the panel is wider, the extra width goes to the
+     ASCII region and the hex data stays on one line — no wrapping. */
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.mem-view .mem-hex-block {
+  flex: 0 0 auto;
+  width: var(--mem-hex-w);
+  /* `max-content` is the hex data's own natural width, so the block can
+     never be squeezed narrower than the bytes it holds — the guarantee
+     that keeps the Hex|ASCII boundary honest. The drag clamp measures
+     the same natural width (see columnFloor()) so the header separator
+     stops exactly where the data does instead of sliding over it. */
+  min-width: max-content;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.mem-view .mem-ascii-block {
+  flex: 1 1 auto;
+  min-width: var(--mem-ascii-w);
+  text-align: center;
+}
+
+.mem-view span.val.word-cell {
+  color: #f5c2e7;
+  cursor: text;
+  display: inline-block;
+  min-width: 9ch;
+  text-align: center;
+  background: rgba(203, 166, 247, 0.08);
+  border: 1px solid rgba(203, 166, 247, 0.28);
+  border-radius: 3px;
+  padding: 0 6px;
+  margin: 0 2px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.mem-view span.val.word-cell.readonly-code {
+  cursor: default !important;
+  opacity: 0.88;
+  background: transparent;
+  border-color: transparent;
+}
+
+.mem-view span.val.word-cell:hover:not(.readonly-code) {
+  background: rgba(203, 166, 247, 0.2);
+}
+
+.mem-view span.val.word-cell.changed {
+  color: #ffe08f;
+  font-weight: bold;
+}
+
+.mem-view span.val.word-cell.editing {
+  background: #f5c2e7;
+  color: #1e1e2e;
+  outline: 1px solid #cba6f7;
+}
+
+/* Word-mode Content(DEC) cell: one decimal number per 32-bit word. */
+.mem-view span.val-dec {
+  display: inline-block;
+  text-align: center;
+  color: #94e2d5;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.mem-view span.val-dec:hover:not(.readonly-code) {
+  background: rgba(148, 226, 213, 0.15);
+}
+.mem-view span.val-dec.changed {
+  color: #ffe08f;
+  font-weight: bold;
+}
+.mem-view span.val-dec.readonly-code {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.mem-legend {
+  display: flex;
+  align-items: baseline;
+  gap: 2px 0;
+  font-size: 11.5px;
+  color: #bac2de;
+  font-weight: 500;
+  line-height: 1.5;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.mem-legend-mode {
+  color: #bac2de;
+}
+
+.mem-legend-endian {
+  color: #00ffff;
+  font-weight: bold;
+}
+
+.mem-legend-editable {
+  color: #89b4fa;
+  font-weight: 550;
+}
+
+.mem-legend-sep {
+  color: #6c7086;
+}
+
+.mem-row-label {
+  font-size: 11.5px;
+  color: #fab387;
+  font-weight: bold;
+}
+
+/* An MMIO register's own name/access sits above its word cell the same
+   way a user symbol does (.mem-row-label-anchor below) — just in the
+   peripheral-purple used elsewhere for MMIO rather than label-orange,
+   so the two kinds of annotation stay visually distinct. */
+.mmio-row-label {
+  color: #b4befe !important;
+}
+
+/* Compact signed/unsigned switch for a Value(Dec)/Content(DEC) column
+   header. Two single-character glyphs either side of the thumb (± / U)
+   carry the meaning; a title tooltip covers the rest, so nothing else
+   here spends space explaining itself. */
+.sign-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  user-select: none;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+/* The unconditional `display` above otherwise beats the `hidden`
+   attribute's own (UA-stylesheet) display:none, since author CSS wins
+   over UA CSS regardless of specificity - Byte mode's toggle would stay
+   visible and clickable despite `hidden` being set. */
+.sign-toggle[hidden] { display: none; }
+.sign-toggle input { display: none; }
+.sign-toggle-lbl {
+  font-size: 9px;
+  color: #6c7086;
+  font-weight: 700;
+}
+/* Small enough that it stays on the same line as the column label it
+   belongs to (Content (DEC)) even when a docked panel narrows that
+   column - a toggle wrapped onto its own line costs a whole header row
+   for one switch. */
+.sign-toggle-track {
+  position: relative;
+  width: 16px;
+  height: 10px;
+  background: #45475a;
+  border-radius: 6px;
+  transition: background .15s;
+}
+.sign-toggle-thumb {
+  position: absolute;
+  top: 1px;
+  left: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #cdd6f4;
+  transition: left .15s;
+}
+.sign-toggle input:checked ~ .sign-toggle-track { background: rgba(203, 166, 247, 0.55); }
+.sign-toggle input:checked ~ .sign-toggle-track .sign-toggle-thumb { left: 1px; background: #f5c2e7; }
+
+/* Anchored symbol labels: the label is placed directly ABOVE the 4-byte word
+   it belongs to. .mem-row-label-anchor stacks label + word cells vertically;
+   .mem-row-bytes wraps the four byte cells of a group so they stay in a row.
+   The anchor's width is pinned to the column's, same as every other row's -
+   otherwise a long label (e.g. two labels sharing an address) would widen
+   just this one row's Hex column, throwing off every row's alignment with
+   the Content column beside it. A long label wraps within that width
+   instead. */
+.mem-row-label-anchor {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  vertical-align: top;
+  width: var(--mem-hex-w);
+}
+.mem-row-label-anchor .mem-row-label {
+  font-size: 10.5px;
+  color: #fab387;
+  font-weight: bold;
+  line-height: 1.15;
+  padding: 0 6px;
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-align: center;
+  max-width: 100%;
+}
+.mem-row-label-anchor .mem-row-bytes {
+  display: inline-flex;
+}
+
+/* Machine / Disassembly views */
+.code-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+  font-family: 'Consolas', 'Roboto Mono', 'SF Mono', monospace;
+  font-weight: 500;
+}
+
+/* Every column's width comes from the <colgroup>, written by
+   applyPanelColLayout() — see the shared header/separator rules above
+   for the typography. Addr and Machine code are `grow: 0` there, so
+   they hold their content-sized width and never scale up just because
+   the panel widened; Native instruction and Original source split the
+   surplus between them. */
+
+.code-list td {
+  padding: 2px 6px;
+  vertical-align: top;
+  border-bottom: 1px solid #181825;
+}
+
+/* No `min-width` on any data cell: a cell minimum overrides the
+   <colgroup> width in a fixed-layout table, which would silently
+   widen the column past what the drag asked for. */
+.code-list .addr {
+  color: #9399b2;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.code-list .bytes {
+  color: #f5c2e7;
+  font-weight: 550;
+  /* Allow wrapping, but only between byte groups — never inside the 8 binary
+     digits of a single byte. `word-break: normal` + `overflow-wrap: anywhere`
+     lets the cell reflow at spaces/underscores on narrow panels while keeping
+     each byte's digits contiguous, which `break-all` would not. */
+  word-break: normal;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* LSB-order hint beside the Disassembly Byte/Word toggle (cyan, matching the
+   Memory-view endianness hint). Byte mode = "LSB to the left" (bytes shown in
+   memory order), Word mode = "LSB to the right" (one whole little-endian word). */
+.disasm-order-hint {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #89dceb;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* The two text columns are the ones that take up the slack when the
+   panel is narrow, so they wrap — but at word boundaries first
+   (`word-break: normal`), only breaking inside a token when a single
+   long operand genuinely cannot fit. `break-all` would chop every
+   mnemonic mid-word. */
+.code-list .native {
+  color: #cdd6f4;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.code-list .source {
+  color: #a6adc8;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Only immediates whose encoded field genuinely reads more than one way
+   are marked, so the dotted underline means "there is more here" rather
+   than decorating every number in the column. */
+.code-list .disasm-imm {
+  border-bottom: 1px dotted #6c7086;
+  cursor: help;
+}
+
+.code-list .disasm-imm:hover,
+.code-list .disasm-imm:focus {
+  border-bottom-color: #cba6f7;
+  color: #f5e0dc;
+  outline: none;
+}
+
+/* Fixed, so the panel's own overflow:auto cannot clip it, and
+   pointer-events:none so it never swallows the tap that dismisses it. */
+#immPopover {
+  position: fixed;
+  z-index: 9999;
+  background: #181825;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-family: 'Consolas', 'Roboto Mono', monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #cdd6f4;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  max-width: 92vw;
+}
+
+#immPopover[hidden] { display: none; }
+
+#immPopover .imm-row { white-space: nowrap; }
+
+#immPopover .imm-key {
+  color: #6c7086;
+  display: inline-block;
+  min-width: 58px;
+}
+
+.code-list .pseudo {
+  /* The blue of this panel's label rows, not the orange that marks
+     labels in the code window and the memory view. */
+  color: #89b4fa;
+}
+
+.code-list .native-expanded {
+  color: #a6e3a1;
+}
+
+.code-list tr.current-native td {
+  background: rgba(137, 180, 250, 0.20);
+}
+
+.code-list tr.disasm-label-row td {
+  padding: 6px 6px 3px 6px;
+  border-bottom: 1px dashed rgba(137, 180, 250, 0.20);
+  background: rgba(137, 180, 250, 0.06);
+}
+
+.disasm-label-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #89b4fa;
+  background: rgba(137, 180, 250, 0.12);
+  border: 1px solid rgba(137, 180, 250, 0.30);
+  border-radius: 4px;
+  padding: 1px 8px;
+  letter-spacing: 0.2px;
+}
+
+.disasm-label-name {
+  /* Orange like the code-window labels and the memory-view row labels */
+  color: #fab387;
+  font-family: 'Consolas', 'Roboto Mono', 'SF Mono', monospace;
+  font-weight: 700;
+}
+
+.disasm-target-label {
+  color: #89dceb;
+  font-weight: 600;
+  font-size: 11.5px;
+  background: rgba(137, 220, 235, 0.12);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-left: 2px;
+}
+
+.disasm-cvar-tag {
+  color: #a6e3a1;
+  font-weight: 600;
+  font-size: 11.5px;
+  background: rgba(166, 227, 161, 0.12);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-left: 2px;
+  cursor: default;
+}
+
+.locals-row-flash {
+  animation: localsRowFlash 1.2s ease-out;
+}
+@keyframes localsRowFlash {
+  0% { background: rgba(166, 227, 161, 0.45); }
+  100% { background: transparent; }
+}
+
+.disasm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #6c7086;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.disasm-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.disasm-show-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

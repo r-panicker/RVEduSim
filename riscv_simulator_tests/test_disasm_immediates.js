@@ -1,5 +1,5 @@
 // test_disasm_immediates.js
-// The Native instruction column still shows the operand exactly as it was
+// The Native instruction column shows the operand exactly as it was
 // written. An immediate whose encoded field reads more than one way gains a
 // marker carrying the other readings, and every reading offered has to be a
 // spelling a real assembler accepts - which is the whole point: a 12-bit
@@ -10,24 +10,19 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { installExamplesFetch } = require('./examples_fetch');
-let JSDOM;
-try {
-  JSDOM = require('jsdom').JSDOM;
-} catch (e) {
-  JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM;
-}
+const { JSDOM } = require('jsdom');
 
 console.log('===========================================================');
 console.log('🚀 TESTING DISASSEMBLY IMMEDIATE READINGS');
 console.log('===========================================================');
 
-const html = fs.readFileSync(path.resolve(__dirname, '../riscv_simulator.html'), 'utf8');
+const html = require('./page').html();
 const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously',
   resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {

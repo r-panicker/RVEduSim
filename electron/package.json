@@ -6,7 +6,9 @@
   "main": "main.js",
   "private": true,
   "scripts": {
+    "prestart": "npm --prefix .. run build",
     "start": "electron .",
+    "predist": "npm --prefix .. run build",
     "build:iverilog": "node -e \"const o={darwin:'mac',win32:'win'}[process.platform]||process.platform;console.log('iverilog/'+o+'-'+process.arch)\" | xargs bash scripts/build-iverilog.sh",
     "dist": "electron-builder --publish never",
     "build:verilator": "node -e \"const o={darwin:'mac',win32:'win'}[process.platform]||process.platform;console.log('verilator/'+o+'-'+process.arch)\" | xargs bash scripts/build-verilator.sh"
@@ -28,8 +30,13 @@
     ],
     "extraResources": [
       {
-        "from": "../riscv_simulator.html",
-        "to": "web/riscv_simulator.html"
+        "from": "../dist",
+        "to": "web",
+        "filter": [
+          "index.html",
+          "app.js",
+          "app.css"
+        ]
       },
       {
         "from": "../vendor",

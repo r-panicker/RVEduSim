@@ -1,0 +1,717 @@
+/* ---- Datapath strip ------------------------------------------------
+   The lecture's single-cycle datapath, animated one phase at a time for
+   the instruction at the PC. It takes the waveform strip's place at the
+   bottom of the window, in the JS engine only: the diagram is wide, and
+   the bottom is where the width is. The diagram keeps the slides' white
+   paper so it looks like the one students have already seen. */
+.dp-resizer { display: none; }
+body:not(.hdl-mode):not(.dp-in-panel).dp-open .dp-resizer { display: block; }
+
+.dp-dock {
+  display: none;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+  background: #1e1e2e;
+  border-top: 1px solid #313244;
+  overflow: hidden;
+}
+
+body.dp-open:not(.hdl-mode):not(.dp-in-panel) .dp-dock { display: flex; flex: 0 0 420px; }
+
+/* Maximised, the strip takes the editor's and the panels' room; the
+   toolbar, with Step and Run, stays where it is. */
+body.dp-max:not(.hdl-mode):not(.dp-in-panel) .main { display: none; }
+body.dp-max.dp-open:not(.hdl-mode):not(.dp-in-panel) .dp-dock { flex: 1 1 auto !important; }
+body.dp-max .dp-resizer { display: none !important; }
+
+.dp-fold-btn::after { content: '✕'; }
+.dp-max-btn::after { content: '⤢'; }
+body.dp-max .dp-max-btn::after { content: '⤡'; }
+
+.dp-hdr { flex-wrap: wrap; row-gap: 3px; }
+
+.dp-instr {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12.5px;
+  color: #f9e2af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.dp-phase {
+  font-size: 11.5px;
+  color: #89b4fa;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
+.dp-speed {
+  font-size: 11px;
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 3px;
+  padding: 1px 2px;
+}
+
+.dp-caption {
+  padding: 5px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #cdd6f4;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  min-height: 2.9em;
+  flex-shrink: 0;
+}
+/* On a phone an empty caption takes no space. On desktop it keeps its
+   height, or the drawing would rescale between instructions. */
+body.dp-in-panel #tab-datapath .dp-caption:empty { display: none; }
+/* Below the drawing: the instruction and the picture belong together. */
+.dp-caption { order: 1; border-bottom: none; border-top: 1px solid #313244; }
+.stat-lag { color: #fab387; }
+#dpClock .dp-clk-wave { fill: none; stroke: #4c4f69; stroke-width: 9; }
+#dpClock .dp-clk-next { fill: none; stroke: #4c4f69; stroke-width: 9; stroke-dasharray: 16 12; }
+#dpClock .dp-clk-arrow { fill: #4c4f69; }
+#dpClock .dp-clk-label { fill: #4c4f69; font: 700 56px Arial, sans-serif; }
+#dpClock.dp-clk-edge .dp-clk-next { stroke: #df8e1d; stroke-width: 18; stroke-dasharray: none; }
+#dpClock.dp-clk-edge .dp-clk-next-arrow { fill: #df8e1d; }
+#dpClock .dp-clk-step rect { fill: var(--sc); opacity: 0.14; }
+#dpClock .dp-clk-step.done rect { opacity: 0.4; }
+#dpClock .dp-clk-step.now rect { opacity: 1; }
+#dpClock .dp-clk-step text { fill: var(--sc); font: 700 72px Arial, sans-serif; }
+#dpClock .dp-clk-step.now text { fill: #fff; }
+/* A phone keeps the header to one row: smaller type, no address, and the
+   instruction gives way (ellipsis) before anything wraps. */
+body.dp-in-panel #tab-datapath .dp-hdr { flex-wrap: nowrap; }
+.dp-hdr .dp-instr:empty, .dp-hdr .dp-phase:empty { display: none; }
+body.dp-in-panel #tab-datapath .dp-instr { font-size: 11px; }
+body.dp-in-panel #tab-datapath .dp-instr-addr { display: none; }
+body.dp-in-panel #tab-datapath .dp-phase { font-size: 10.5px; }
+body.dp-in-panel #tab-datapath .dp-stage-name { display: none; }
+body.dp-in-panel #tab-datapath .dp-hdr-actions { flex-shrink: 0; align-items: center; }
+body.dp-in-panel #tab-datapath .dp-hdr #dpPipeCfgBtn { min-height: 0; min-width: 28px; padding: 1px 6px; font-size: 12px; }
+body.dp-in-panel #tab-datapath .dp-hdr .dp-seg button { padding: 1px 8px; font-size: 12px; }
+
+.dp-caption code {
+  font-family: 'Consolas', 'Courier New', monospace;
+  color: #f9e2af;
+}
+
+.dp-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: #fbfbf8;
+  display: flex;
+  justify-content: center;
+}
+
+.dp-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* A lit wire keeps the diagram's own geometry and only changes colour
+   and weight; unused and don't-care paths recede rather than vanish. */
+/* --sc is the colour of the pipeline stage that lit it (single-cycle). */
+.dp-svg [data-e].dp-lit-data { stroke: var(--sc, #e64553) !important; stroke-width: 11px !important; }
+.dp-svg [data-e].dp-lit-field { stroke: var(--sc, #8839ef) !important; stroke-width: 11px !important; }
+.dp-svg [data-e].dp-lit-ctrl { stroke: var(--sc, #1e66f5) !important; stroke-width: 7px !important; }
+.dp-svg [data-e].dp-lit-unused { stroke: #bcc0cc !important; stroke-dasharray: 18 12; }
+.dp-svg [data-e].dp-lit-x { stroke: #bcc0cc !important; stroke-dasharray: 4 10; }
+/* Tinted, not filled: some blocks are drawn over their own labels. */
+.dp-svg [data-e].dp-glow { stroke: var(--sc, #fe640b) !important; stroke-width: 12px !important; fill: var(--sc, #fe640b) !important; fill-opacity: 0.08; }
+.dp-svg [data-e].dp-glow-ctrl { stroke: var(--sc, #1e66f5) !important; stroke-width: 12px !important; fill: var(--sc, #1e66f5) !important; fill-opacity: 0.08; }
+.dp-svg [data-e].dp-edge { stroke: var(--sc, #40a02b) !important; stroke-width: 12px !important; fill: var(--sc, #40a02b) !important; fill-opacity: 0.1; }
+
+.dp-body { position: relative; }
+.dp-body.dp-enc-below { flex-direction: column; align-items: stretch; justify-content: flex-start; }
+.dp-body.dp-enc-below .dp-enc { order: 2; position: static; margin: 6px 8px 8px; flex-shrink: 0; align-self: flex-start; }
+.dp-body.dp-enc-below .dp-svg { flex: 0 0 auto; height: auto; }
+.dp-body.dp-enc-side { align-items: flex-start; }
+.dp-body.dp-enc-side .dp-enc { position: static; margin: 8px 0 0 8px; flex-shrink: 0; }
+.dp-body.dp-enc-side .dp-svg { flex: 1 1 auto; min-width: 0; }
+
+/* The encoding sits on the diagram's paper, so it takes the paper's colours. */
+.dp-enc {
+  position: absolute;
+  z-index: 1;
+  background: #ffffff;
+  border: 1px solid #ccd0da;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: #4c4f69;
+  font-size: 11px;
+  line-height: 1.35;
+  box-shadow: 0 2px 8px rgba(76, 79, 105, 0.12);
+  max-width: 460px;
+}
+.dp-ctl-table {
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.dp-ctl-table th {
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 9.5px;
+  line-height: 1.1;
+  color: #6c6f85;
+  padding: 0 4px 3px;
+  vertical-align: bottom;
+  border-bottom: 1px solid #ccd0da;
+}
+.dp-ctl-table td { padding: 1px 4px; text-align: center; vertical-align: top; }
+.dp-ctl-table td.dp-ctl-name { text-align: left; }
+.dp-ctl-table td:last-child { text-align: left; }
+.dp-ctl-table tr.dp-ctl-on td { background: rgba(30, 102, 245, 0.14); color: #1e66f5; font-weight: 700; }
+.dp-ctl-note { margin-top: 3px; font-size: 9.5px; color: #8c8fa1; font-family: 'Consolas', 'Courier New', monospace; }
+.dp-enc[hidden] { display: none; }
+.dp-enc code, .dp-enc-bin, .dp-enc-grid { font-family: 'Consolas', 'Courier New', monospace; }
+.dp-enc-title { margin-bottom: 4px; }
+.dp-enc-title code { color: #1e66f5; }
+.dp-enc-grid {
+  display: grid;
+  grid-template-columns: repeat(32, 13px);
+  margin-bottom: 4px;
+}
+.dp-enc-name {
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  padding: 0 1px;
+}
+.dp-enc-bit {
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 17px;
+  border-top: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+}
+.dp-enc-bit.dp-enc-first { border-left: 1px solid currentColor; }
+.dp-enc-bit.dp-enc-lsb { border-right: 1px solid currentColor; }
+.dp-enc-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #8c8fa1;
+  padding: 0 1px;
+}
+.dp-enc-ctl { color: #8839ef; }
+.dp-enc-reg { color: #179299; }
+.dp-enc-imm { color: #df8e1d; }
+.dp-enc-bit.dp-enc-ctl { background: rgba(136, 57, 239, 0.1); }
+.dp-enc-bit.dp-enc-reg { background: rgba(23, 146, 153, 0.1); }
+.dp-enc-bit.dp-enc-imm { background: rgba(223, 142, 29, 0.12); }
+.dp-enc-table { border-collapse: collapse; }
+.dp-enc-table td { padding: 0 7px 0 0; vertical-align: top; }
+.dp-enc-table td:last-child { padding-right: 0; }
+.dp-enc-range { color: #8c8fa1; }
+.dp-enc-bin { color: #4c4f69; }
+div.dp-enc-imm { margin-top: 3px; }
+div.dp-enc-imm code { color: #df8e1d; }
+
+/* Pipelined: its own drawing, or a timeline in its place. A lit wire
+   takes its stage's colour. */
+.dp-pipe-svg { display: none; }
+body.dp-pipe #dpSvg { display: none; }
+body.dp-pipe:not(.dp-bp) #dpPipeSvg,
+body.dp-pipe.dp-bp #dpPipeBpSvg { display: block; }
+body.dp-view-timeline .dp-body > .dp-svg,
+body.dp-view-timeline .dp-enc { display: none !important; }
+body:not(.dp-pipe) .dp-hdr .dp-pipe-only { display: none !important; }
+.dp-seg {
+  display: inline-flex;
+  border: 1px solid #45475a;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.dp-seg button {
+  background: #313244;
+  border: none;
+  color: #a6adc8;
+  padding: 2px 9px;
+  font: 600 11.5px inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+.dp-seg button + button { border-left: 1px solid #45475a; }
+.dp-seg button.active { background: #cba6f7; color: #11111b; }
+.visit-count { color: #6c7086; font-size: 11.5px; }
+/* Step controls that stay in reach while a phone scrolls. */
+.float-steps {
+  position: fixed;
+  right: 10px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 48;
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 24px;
+  background: rgba(24, 24, 37, 0.88);
+  border: 1px solid #45475a;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.float-steps[hidden], .float-steps button[hidden] { display: none; }
+.float-steps button {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #585b70;
+  background: #313244;
+  color: #cdd6f4;
+  font-size: 15px;
+  padding: 0;
+  cursor: pointer;
+}
+.float-steps button:disabled { opacity: 0.35; }
+body.float-dp #tab-datapath #dpPrevBtn, body.float-dp #tab-datapath #dpNextBtn,
+body.float-dp #tab-datapath #dpPlayBtn { display: none; }
+.visit-count[hidden] { display: none; }
+.dp-svg [data-e].pl-lit { stroke: var(--pl) !important; stroke-width: 11px !important; }
+.dp-svg [data-e].pl-lit.pl-thin { stroke-width: 7px !important; }
+.pdp-stage-label {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 50px;
+}
+.pdp-stage-label.pdp-bubble { font-style: italic; opacity: 0.6; }
+.pdp-enc-row + .pdp-enc-row { margin-top: 5px; }
+.pdp-enc-head { font-size: 11px; white-space: nowrap; }
+.pdp-enc-head code { color: #4c4f69; }
+.pdp-enc-head i { color: #8c8fa1; }
+.pdp-enc-grid .dp-enc-name { font-size: 8.5px; }
+.dp-timeline { display: none; }
+body.dp-view-timeline .dp-timeline {
+  display: block;
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 0 10px 8px;
+}
+.pdp-tl {
+  border-collapse: collapse;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  color: #4c4f69;
+}
+.pdp-tl th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fbfbf8;
+  font-weight: 600;
+  color: #8c8fa1;
+  padding: 6px 0 2px;
+  min-width: 26px;
+}
+.pdp-tl td { height: 22px; text-align: center; border-bottom: 1px solid #eceae6; }
+.pdp-tl .pdp-tl-ins { text-align: left; white-space: nowrap; padding-right: 12px; }
+.pdp-tl-addr { color: #9ca0b0; }
+.pdp-tl-cell {
+  font-weight: 700;
+  color: #fff;
+  background: var(--pc);
+  border: 1px solid #fbfbf8;
+}
+.pdp-tl-stall { background: repeating-linear-gradient(135deg, var(--pc) 0 5px, #fbfbf8 5px 8px); color: #4c4f69; }
+.pdp-tl-flush { text-decoration: line-through; opacity: 0.55; }
+.pdp-tl .pdp-tl-bub { background: #fbfbf8; color: #9ca0b0; font-weight: 400; outline: 1px dashed #9ca0b0; outline-offset: -3px; }
+.pdp-tl-nop { color: #8c8fa1; }
+.pdp-tl tr.pdp-tl-gone td { opacity: 0.3; }
+.pdp-tl .pdp-tl-miss { box-shadow: inset 0 0 0 2px #11111b; text-decoration: underline wavy; }
+.pdp-tl th.pdp-tl-live { color: #4c4f69; }
+.pdp-tl td.pdp-tl-live { box-shadow: inset 0 0 0 2px #4c4f69; }
+.pdp-tl-empty { color: #8c8fa1; font-size: 12.5px; }
+
+.dp-chip rect { rx: 10px; }
+.dp-chip text {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 34px;
+  font-weight: 700;
+  fill: #ffffff;
+  dominant-baseline: central;
+}
+.dp-chip.dp-parked { opacity: 0.9; }
+.dp-chip.dp-parked text { font-size: 26px; }
+
+/* On a phone the strip is a panel tab of its own. */
+body.dp-in-panel #tab-datapath .dp-dock {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 340px;
+  border-top: none;
+}
+body.dp-in-panel #tab-datapath .dp-hdr .dp-hdr-title,
+body.dp-in-panel #tab-datapath .dp-hdr .dp-fold-btn,
+body.dp-in-panel #tab-datapath .dp-hdr .dp-max-btn { display: none; }
+body.dp-in-panel #tab-datapath .dp-hdr .panel-hdr-btn:not(.dp-max-btn):not(.dp-fold-btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 14px;
+  border: 1px solid #45475a;
+}
+body.dp-in-panel #tab-datapath .dp-body { justify-content: flex-start; min-height: 300px; }
+/* The timeline is only as tall as its rows. */
+body.dp-in-panel.dp-view-timeline #tab-datapath .dp-dock,
+body.dp-in-panel.dp-view-timeline #tab-datapath .dp-body { min-height: 0; flex: 0 0 auto; }
+/* Centred, a diagram wider than the panel would overflow to the left,
+   where scrolling cannot reach. */
+body.dp-in-panel #tab-datapath .dp-svg { width: 100%; height: auto; }
+body.dp-in-panel #tab-datapath .dp-enc { max-width: calc(100% - 16px); overflow-x: auto; }
+
+/* ---- Waveform strip: header, signal names and picker (its grab bar is in
+   08-waveform.css) ---- */
+.wave-fold-btn::after { content: '✕'; }
+
+.wave-dock {
+  display: none;
+  flex-direction: column;
+  flex: 0 0 240px;
+  min-height: 0;
+  background: #1e1e2e;
+  border-top: 1px solid #313244;
+  overflow: hidden;
+  position: relative;
+}
+
+body.wave-open .wave-dock { display: flex; }
+
+/* Inside the mobile panel it is the panel's whole content, so it drops the
+   fixed strip height and the border that separated it from the page, and
+   shows whenever its tab is chosen rather than tracking `wave-open`. */
+body.wave-in-panel #tab-waveform .wave-dock {
+  display: flex;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 320px;
+  border-top: none;
+}
+
+body.wave-in-panel .wave-resizer { display: none; }
+
+/* The panel chrome already names it, and ctrl+scroll is not a gesture the
+   devices this layout is for have. */
+body.wave-in-panel #tab-waveform .wave-hdr-title,
+body.wave-in-panel #tab-waveform .wave-hdr-hint { display: none; }
+
+/* Mobile hides panel header buttons, but these are the waveform's only
+   controls: picking signals and zooming are how it is read at all. */
+body.wave-in-panel #tab-waveform .wave-hdr .panel-hdr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 14px;
+  border: 1px solid #45475a;
+}
+
+body.wave-in-panel #tab-waveform .wave-hdr {
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+body.wave-in-panel #tab-waveform .wave-hdr .wave-fold-btn { display: none; }
+
+/* 16px, or a phone zooms the page in on focus. */
+body.wave-in-panel #tab-waveform .wave-cycle input {
+  width: 10ch;
+  min-height: 36px;
+  font-size: 16px;
+}
+
+.wave-hdr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 4px 3px 10px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.wave-hdr-title {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #9399b2;
+}
+
+/* Sits above the name gutter, so the control that changes the names is
+   over the names rather than beside the button that closes the strip. */
+.wave-add-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid #45475a;
+}
+
+/* Nothing to say for most runs, and an empty item still takes a row when
+   the header wraps. */
+.wave-hdr-info:empty { display: none; }
+
+.wave-hdr-info {
+  font-size: 11px;
+  color: #6c7086;
+  font-family: 'Consolas', 'Courier New', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+/* The first thing to go when the header runs out of room: it is a
+   reminder, not a control. */
+.wave-hdr-hint {
+  font-size: 10.5px;
+  color: #45475a;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.wave-hdr-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.wave-cycle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 6px;
+  font-size: 11px;
+  color: #9399b2;
+  white-space: nowrap;
+}
+
+.wave-cycle input {
+  width: 9ch;
+  padding: 2px 4px;
+  font: 11px 'Consolas', 'Courier New', monospace;
+  color: #cdd6f4;
+  background: #11111b;
+  border: 1px solid #45475a;
+  border-radius: 3px;
+}
+
+.wave-notice {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #a6adc8;
+  line-height: 1.5;
+}
+
+.wave-dock.wave-empty .wave-notice { display: flex; }
+.wave-dock.wave-empty .wave-body { display: none; }
+
+.wave-notice button {
+  background: #cba6f7;
+  border: none;
+  color: #1e1e2e;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 650;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.wave-notice button:hover { background: #d7bcfa; }
+
+/* Scrolls as one, so more signals than fit the strip's height are
+   reachable without the labels sliding out of step with their traces. */
+.wave-body {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* The name gutter is a sibling of the canvas, not a scroller of its own:
+   both are given the same natural height, so a signal's label always sits
+   on the same line as its trace. */
+.wave-names {
+  flex: 0 0 165px;
+  position: sticky;
+  left: 0;
+  background: #181825;
+  border-right: 1px solid #313244;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11px;
+}
+
+.wave-name {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: #cdd6f4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid rgba(49, 50, 68, 0.45);
+}
+
+.wave-names-axis {
+  height: 20px;
+  border-bottom: 1px solid #313244;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+  font-size: 10px;
+  color: #6c7086;
+}
+
+#waveCanvas {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  cursor: crosshair;
+  /* Height is set in script to the rows' natural height, so .wave-body
+     scrolls when there are more signals than the strip is tall. */
+}
+
+#waveCanvas.wave-panning { cursor: grabbing; }
+
+.wave-name {
+  justify-content: space-between;
+}
+
+.wave-name-remove {
+  background: none;
+  border: none;
+  color: #6c7086;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 3px;
+  /* Held out of the layout until hover so eight labels do not read as
+     eight buttons; the row keeps its width either way. */
+  visibility: hidden;
+  flex-shrink: 0;
+}
+
+.wave-name:hover .wave-name-remove { visibility: visible; }
+.wave-name-remove:hover { background: #45475a; color: #f38ba8; }
+
+.wave-picker[hidden] { display: none; }
+
+/* Overlaid rather than stacked: a dropdown that reflowed the strip would
+   squeeze the waves it exists to add to. */
+.wave-picker {
+  position: absolute;
+  top: 26px;
+  left: 6px;
+  z-index: 20;
+  width: min(460px, calc(100% - 12px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  background: #181825;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.75);
+}
+
+.wave-picker-hdr {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #9399b2;
+}
+
+.wave-picker-hdr button { font-size: 11px; padding: 2px 7px; }
+.wave-picker-hdr button:first-of-type { margin-left: auto; }
+.wave-picker-hdr button:last-of-type { color: #cba6f7; }
+
+.wave-picker input {
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  color: #cdd6f4;
+  padding: 3px 6px;
+  font-size: 11px;
+  border-radius: 3px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  outline: none;
+}
+
+.wave-picker input:focus { border-color: #cba6f7; }
+
+.wave-picker-list {
+  max-height: 132px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.wave-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11px;
+  color: #cdd6f4;
+  cursor: pointer;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.wave-picker-item:hover { background: #313244; }
+.wave-picker-item.on { color: #a6e3a1; }
+.wave-picker-item .wave-picker-w { color: #6c7086; margin-left: auto; padding-left: 10px; }
+.wave-picker-empty { padding: 6px 4px; font-size: 11px; color: #6c7086; }
+
+/* Console message colours (the console itself is in 07-console.css). */
+.console .error {
+  color: #f38ba8;
+}
+
+.console .info {
+  color: #89b4fa;
+}
+
+.console .success {
+  color: #a6e3a1;
+}
+
+.console .warn {
+  color: #f9e2af;
+}

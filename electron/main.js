@@ -1,5 +1,5 @@
 'use strict';
-// The desktop app: riscv_simulator.html in a window, served from disk over
+// The desktop app: the page built into dist/ (npm run build) in a window, served from disk over
 // app:// (a file:// page cannot fetch its own .wasm), with Icarus Verilog
 // run natively through the bridge in preload.js.
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } = require('electron');
@@ -10,7 +10,7 @@ const { createRunner, findBinDir, readFolder } = require('./hdl_native');
 const { createVerilator, findVerilator } = require('./verilator_native');
 
 const OS = { darwin: 'mac', win32: 'win' }[process.platform] || process.platform;
-const WEB_ROOT = app.isPackaged ? path.join(process.resourcesPath, 'web') : path.join(__dirname, '..');
+const WEB_ROOT = app.isPackaged ? path.join(process.resourcesPath, 'web') : path.join(__dirname, '..', 'dist');
 const IVL_DIR = findBinDir([
   app.isPackaged ? path.join(process.resourcesPath, 'iverilog') : null,
   path.join(__dirname, 'iverilog', OS + '-' + process.arch)
@@ -127,7 +127,7 @@ function createWindow() {
   win.webContents.on('will-navigate', (e, url) => {
     if (!url.startsWith('app://')) { e.preventDefault(); external(url); }
   });
-  win.loadURL('app://rvsim/riscv_simulator.html');
+  win.loadURL('app://rvsim/index.html');
 }
 
 app.whenReady().then(() => {

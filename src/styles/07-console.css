@@ -1,0 +1,34 @@
+/* Console */
+.console {
+  background: #11111b;
+  padding: 8px 10px;
+  font-size: 13px;
+  max-height: 140px;
+  overflow: auto;
+  min-height: 40px;
+  line-height: 1.5;
+}
+
+/* Grab bar for the console's height. Its own top border stands in for the
+   console's, so the two never double up. */
+.console-resizer {
+  height: 6px;
+  flex: 0 0 6px;
+  cursor: ns-resize;
+  background: #181825;
+  border-top: 1px solid #313244;
+  position: relative;
+}
+.console-resizer::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 28px;
+  height: 2px;
+  margin-left: -14px;
+  border-radius: 1px;
+  background: #45475a;
+}
+.console-resizer:hover::after,
+.console-resizer.dragging::after { background: #89b4fa; }

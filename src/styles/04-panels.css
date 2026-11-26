@@ -1,0 +1,352 @@
+/* Right Panel Tabs / Dockable Panels */
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+}
+
+.tab-bar button {
+  flex: 1 1 auto;
+  min-width: 90px;
+  background: none;
+  border: none;
+  color: #a6adc8;
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  font-family: inherit;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tab-bar button:hover {
+  color: #cdd6f4;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tab-bar button.active {
+  color: #cba6f7;
+  font-weight: 650;
+  border-bottom-color: #cba6f7;
+}
+
+.tab-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #45475a;
+  flex-shrink: 0;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.tab-bar button.active .tab-chip-dot {
+  background: #cba6f7;
+}
+
+.tab-bar button.floating .tab-chip-dot {
+  background: #89b4fa;
+  box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.3);
+}
+
+/* Docked panel container. With ≤2 docked panels this is a single vertical
+   stack (1 column); with more, the panels wrap into a 2-column grid.
+   Rows are created as .panel-dock-row wrappers, columns are separated by a
+   draggable .panel-hsplitter, rows by a draggable .panel-vsplitter. */
+.panel-stack {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* A single row of the 2×2 grid (2 columns). */
+.panel-dock-row {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  flex: 1 1 0;
+  min-height: 90px;
+  min-width: 0;
+}
+
+/* Row holding only ONE panel (e.g. the 3rd of 3 visible panels): the lone
+   panel must stretch to fill the entire row width — no blank space is left
+   for an invisible 4th panel. */
+.panel-dock-row-single > .tab-content {
+  flex: 1 1 0 !important;
+}
+
+/* Vertical separator between the two columns of the 2×2 grid. */
+.panel-hsplitter {
+  width: 6px;
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: #181825;
+  border-left: 1px solid #313244;
+  border-right: 1px solid #313244;
+}
+
+.panel-hsplitter:hover {
+  background: #cba6f7;
+}
+
+.panel-stack-empty {
+  flex: 1;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  color: #6c7086;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.panel-stack-empty-icon {
+  color: #45475a;
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.panel-stack-empty b {
+  color: #9399b2;
+}
+
+.panel-stack.is-empty .panel-stack-empty {
+  display: flex;
+}
+
+.tab-content {
+  flex: 1 1 0;
+  min-height: 90px;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.tab-content.panel-docked {
+  display: flex;
+  /* Paired grid rows use shrinkable `0 1 Npx` flex-basis; without
+     min-width: 0 the panel cannot shrink below its content's min-content
+     width (wide tables / machine-code columns), so when the main splitter
+     narrows the dock the row overflows and leaves blank space on the right.
+     min-width: 0 lets the flex item shrink to match the narrower dock. */
+  min-width: 0;
+}
+
+.tab-content.panel-floating {
+  display: flex;
+  position: fixed;
+  z-index: 40;
+  width: 460px;
+  height: 360px;
+  min-width: 240px;
+  min-height: 150px;
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  border-radius: 8px;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  resize: both;
+  flex: 0 0 auto;
+}
+
+.tab-content.panel-floating.focused {
+  z-index: 46;
+  border-color: #cba6f7;
+}
+
+/* Injected panel header bar */
+.panel-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 4px 3px 10px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.panel-hdr-title {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #9399b2;
+}
+
+.tab-content.panel-floating > .panel-hdr {
+  cursor: move;
+}
+
+.tab-content.panel-floating > .panel-hdr .panel-hdr-title {
+  color: #cba6f7;
+}
+
+.panel-hdr-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.panel-hdr-btn {
+  background: none;
+  border: none;
+  color: #9399b2;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 4px;
+  font-family: inherit;
+}
+
+.panel-hdr-btn:hover {
+  background: #313244;
+  color: #cdd6f4;
+}
+
+.panel-hdr-btn.active {
+  background: #45475a;
+  color: #cba6f7;
+}
+
+/* Row filter, one per panel, directly under that panel's header */
+.panel-find[hidden] {
+  /* A class selector outranks the UA's [hidden] rule, so the closed state
+     has to be spelled out or the bar shows through its own display:flex. */
+  display: none;
+}
+
+.panel-find {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  flex-shrink: 0;
+}
+
+.panel-find input {
+  flex: 1;
+  min-width: 0;
+  background: #1e1e2e;
+  border: 1px solid #45475a;
+  color: #cdd6f4;
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 3px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  outline: none;
+}
+
+.panel-find input:focus {
+  border-color: #cba6f7;
+}
+
+.panel-find-count {
+  font-size: 10px;
+  color: #a6adc8;
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.panel-body {
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+  min-height: 0;
+}
+
+/* Row splitter between docked panels */
+.panel-vsplitter {
+  height: 6px;
+  flex: 0 0 6px;
+  cursor: row-resize;
+  background: #181825;
+  border-top: 1px solid #313244;
+  border-bottom: 1px solid #313244;
+}
+
+.panel-vsplitter:hover {
+  background: #cba6f7;
+}
+
+/* Register Table */
+.reg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+
+/* Every column's width comes from the <colgroup>, written by
+   applyPanelColLayout() in 08-panels.ts, with no CSS width here, so
+   nothing competes with the computed layout. A percentage width would
+   break it: in a fixed-layout table where *every* column has a specified
+   width, surplus space is shared out in proportion to those widths, so
+   the px columns balloon and a 1% column is squeezed to nothing. */
+.reg-table .col-id,
+.reg-table .col-name {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.reg-table th.col-val,
+.reg-table td.col-val {
+  text-align: center;
+}
+
+.reg-table td {
+  padding: 4px;
+  border-bottom: 1px solid #181825;
+  vertical-align: middle;
+  font-family: 'Consolas', 'Roboto Mono', 'SF Mono', monospace;
+  font-weight: 550;
+}
+
+.reg-table tr:hover td {
+  background: #181825;
+}
+
+.reg-table .reg-name {
+  color: #89b4fa;
+  font-weight: 600;
+}
+
+.reg-table .reg-val {
+  color: #a6e3a1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.reg-table .reg-changed {
+  color: #f9e2af;
+  font-weight: 650;
+}
+
+.reg-table .reg-editable {
+  cursor: pointer;
+}
+
+.reg-table .reg-editable:hover {
+  color: #f9e2af;
+}
+
+.reg-table .reg-editable.editing {
+  color: #89dceb;
+  text-decoration: underline;
+}

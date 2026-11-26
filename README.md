@@ -53,10 +53,11 @@ The builds are not code-signed yet, so the first launch needs one extra step:
 Verilator compiles your design to C++, so it needs a C++ compiler: `g++` on Linux, the Xcode command line tools on macOS. Where there is none, the app downloads one (Zig) the first time.
 
 ### Browser
-Nothing to install: **https://r-panicker.github.io/RVEduSim/** always runs the latest code on `main`. To run a copy yourself, serve this repository and open `riscv_simulator.html`:
+Nothing to install: **https://r-panicker.github.io/RVEduSim/** always runs the latest code on `main`. To run a copy yourself, build the page from `src/` (Node.js 20 or later) and serve `dist/`:
 
 ```bash
-python3 -m http.server 8000     # then open http://localhost:8000/riscv_simulator.html
+npm install && npm run build
+python3 -m http.server 8000 -d dist     # then open http://localhost:8000/
 ```
 
 Opened straight from disk, only the built-in example works: browsers block the files the other examples and the Verilog engines load over `file://`.

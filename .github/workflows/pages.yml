@@ -1,5 +1,5 @@
-# Publishes the simulator to GitHub Pages at <owner>.github.io/<repository>/,
-# with riscv_simulator.html as the index. Only what the page loads is published.
+# Publishes the simulator to GitHub Pages at <owner>.github.io/<repository>/:
+# the page built from src/ (npm run build) and only what it loads.
 # Pages must be set to deploy from GitHub Actions (Settings > Pages > Source).
 name: Pages
 
@@ -26,11 +26,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Build the page
+        run: npm ci && npm run build
+
+      # riscv_simulator.html, the page's old address, forwards to the index.
       - name: Assemble the site
         run: |
           mkdir _site
-          cp -r riscv_simulator.html riscv_simulator.md riscv_simulator_specs.md examples vendor _site/
-          cp riscv_simulator.html _site/index.html
+          cp dist/index.html dist/app.js dist/app.css _site/
+          cp -r riscv_simulator.md riscv_simulator_specs.md examples vendor _site/
+          cat > _site/riscv_simulator.html <<'EOF'
+          <!DOCTYPE html>
+          <meta charset="utf-8">
+          <title>RVEduSim</title>
+          <meta http-equiv="refresh" content="0; url=./">
+          <script>location.replace('./' + location.search + location.hash);</script>
+          <a href="./">RVEduSim</a>
+          EOF
           touch _site/.nojekyll
 
       - uses: actions/configure-pages@v6

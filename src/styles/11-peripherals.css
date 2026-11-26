@@ -1,0 +1,444 @@
+/* ============================================================
+PERIPHERALS UI
+============================================================ */
+
+.peripherals-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.periph-section {
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 9px 10px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* UART Serial Terminal Styling */
+.uart-terminal {
+  background: #0d0e15;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  padding: 6px 8px;
+  height: 72px;
+  max-height: 95px;
+  overflow-y: auto;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #a6e3a1;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: 3px;
+  margin-bottom: 5px;
+}
+
+.uart-controls {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.uart-controls select {
+  background: #313244;
+  border: 1px solid #45475a;
+  color: #cdd6f4;
+  padding: 3px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  height: 26px;
+}
+
+.uart-controls input[type="text"] {
+  flex: 1;
+  min-width: 130px;
+  background: #313244;
+  border: 1px solid #45475a;
+  color: #cdd6f4;
+  padding: 3px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  height: 26px;
+  box-sizing: border-box;
+}
+
+.uart-controls input[type="checkbox"] {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: auto;
+  margin: 0 2px 0 0;
+  cursor: pointer;
+}
+
+.uart-controls button {
+  background: #313244;
+  border: none;
+  color: #cdd6f4;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-family: inherit;
+  white-space: nowrap;
+  height: 26px;
+}
+
+.uart-controls button:hover {
+  background: #45475a;
+}
+
+.uart-controls button.primary {
+  background: #cba6f7;
+  color: #1e1e2e;
+  font-weight: 600;
+}
+
+.uart-controls button.primary:hover {
+  background: #b4befe;
+}
+
+.uart-queue-info {
+  font-size: 11px;
+  color: #a6adc8;
+  margin-top: 3px;
+}
+
+/* Row group that holds two peripheral boxes side-by-side on the same row.
+   The tracks wrap automatically: on wide docks the two boxes stay in a row,
+   but in narrow panels (e.g. a 2×2-grid cell) they stack so the
+   7-segment display gets the full panel width and can scale up. */
+.periph-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.periph-title {
+  font-weight: 600;
+  color: #a6adc8;
+  margin-bottom: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.periph-title:hover {
+  color: #cdd6f4;
+}
+
+/* Fold/unfold: the chevron is absolutely positioned so it never
+   disturbs a title's own flex layout (several use space-between to
+   pin a badge to the right). Everything but the title itself is what
+   folds - one rule covers every section without needing a dedicated
+   wrapper around each one's body. Cycle Counter has no `data-periph`
+   and is therefore never foldable: its one line of content already
+   lives entirely inside the title, so there is no body to hide. */
+.periph-section[data-periph] > .periph-title {
+  position: relative;
+  padding-left: 15px;
+}
+
+.periph-section[data-periph] > .periph-title::before {
+  content: '▾';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  color: #6c7086;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.periph-section[data-periph] > .periph-title:hover::before {
+  color: #cdd6f4;
+}
+
+.periph-section.periph-folded > .periph-title::before {
+  transform: translateY(-50%) rotate(-90deg);
+}
+
+.periph-section.periph-folded > *:not(.periph-title) {
+  /* Several bodies (e.g. #pbContainer) have their own id-selector
+     display rule, higher specificity than this one - needs !important
+     to actually win. */
+  display: none !important;
+}
+
+.periph-addr {
+  font-family: 'Consolas', monospace;
+  font-size: 10px;
+  color: #585b70;
+}
+
+/* LED & DIP Board Layout */
+.periph-board {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 5px;
+  padding: 5px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.periph-group-labels {
+  display: flex;
+  align-items: center;
+  font-size: 9.5px;
+  font-weight: 600;
+  margin-bottom: 1px;
+}
+
+.lbl-pc {
+  flex: 7;
+  color: #89b4fa;
+  text-align: center;
+}
+
+.lbl-clk {
+  flex: 1;
+  color: #fab387;
+  text-align: center;
+}
+
+.lbl-user {
+  flex: 8;
+  color: #a6e3a1;
+  text-align: center;
+}
+
+.led-row,
+.dip-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  /* No independent row scrollbars to preserve strict LED alignment */
+}
+
+.led-cell,
+.dip-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 14px;
+  box-sizing: border-box;
+}
+
+.led-sublabel,
+.dip-sublabel {
+  font-size: 7.5px;
+  color: #6c7086;
+  margin-bottom: 1px;
+  line-height: 1;
+}
+
+.dip-sublabel {
+  margin-top: 3px;
+  margin-bottom: 0;
+}
+
+.led-group-divider {
+  width: 1px;
+  height: 18px;
+  background: #45475a;
+  margin: 0 1px;
+  flex-shrink: 0;
+}
+
+.led {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #2a2a3a;
+  border: 1px solid #313244;
+  transition: background 0.1s ease, box-shadow 0.1s ease;
+}
+
+/* 3 Distinct LED Group Colors */
+.led-pc.on {
+  background: #89b4fa;
+  border-color: #89b4fa;
+  box-shadow: 0 0 5px #89b4fa, 0 0 10px rgba(137, 180, 250, 0.4);
+}
+
+.led-clock.on {
+  background: #fab387;
+  border-color: #fab387;
+  box-shadow: 0 0 5px #fab387, 0 0 10px rgba(250, 179, 135, 0.4);
+}
+
+.led-user.on {
+  background: #a6e3a1;
+  border-color: #a6e3a1;
+  box-shadow: 0 0 5px #a6e3a1, 0 0 10px rgba(166, 227, 161, 0.4);
+}
+
+/* Dual-Rectangle 3D Rocker/Slide DIP Switch (Balanced Height: 22px) */
+.dip-switch {
+  width: 14px;
+  height: 22px;
+  border-radius: 3px;
+  background: #11111b;
+  border: 1px solid #45475a;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  padding: 1px;
+  gap: 1px;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+}
+
+.dip-switch:hover {
+  border-color: #cba6f7;
+}
+
+.dip-rect-top,
+.dip-rect-bottom {
+  flex: 1;
+  width: 100%;
+  border-radius: 1px;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+}
+
+/* OFF State (0): Switch DOWN -> Top is dark/recessed, Bottom is raised slider knob */
+.dip-switch .dip-rect-top {
+  background: #181825;
+  border: 1px solid #1e1e2e;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.dip-switch .dip-rect-bottom {
+  background: linear-gradient(180deg, #585b70 0%, #313244 100%);
+  border: 1px solid #6c7086;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* ON State (1): Switch UP -> Top is raised active glowing knob, Bottom is dark/recessed */
+.dip-switch.on {
+  border-color: #cba6f7;
+  box-shadow: 0 0 6px rgba(203, 166, 247, 0.4);
+}
+
+.dip-switch.on .dip-rect-top {
+  background: linear-gradient(180deg, #cba6f7 0%, #a6e3a1 100%);
+  border: 1px solid #cba6f7;
+  box-shadow: 0 1px 3px rgba(203, 166, 247, 0.6);
+}
+
+.dip-switch.on .dip-rect-bottom {
+  background: #181825;
+  border: 1px solid #1e1e2e;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.pb-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #2a2a3a;
+  border: 2px solid #313244;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 600;
+  color: #6c7086;
+  transition: all 0.1s ease;
+  user-select: none;
+}
+
+.pb-btn:hover {
+  border-color: #f9e2af;
+  color: #f9e2af;
+}
+
+.pb-btn.pressed {
+  background: #f9e2af;
+  border-color: #f9e2af;
+  color: #1e1e2e;
+  box-shadow: 0 0 8px rgba(249, 226, 175, 0.4);
+  transform: scale(0.95);
+}
+
+/* Button row: BTNL BTNC BTNR in a line */
+.btn-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  justify-content: center;
+}
+
+.pb-btn-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Push Button container */
+#pbContainer {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.sevseg-container {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a1a;
+  border: 1px solid #313244;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.sevseg-digit {
+  /* Digits scale to the available width (the SVG viewBox keeps the 22:40
+     ratio), so the display fills its panel and
+     never needs horizontal scrolling — even in a narrow 2×2 grid cell.
+     A generous max keeps it from growing oversized in a wide dock. */
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  height: auto;
+  max-width: 58px;
+  aspect-ratio: 22 / 40;
+}
+
+.sevseg-segment {
+  fill: #1a1a2a;
+  transition: fill 0.1s ease;
+}
+
+.sevseg-segment.lit {
+  fill: #a6e3a1;
+  filter: drop-shadow(0 0 2px rgba(166, 227, 161, 0.6));
+}

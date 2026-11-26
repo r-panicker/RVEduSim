@@ -1,0 +1,15 @@
+[
+  "01-base.css",
+  "02-layout.css",
+  "03-controls.css",
+  "04-panels.css",
+  "05-data-panels.css",
+  "06-hdl-sources.css",
+  "07-console.css",
+  "08-waveform.css",
+  "09-datapath.css",
+  "10-editor.css",
+  "11-peripherals.css",
+  "12-responsive.css",
+  "13-scrollbars.css"
+]

@@ -1,6 +1,6 @@
 # `vendor/` — local copies of the three external engines
 
-`riscv_simulator.html` loads three things it does not carry inside itself. Each
+The page loads three things it does not carry inside itself. Each
 is fetched from a CDN first and falls back to the copy here, so the simulator
 keeps working when the CDN is blocked, throttled or down. CodeMirror is the
 exception, the other way round; see below.
@@ -27,23 +27,27 @@ that works. CodeMirror is the exception: it loads through a `<script>` tag, whic
 Each engine tries its sources in order and takes the first that answers:
 
 - **CodeMirror** — `vendor/codemirror/` → `riscv_simulator_tests/` → jsDelivr, serving `vendor/codemirror/` from the public repository (local first, since a CDN round trip costs a noticeable part of a second on every load)
-- **Icarus** — jsDelivr → `senolgulgonul.github.io/verisim/` → `vendor/verisim/` → `verisim/`
+- **Icarus** — jsDelivr at a fixed commit of `senolgulgonul/verisim` → `vendor/verisim/` → `verisim/`
 - **Yosys** — jsDelivr → `vendor/yosys/`
 
 ## Refreshing these copies
 
 Pinned versions, so nothing changes underfoot. Re-run only when you mean to
-upgrade, and bump `HDL_YOSYS_VERSION` in `riscv_simulator.html` to match.
+upgrade, and change the pins in `src/ts/` to match: the verisim commit in
+`HDL_ENGINE_SOURCES` (`18-hdl-engine.ts`) and `HDL_YOSYS_VERSION` (`25-hdl-synthesis.ts`). A new verisim build may come from another
+Icarus commit; `IVERILOG_REV` in `electron/scripts/build-iverilog.sh` should then follow it,
+so the browser and desktop engines stay the same.
 
 ```bash
 cd vendor
 
-# Icarus Verilog (WASM)
+# Icarus Verilog (WASM) - the commit in HDL_ENGINE_SOURCES
+C=972bb7b72322bce94918e26ddefc696da949eb06
 for f in ivlpp.js ivlpp.wasm ivl.js ivl.wasm vvp.js vvp.wasm; do
-  curl -fsSL -o "verisim/$f" "https://cdn.jsdelivr.net/gh/senolgulgonul/verisim@main/$f"
+  curl -fsSL -o "verisim/$f" "https://cdn.jsdelivr.net/gh/senolgulgonul/verisim@$C/$f"
 done
 
-# Yosys — must match HDL_YOSYS_VERSION in riscv_simulator.html
+# Yosys — must match HDL_YOSYS_VERSION in src/ts/25-hdl-synthesis.ts
 V=0.68.1207
 for f in bundle.js yosys.core.wasm yosys.core2.wasm yosys.core3.wasm \
          yosys.core4.wasm yosys-resources.0.tar; do

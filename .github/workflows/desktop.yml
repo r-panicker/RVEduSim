@@ -97,6 +97,10 @@ jobs:
         shell: msys2 {0}
         run: bash electron/scripts/build-verilator.sh electron/verilator/${{ matrix.target }}
 
+      # The page, built from src/ into dist/, which the tests and the app load.
+      - name: Build the page
+        run: npm ci && npm run build
+
       - name: Install
         working-directory: electron
         run: npm ci

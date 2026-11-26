@@ -54,7 +54,7 @@ async function launch(userData) {
     const { app, page } = run;
 
     console.log('\n[1] The page, served from disk');
-    check('It loads over app://', page.url() === 'app://rvsim/riscv_simulator.html');
+    check('It loads over app://', page.url() === 'app://rvsim/index.html');
     check('The bridge reports native Icarus', await page.evaluate(() => !!(window.rvNative && window.rvNative.icarus)));
     check('Node is not reachable from the page', await page.evaluate(() => typeof require === 'undefined' && typeof process === 'undefined'));
     check('There is no menu bar', await app.evaluate(({ Menu }) => process.platform === 'darwin' || Menu.getApplicationMenu() === null));

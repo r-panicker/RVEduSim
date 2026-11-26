@@ -4,16 +4,7 @@ const { installExamplesFetch } = require('./examples_fetch');
 const path = require('path');
 const https = require('https');
 
-let JSDOM;
-try {
-  JSDOM = require('jsdom').JSDOM;
-} catch (e) {
-  try {
-    JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM;
-  } catch (e2) {
-    JSDOM = require('/home/rajesh/.gemini/antigravity-ide/brain/7780d698-8baa-4d51-9b54-596f69dcec55/scratch/node_modules/jsdom').JSDOM;
-  }
-}
+const { JSDOM } = require('jsdom');
 
 async function compileGodbolt(sourceCode, compilerId = 'rv32-cclang2010', optLevel = '-Os') {
   return new Promise((resolve, reject) => {
@@ -51,15 +42,13 @@ async function runTests() {
   console.log('===========================================================');
   console.log('🚀 TESTING IMAGEDISPLAY RENDERING & RESET OVERRIDE BEHAVIOR');
   console.log('===========================================================');
-
-  const htmlPath = path.resolve(__dirname, '../riscv_simulator.html');
-  const htmlContent = fs.readFileSync(htmlPath, 'utf8');
+  const htmlContent = require('./page').html();
 const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
   const dom = new JSDOM(htmlContent, {
     runScripts: 'dangerously',
     resources: 'usable',
-    url: 'http://localhost:8080/riscv_simulator.html',
+    url: 'http://localhost:8080/index.html',
     beforeParse(window) {
     window.__CM6_DISABLE_CDN = true; // prevent the loader from fetching the CDN bundle (jsdom layout limitations); tests pre-inject the local bundle
     // Pre-inject CodeMirror 6 so the app can boot even when the CDN is

@@ -8,7 +8,8 @@ needs, so its memory is `2**bits` bytes. Selecting an example sets the Linker
 segment sizes from them, and HDL mode refuses a program that does not fit the
 loaded `Wrapper.v`.
 
-`dip_led` and `dip_led_c` are also baked into `riscv_simulator.html`, so the
+`dip_led` and `dip_led_c` are also built into the page
+(`src/ts/13-tabs-examples-language.ts`), so the
 page has a working example with no server. Change a row for either and update
 the baked copy to match.
 

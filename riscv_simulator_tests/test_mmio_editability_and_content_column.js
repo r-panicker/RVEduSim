@@ -1,12 +1,11 @@
 // test_mmio_editability_and_content_column.js
-// Covers three related fixes to the Memory and Registers panels:
+// Covers three behaviours of the Memory and Registers panels:
 //   1. Read-only MMIO registers (DIP, PB, ...) are not editable in the
 //      Memory view, and a write to one - from a program or from the view -
 //      is ignored, the same way real hardware ignores it. UART_RX stays
-//      editable on purpose (see MMIO_REGISTERS in riscv_simulator.html).
-//   2. An MMIO edit is now visible immediately (Peripherals DOM built at
-//      boot, not lazily on first tab visit) instead of only after the next
-//      Step.
+//      editable on purpose (see MMIO_REGISTERS in src/ts/03-state.ts).
+//   2. An MMIO edit is visible immediately, not only after the next Step:
+//      the Peripherals DOM is built at boot, not lazily on first tab visit.
 //   3. The Memory panel's Content column is ASCII in Byte mode and DEC (with
 //      a signed/unsigned switch) in Word mode; the Registers panel's
 //      Content (Dec) column has the same switch.
@@ -14,29 +13,18 @@
 const fs = require('fs');
 const path = require('path');
 const { installExamplesFetch } = require('./examples_fetch');
-let JSDOM;
-try {
-  JSDOM = require('jsdom').JSDOM;
-} catch (e) {
-  try {
-    JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM;
-  } catch (e2) {
-    JSDOM = require('/home/rajesh/.gemini/antigravity-ide/brain/7780d698-8baa-4d51-9b54-596f69dcec55/scratch/node_modules/jsdom').JSDOM;
-  }
-}
+const { JSDOM } = require('jsdom');
 
 console.log('===========================================================');
 console.log('🚀 TESTING MMIO EDITABILITY & MEMORY/REGISTERS CONTENT COLUMN');
 console.log('===========================================================');
-
-const htmlPath = path.resolve(__dirname, '../riscv_simulator.html');
-const htmlContent = fs.readFileSync(htmlPath, 'utf8');
+const htmlContent = require('./page').html();
 const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 const dom = new JSDOM(htmlContent, {
   runScripts: 'dangerously',
   resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {

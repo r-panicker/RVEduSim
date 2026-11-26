@@ -4,7 +4,8 @@
 
 | File | What it is |
 |---|---|
-| [`riscv_simulator.html`](riscv_simulator.html) | The simulator: one file, no build step. Assembling, simulating and the HDL engine run in the browser. The **DIP to LED** example (assembly and C) is embedded in the page; every other example, and C compilation, need the page served over `http://`. |
+| [`src/`](src/) | The simulator's source: `index.html` (the markup), `styles/*.css` (in the order of `styles/order.json`) and `ts/*.ts` (in the order of `tsconfig.json`'s `files`). Assembling, simulating and the HDL engine run in the browser. The **DIP to LED** example (assembly and C) is built in; every other example, and C compilation, need the page served over `http://`. |
+| [`tools/page.js`](tools/page.js), [`tools/build.js`](tools/build.js) | The build: `npm run build` writes `dist/` (`index.html`, a minified `app.js` and `app.css`). `dist/` is not committed; the Pages workflow and the desktop app build it. |
 | [`examples/`](examples/) | All other examples: `asm/*.asm`, `c/*.c`, fetched when selected. `examples/hdl/` holds `Wrapper.v` and `RV_reference.v`, a prebuilt gate-level netlist of a reference core. |
 | [`examples/index.txt`](examples/index.txt) | The Example menu: one markdown-style table row per example, giving its key, language, label, file, the `IROM`/`DMEM` depth bits it needs, and a description. Adding a row and a file adds an example; the HTML is not edited. The file is `.txt` so static site generators serve it verbatim rather than render it. |
 | [`vendor/`](vendor/README.md) | Local copies of the external engines: the CodeMirror 6 bundle, Icarus Verilog compiled to WebAssembly, and Yosys (`@yowasp/yosys`). |
@@ -12,26 +13,38 @@
 
 **Live:** <https://r-panicker.github.io/RVEduSim/>. Desktop installers: <https://github.com/r-panicker/RVEduSim/releases>. Vibe coded by Rajesh Panicker.
 
-The page is a self-contained RISC-V assembler, C compiler front-end, emulator and visual
-debugger, with an optional second engine that simulates a Verilog processor. The editor
-engine, ISA tables and peripherals are in the HTML file. Example programs other than DIP to
-LED are plain files in `examples/`, loaded with `fetch()`, which browsers block over
+The page is a RISC-V assembler, C compiler front-end, emulator and visual debugger, with an
+optional second engine that simulates a Verilog processor. Example programs other than DIP
+to LED are plain files in `examples/`, loaded with `fetch()`, which browsers block over
 `file://`. C compilation uses the Compiler Explorer (Godbolt) REST API and needs the network
 however the page is served.
 
+### Source and build
+
+The scripts in `src/ts/` are TypeScript, of two kinds. An ES module (a file with `import` or
+`export`) is strictly typed and names what it uses; esbuild bundles the modules and puts their
+exports on `window`. The rest are classic scripts: they share one global scope, as the parts of
+one script, so a function or variable declared in one is visible in all of them and in the
+modules, and the markup's inline handlers (`onclick="runProgram()"`) call them by name. The build
+(`tools/page.js`) runs the modules first, then the classic scripts joined in the order of
+`tsconfig.json`'s `files`, with types stripped and top-level names kept when minified. A module
+uses a classic script's global only once the page has loaded, and declares it
+(`declare let labels: Record<string, number>`) to type it. `npm run typecheck` runs `tsc` over
+all of them; a classic script that starts with `// @ts-nocheck` is not yet typed. The styles are joined
+in the order of `src/styles/order.json`. `dist/index.html` names `app.js` and `app.css` with a
+hash of their content (`app.js?v=…`), so a browser never runs a cached copy of an older build.
+
 ### Running it locally
 
-Opening `riscv_simulator.html` from disk loads only DIP to LED. To get every example and C
-compilation, serve the repository root over `http://`:
-
 ```bash
-cd <repository root>   # the folder holding riscv_simulator.html
-python3 -m http.server 8000
+npm install
+npm run build          # or npm run build:dev, not minified
+python3 -m http.server 8000 -d dist
 ```
 
-then open <http://localhost:8000/riscv_simulator.html>. Any static server works (`npx serve`,
-VS Code's Live Server). `examples/` and `vendor/` must stay siblings of
-`riscv_simulator.html`.
+then open <http://localhost:8000/>. `npm run build` links `vendor/` and `examples/` into
+`dist/`, which the page loads by relative path. Opened from disk, `dist/index.html` loads only
+DIP to LED.
 
 ---
 
@@ -660,11 +673,11 @@ If the CDN cannot be reached, the loader falls back to `vendor/yosys/` beside th
 
 The browser engine is three Emscripten modules (`ivlpp`, `ivl`, `vvp`, each a `.js` and a `.wasm`). They are loaded from the first of these locations that answers:
 
-1. `https://cdn.jsdelivr.net/gh/senolgulgonul/verisim@main/`
-2. `https://senolgulgonul.github.io/verisim/`
-3. `vendor/verisim/`, the copy in the repository (see
+1. `https://cdn.jsdelivr.net/gh/senolgulgonul/verisim@972bb7b…/`, the upstream build at a fixed commit
+   (`HDL_ENGINE_SOURCES` holds the full hash), whose files are byte for byte those in `vendor/verisim/`
+2. `vendor/verisim/`, the copy in the repository (see
    [`vendor/README.md`](vendor/README.md))
-4. `verisim/` next to the page, for a copy you supply
+3. `verisim/` next to the page, for a copy you supply
    (`ivlpp.js/.wasm`, `ivl.js/.wasm`, `vvp.js/.wasm`)
 
 The local copies work only when the page is served over `http://`: Emscripten fetches its
@@ -1052,7 +1065,7 @@ The OLED, LED and 7-segment registers read back the last value written, so the M
 
 ### 7.3 Read-only registers
 
-A write to a read-only register, from a program or from the Memory view, has no effect, as on the hardware. `UART_RX` is the exception: writing it queues a byte for reception, as a way to feed input. `MMIO_REGISTERS` in `riscv_simulator.html` is the single definition of each register's address, name, access, read and write behaviour; the Memory view's editability, `handleMMIOWrite()`'s write gate and the Peripherals panel all read from it. `editable` defaults to `access !== 'RO'` and is overridden only for `UART_RX`.
+A write to a read-only register, from a program or from the Memory view, has no effect, as on the hardware. `UART_RX` is the exception: writing it queues a byte for reception, as a way to feed input. `MMIO_REGISTERS` in `src/ts/03-state.ts` is the single definition of each register's address, name, access, read and write behaviour; the Memory view's editability, `handleMMIOWrite()`'s write gate and the Peripherals panel all read from it. `editable` defaults to `access !== 'RO'` and is overridden only for `UART_RX`.
 
 ---
 
@@ -1127,7 +1140,7 @@ Each section title shows the register addresses; status bits (`RX_VALID`, `TX_RE
 
 ## 9. Example programs
 
-There are 13 examples, 7 in assembly and 6 in C. `dip_led` and `dip_led_c` are baked into `riscv_simulator.html`; the rest are fetched from `examples/asm/` or `examples/c/` when selected, which requires the page to be served over `http://`.
+There are 13 examples, 7 in assembly and 6 in C. `dip_led` and `dip_led_c` are built into the page (`src/ts/13-tabs-examples-language.ts`); the rest are fetched from `examples/asm/` or `examples/c/` when selected, which requires the page to be served over `http://`.
 
 The **Example** menu is built at startup from `examples/index.txt` by `loadExampleIndex()`. The file is plain text so that static site generators serve it verbatim. Its table has one row per example:
 
@@ -1248,7 +1261,7 @@ Global shortcuts do not fire while a form field (UART input, address box, find f
 
 ## 12. Automated test suite
 
-The Node/jsdom harness is in [`riscv_simulator_tests/`](riscv_simulator_tests). Every suite loads the real `riscv_simulator.html`, so the tests exercise the shipped file rather than a copy of its logic. There is no build step. `npm test` runs 28 suites; four more need tools `npm test` cannot assume and are run on their own (`npm run test:native`, `test:verilator`, `test:folder`, `test:app`).
+The Node/jsdom harness is in [`riscv_simulator_tests/`](riscv_simulator_tests). Every suite loads the page built from `src/` (`page.js`, through `tools/page.js`, with its script and styles inline), so the tests exercise the shipped code rather than a copy of its logic; there is no separate build before testing. The build is not minified unless `RVSIM_TEST_MINIFIED=1`. `test_hdl_folder_browser.js` serves the minified build to Chrome, and `test_electron_app.js` runs the packaged app, which carries `dist/`. `npm test` runs 28 suites; four more need tools `npm test` cannot assume and are run on their own (`npm run test:native`, `test:verilator`, `test:folder`, `test:app`).
 
 Shared infrastructure, not suites: `godbolt_cache.js` with `godbolt_cache*.json` answers the Godbolt compile requests for the examples, and `examples_fetch.js` serves `examples/` from disk. Both stand in for network access that jsdom does not have. `cm6_bundle.min.js` is the CodeMirror bundle injected into each page.
 

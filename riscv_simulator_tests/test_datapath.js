@@ -8,24 +8,19 @@
 const fs = require('fs');
 const path = require('path');
 const { installExamplesFetch } = require('./examples_fetch');
-let JSDOM;
-try {
-  JSDOM = require('jsdom').JSDOM;
-} catch (e) {
-  JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM;
-}
+const { JSDOM } = require('jsdom');
 
 console.log('===========================================================');
 console.log('🚀 TESTING THE DATAPATH ANIMATION');
 console.log('===========================================================');
 
-const htmlContent = fs.readFileSync(path.resolve(__dirname, '../riscv_simulator.html'), 'utf8');
+const htmlContent = require('./page').html();
 const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 const dom = new JSDOM(htmlContent, {
   runScripts: 'dangerously',
   resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {
@@ -266,7 +261,8 @@ setTimeout(async () => {
     // [6] A trunk is lit by whichever of its branches is used, and a branch
     // that is not used stays dashed all the way from its junction.
     console.log('\n[6] Branching nets light exactly the path that is used');
-    // The drawing's own segments ran straight through junctions; none may now.
+    // The lecture drawing's segments run straight through junctions; in the
+    // embedded drawing each is split there, so no wire ends partway along another.
     const through = ev(`(() => {
       const bad = [];
       const segs = [];

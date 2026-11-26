@@ -1,8 +1,7 @@
 // Serves examples/ from local disk - the programs, examples/index.txt that
-// lists them (see EXAMPLE_MENU in riscv_simulator.html), and examples/hdl/
+// lists them (see EXAMPLE_MENU in src/ts/13-tabs-examples-language.ts), and examples/hdl/
 // for the prebuilt processor - so the page's own fetch() calls work under
-// jsdom, which has no fetch of its own (confirmed: window.fetch is undefined
-// there by default).
+// jsdom, which has no fetch of its own.
 //
 // This is the runtime counterpart of the offline godbolt_cache: without it,
 // every example but `dip_led` / `dip_led_c` fails to load under test, the

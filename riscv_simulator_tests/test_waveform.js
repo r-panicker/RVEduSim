@@ -17,15 +17,13 @@
  */
 const fs = require('fs');
 const path = require('path');
-let JSDOM;
-try { JSDOM = require('jsdom').JSDOM; }
-catch (e) { JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM; }
+const { JSDOM } = require('jsdom');
 
 const ROOT = path.resolve(__dirname, '..');
 const RV = require('./core_dir').coreDir('test_waveform');
 const ENGINE = process.env.HDL_ENGINE_DIR || path.join(ROOT, 'vendor', 'verisim');
 
-const html = fs.readFileSync(path.join(ROOT, 'riscv_simulator.html'), 'utf8');
+const html = require('./page').html();
 const CM6 = fs.readFileSync(path.join(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 const DESIGN = ['ALU.v', 'Decoder.v', 'Extend.v', 'MCycle.v', 'PC_Logic.v', 'ProgramCounter.v',
@@ -39,7 +37,7 @@ function check(label, cond) {
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously', resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {
@@ -221,7 +219,7 @@ setTimeout(async () => {
 
     // ---------------------------------------------------------------
     console.log('\n[3] Dock availability follows the engine mode');
-    // There is no toolbar button any more: in HDL mode the strip is always on
+    // There is no toolbar button: in HDL mode the strip is always on
     // the page, folded to its own title bar when closed, and that bar is how it
     // comes back.
     const dockEl = doc.getElementById('waveDock');
@@ -328,7 +326,7 @@ setTimeout(async () => {
     win.uartTickDelivery();
     check('a byte arriving while one is unread is dropped',
       st().full === true && st().byte === 0x42);
-    check('the older byte is the one that survives, as TOP_Nexys keeps it',
+    check('the older byte is the one that survives, as the top level module for synthesis keeps it',
       rxRead() === 0x42);
     check('the drop was counted so the console can report it',
       win.getUartRxState().dropped >= 1);

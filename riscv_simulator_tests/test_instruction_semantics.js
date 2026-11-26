@@ -10,16 +10,14 @@
 // shows up as a wrong number here.
 const fs = require('fs');
 const path = require('path');
-let JSDOM;
-try { JSDOM = require('jsdom').JSDOM; }
-catch (e) { JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM; }
+const { JSDOM } = require('jsdom');
 
-const html = fs.readFileSync(path.resolve(__dirname, '../riscv_simulator.html'), 'utf8');
+const html = require('./page').html();
 const CM6 = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously', resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(w) {
     w.__CM6_DISABLE_CDN = true;
     w.addEventListener('DOMContentLoaded', () => {
@@ -222,7 +220,7 @@ const CASES = [
   ['j',     'li t2, 0',                     'j .Lskip\nli t2, 99\n.Lskip:',  { t2: 0 }],
   ['jr',    'li t2, 0\nla t0, .Ltgt',       'jr t0\nli t2, 99\n.Ltgt:',      { t2: 0 }],
 
-  // ---- the load/store-to-symbol forms the assembler now polices -------
+  // ---- load/store to a symbol: lw addresses through rd, sw names a scratch
   ['lw from a symbol uses rd', 'li t1, 0x5A5A\nla t0, buf\nsw t1, 0(t0)',
    'lw t2, buf',                                                       { t2: 0x5A5A }],
   ['sw to a symbol with a named scratch register', 'li t1, 0x1234',

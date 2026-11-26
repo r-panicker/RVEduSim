@@ -278,12 +278,14 @@ like the page, with these differences:
 
 ## 7. Running locally, and the full reference
 
-To run a local copy, serve the folder through a web server rather than opening the file
-directly. From a `file://` address the browser blocks the page's own requests, so only the
-**DIP to LED** example loads, and everything else fails with `Failed to fetch`.
+To run a local copy, build the page (Node.js 20 or later) and serve it through a web server
+rather than opening the file directly. From a `file://` address the browser blocks the
+page's own requests, so only the **DIP to LED** example loads, and everything else fails
+with `Failed to fetch`.
 
 ```bash
-python3 -m http.server 8000      # then open http://localhost:8000/riscv_simulator.html
+npm install && npm run build
+python3 -m http.server 8000 -d dist      # then open http://localhost:8000/
 ```
 
 C programs need an internet connection either way, since they are compiled on Compiler

@@ -9,24 +9,19 @@
 const fs = require('fs');
 const path = require('path');
 const { installExamplesFetch } = require('./examples_fetch');
-let JSDOM;
-try {
-  JSDOM = require('jsdom').JSDOM;
-} catch (e) {
-  JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM;
-}
+const { JSDOM } = require('jsdom');
 
 console.log('===========================================================');
 console.log('🚀 TESTING PERIPHERAL ROLLBACK ON BACK STEP');
 console.log('===========================================================');
 
-const htmlContent = fs.readFileSync(path.resolve(__dirname, '../riscv_simulator.html'), 'utf8');
+const htmlContent = require('./page').html();
 const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 const dom = new JSDOM(htmlContent, {
   runScripts: 'dangerously',
   resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {
@@ -211,8 +206,8 @@ wait:
     check('and puts it back at the head of the queue',
       ev('JSON.stringify(uartPending)') === '[65,66]');
 
-    // Re-stepping must deliver the same byte, not the next one - this is the
-    // desync that made the gap a correctness bug and not just a cosmetic one.
+    // Re-stepping must deliver the same byte, not the next one; otherwise the
+    // receive path falls out of step with instructionCount.
     win.stepOnce();
     check('stepping forward again delivers the same byte, losing nothing',
       ev('uartRxByte') === 0x41 && ev('uartPending.length') === 1);

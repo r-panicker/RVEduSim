@@ -1,0 +1,14 @@
+{
+  "name": "rvedusim-web",
+  "private": true,
+  "description": "RVEduSim: the page, built from src/ into dist/",
+  "scripts": {
+    "build": "node tools/build.js",
+    "build:dev": "node tools/build.js --dev",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

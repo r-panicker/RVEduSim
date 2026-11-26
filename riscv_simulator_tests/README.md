@@ -1,6 +1,6 @@
 # RVEduSim: test suites
 
-This directory contains the automated test suites, bundling tools, and generator utilities for **[riscv_simulator.html](../riscv_simulator.html)** and **[riscv_simulator_specs.md](../riscv_simulator_specs.md)**.
+This directory contains the automated test suites, bundling tools, and generator utilities for the simulator page (**[src/](../src/)**) and **[riscv_simulator_specs.md](../riscv_simulator_specs.md)**.
 
 ---
 
@@ -60,8 +60,9 @@ npm run test:app       # test_electron_app.js: the desktop app; opens a window
 npm run test:verilator # test_verilator.js: native Icarus and Verilator builds, and a C++ compiler
 ```
 
-What each checks is in §12 of the specs. There is no build step: `riscv_simulator.html`
-is edited directly.
+What each checks is in §12 of the specs. Each suite builds the page from `src/` in memory
+(`page.js`), so there is no build to run first; `RVSIM_TEST_MINIFIED=1` tests the minified
+build. The root `package.json` provides esbuild for it (`npm install` there once).
 
 ---
 
@@ -244,7 +245,7 @@ is edited directly.
 
 ## 🌐 examples/ and the Godbolt cache
 
-Every example but `dip_led` / `dip_led_c` lives outside `riscv_simulator.html` entirely, in
+Every example but `dip_led` / `dip_led_c` lives outside the page entirely, in
 [`../examples/`](../examples/) (`asm/*.asm`, `c/*.c`) — the page `fetch()`es one when it is
 selected. The **menu itself** is data too: `index.txt` holds one markdown-style table
 (`| key | lang | label | file | irom | dmem | description |`), fetched and parsed at page load

@@ -1,0 +1,362 @@
+/* ============================================================
+   HDL mode: the source list and drop zone in the settings dialog, the
+   register-file notices, the toolbar's HDL chip and engine toggle, and
+   the simulation settings groups
+   ============================================================ */
+.hdl-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hdl-drop {
+  border: 1px dashed #45475a;
+  border-radius: 6px;
+  padding: 10px;
+  text-align: center;
+  color: #6c7086;
+  font-size: 12px;
+  line-height: 1.5;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.hdl-drop.hdl-drop-active {
+  border-color: #cba6f7;
+  background: rgba(203, 166, 247, 0.08);
+  color: #cdd6f4;
+}
+
+.hdl-drop b { color: #a6adc8; }
+
+#hdlSimulator:disabled { opacity: 0.5; cursor: not-allowed; }
+#hdlSimulatorRow:has(#hdlSimulator:disabled) label { opacity: 0.6; }
+.hdl-btn {
+  background: #313244;
+  border: 1px solid #45475a;
+  color: #cdd6f4;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 550;
+  font-family: inherit;
+}
+
+.hdl-btn:hover:not(:disabled) {
+  background: #45475a;
+  border-color: #cba6f7;
+}
+
+.hdl-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hdl-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.hdl-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  background: #181825;
+  border-radius: 3px;
+  font-family: 'Consolas', 'Roboto Mono', 'SF Mono', monospace;
+  font-size: 12px;
+}
+
+.hdl-file-wrapper {
+  border-left: 2px solid #a6e3a1;
+}
+
+.hdl-file-name {
+  color: #cdd6f4;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hdl-file-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #a6e3a1;
+  background: rgba(166, 227, 161, 0.12);
+  border: 1px solid rgba(166, 227, 161, 0.3);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.hdl-file-size {
+  flex: 0 0 auto;
+  color: #6c7086;
+  font-size: 11px;
+}
+
+.hdl-file-x {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: #6c7086;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+.hdl-file-x:hover {
+  color: #f38ba8;
+  background: #313244;
+}
+
+.hdl-empty {
+  color: #6c7086;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 6px 2px;
+}
+
+.hdl-empty b { color: #a6adc8; }
+
+.hdl-warn {
+  display: none;
+  color: #f9e2af;
+  background: rgba(249, 226, 175, 0.08);
+  border: 1px solid rgba(249, 226, 175, 0.25);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Shown in place of register values when HDL mode cannot reach the
+   register file inside the uploaded design. */
+.hdl-reg-notice {
+  margin: 6px;
+  padding: 7px 9px;
+  border: 1px solid #f9e2af;
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: #2a2618;
+  color: #f9e2af;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.hdl-reg-notice code {
+  background: #11111b;
+  padding: 0 3px;
+  border-radius: 3px;
+  color: #cdd6f4;
+}
+
+/* A register the hardware has not written yet really is undefined; the
+   functional model shows 0, the RTL cannot honestly claim that. */
+.reg-unknown {
+  color: #6c7086 !important;
+  font-style: italic;
+}
+
+.hdl-hint {
+  color: #6c7086;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* Standing indicator of the loaded Verilog, in place of the panel's file list. */
+.hdl-chip {
+  background: #313244;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #a6adc8;
+  cursor: pointer;
+}
+.hdl-chip .chip-short { display: none; }
+
+.hdl-chip:hover { background: #45475a; color: #cdd6f4; }
+.hdl-chip-warn {
+  border-color: #f9e2af;
+  color: #f9e2af;
+  background: #2a2618;
+}
+.hdl-chip-warn:hover { background: #3a3420; color: #f9e2af; }
+
+.dl-select {
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  height: 28px;
+  padding: 0 6px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.dl-select:hover { border-color: #585b70; }
+.dl-select option:disabled { color: #6c7086; }
+
+    /* Marks which kind of cycle count the toolbar is showing. */
+.stat-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6c7086;
+  vertical-align: 1px;
+}
+
+/* Simulation settings, grouped by the engine each group reaches. */
+.sim-group {
+  margin-bottom: 16px;
+  transition: opacity 0.15s ease;
+}
+.sim-group-hdr {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #313244;
+}
+.sim-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #89b4fa;
+}
+.sim-group-note {
+  font-size: 10.5px;
+  color: #6c7086;
+  font-style: italic;
+}
+.sim-card {
+  background: #11111b;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+/* Dimmed, never hidden, so a setting that does nothing is still findable. */
+.sim-group.sim-group-off { opacity: 0.45; }
+#simGroupJs[hidden], #simGroupHdl[hidden] { display: none; }
+.sim-dim { opacity: 0.45; }
+.pipe-select {
+  padding: 2px 4px;
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+}
+.pipe-haz {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: #bac2de;
+}
+.pipe-haz label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pipe-haz input { accent-color: #cba6f7; margin: 0; }
+.disasm-stage {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(205, 214, 244, 0.1);
+  font-weight: 700;
+  font-size: 10px;
+}
+.cm-pipe-stage {
+  display: inline-flex;
+  gap: 3px;
+  padding: 0 3px;
+  font: 700 11px/20px ui-monospace, monospace;
+}
+.sim-group.sim-group-off .sim-group-title { color: #6c7086; }
+
+/* Reference text that is worth having but not worth a permanent block
+   of the panel: one line until it is asked for. */
+.hdl-note {
+  margin-top: 6px;
+}
+
+.hdl-note > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: #7f849c;
+  list-style: none;
+  user-select: none;
+}
+.hdl-note > summary::-webkit-details-marker { display: none; }
+.hdl-note > summary::before {
+  content: '\25B8';
+  display: inline-block;
+  margin-right: 5px;
+  transition: transform 0.12s ease;
+}
+.hdl-note[open] > summary::before { transform: rotate(90deg); }
+.hdl-note > summary:hover { color: #cdd6f4; }
+.hdl-note > .hdl-hint { margin-top: 4px; }
+
+.hdl-hint code {
+  color: #89b4fa;
+  font-family: 'Consolas', 'Roboto Mono', monospace;
+}
+
+/* Engine toggle in the toolbar, styled like the ASM/C language pill. */
+.eng-toggle-group {
+  display: inline-flex;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.eng-btn {
+  background: #313244;
+  border: none;
+  color: #9399b2;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.2px;
+}
+
+.eng-btn:hover:not(.active) { color: #cdd6f4; }
+
+.eng-btn.active {
+  background: #cba6f7;
+  color: #11111b;
+  font-weight: 700;
+}
+
+#btnViz.viz-on {
+  background: #cba6f7;
+  color: #11111b;
+}

@@ -1,8 +1,9 @@
 # `electron/` — the desktop app
 
-`riscv_simulator.html` in an Electron window, with Icarus Verilog built natively for
-the platform, so HDL mode needs no browser, no network and no WASM. The page is not
-copied or changed for the app: it is served from the app's resources over `app://`, and
+The page, built into `../dist/` by `npm run build`, in an Electron window, with Icarus
+Verilog built natively for the platform, so HDL mode needs no browser, no network and no
+WASM. The page is not changed for the app: it is served from the app's resources (from
+`../dist/` when run with `npm start`, which builds it first) over `app://`, and
 finds the native engine through `window.rvNative`. What the app changes, and the
 measured speed, are in [§5.18 of the specs](../riscv_simulator_specs.md#518-the-desktop-app).
 
@@ -63,8 +64,8 @@ from source as a fallback. On Windows it also runs the Verilator suite with
 `RVSIM_FORCE_ZIG=1`, which covers a computer without MinGW's g++.
 
 The page and its resources come from the repository at build time
-(`riscv_simulator.html`, `vendor/`, `examples/`), so an installer carries whatever the
-page was when it was built.
+(`dist/`, built from `src/`, with `vendor/` and `examples/`), so an installer carries
+whatever the page was when it was built.
 
 ## Signing
 

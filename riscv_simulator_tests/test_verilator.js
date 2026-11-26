@@ -17,9 +17,7 @@ const os = require('os');
 const path = require('path');
 const { execSync } = require('child_process');
 const { installExamplesFetch } = require('./examples_fetch');
-let JSDOM;
-try { JSDOM = require('jsdom').JSDOM; }
-catch (e) { JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM; }
+const { JSDOM } = require('jsdom');
 
 const ROOT = path.resolve(__dirname, '..');
 // The RTL core, or the prebuilt one in examples/hdl (see core_dir.js). The
@@ -34,7 +32,7 @@ const OS = { darwin: 'mac', win32: 'win' }[process.platform] || process.platform
 const NATIVE = findBinDir([process.env.HDL_NATIVE_DIR, path.join(ROOT, 'electron', 'iverilog', OS + '-' + process.arch)]);
 const VL_ROOT = findVerilator([process.env.HDL_VERILATOR_DIR, path.join(ROOT, 'electron', 'verilator', OS + '-' + process.arch)]);
 
-const html = fs.readFileSync(path.join(ROOT, 'riscv_simulator.html'), 'utf8');
+const html = require('./page').html();
 const CM6 = fs.readFileSync(path.join(__dirname, 'cm6_bundle.min.js'), 'utf8');
 const DESIGN = ['ALU.v', 'Decoder.v', 'Extend.v', 'MCycle.v', 'PC_Logic.v', 'ProgramCounter.v',
                 'RegFile.v', 'Shifter.v', 'RV.v', 'Wrapper.v'];
@@ -75,7 +73,7 @@ function makePage(runner, folder, vl, src) {
   const timing = { ms: {} };
   const dom = new JSDOM(src || html, {
     runScripts: 'dangerously', resources: 'usable',
-    url: 'http://localhost:8080/riscv_simulator.html',
+    url: 'http://localhost:8080/index.html',
     beforeParse(window) {
       window.__CM6_DISABLE_CDN = true;
       window.addEventListener('DOMContentLoaded', () => {

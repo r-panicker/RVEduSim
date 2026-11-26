@@ -1,0 +1,540 @@
+/* ============================================================
+Responsive Design & Mobile Optimization
+============================================================ */
+@media (max-width: 800px) {
+
+  html,
+  body {
+    overflow-x: hidden;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .container {
+    height: auto;
+    min-height: 100vh;
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100vw;
+  }
+
+  .main {
+    flex-direction: column;
+    overflow: visible;
+    height: auto;
+    width: 100%;
+    max-width: 100vw;
+  }
+
+  .left-panel {
+    min-height: auto;
+    height: auto;
+    width: 100%;
+    max-width: 100vw;
+    flex: none;
+    overflow: visible;
+  }
+
+  .splitter {
+    display: none;
+  }
+
+  .right-panel {
+    width: 100%;
+    max-width: 100vw;
+    min-width: 0;
+    max-height: none;
+    height: auto;
+    border-left: none;
+    border-top: 2px solid #313244;
+    flex-shrink: 0;
+  }
+
+  .header {
+    padding: 6px 10px;
+    flex-wrap: wrap;
+    gap: 4px;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    max-width: 100vw;
+  }
+
+  .header h1 {
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .toolbar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 5px 8px;
+    gap: 5px;
+    font-size: 12px;
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
+  }
+
+  .toolbar-divider {
+    display: none;
+  }
+
+  /* Mobile 3-row toolbar. `.toolbar` itself is the grid (see `.toolbar`
+     above); the two row wrappers contribute nothing of their own on
+     mobile (`display: contents`) so their groups place directly into
+     it - which is what lets Editor and Dump/Settings share row 2 as
+     two half-width columns instead of each claiming a full row. */
+  .toolbar-row-source,
+  .toolbar-row-simulation {
+    display: contents;
+  }
+
+  /* Row 1: File & Mode (Toggle, Example, Open, Save) */
+  .toolbar-group-file-mode {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    display: flex;
+    width: 100%;
+    gap: 4px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-group-file-mode .lang-toggle-group {
+    flex: 0 0 auto;
+  }
+
+  .toolbar-group-file-mode .example-label {
+    flex: 1 1 32px;
+    max-width: 150px;
+    min-width: 0;
+  }
+
+  /* Its width is its message; growing it just takes room from the buttons. */
+  .toolbar-group-file-mode .hdl-chip {
+    flex: 0 0 auto;
+  }
+
+  /* The long label plus six other controls will not fit 374px, and the row
+     wrapping is worse than the short form plus the tooltip. */
+  .hdl-chip .chip-long { display: none; }
+  .hdl-chip .chip-short { display: inline; }
+
+  .toolbar-group-file-mode .hdl-chip { padding: 2px 5px; }
+
+  /* The word costs more of this row than it is worth: the selected option
+     names the example, and the label keeps its tooltip. */
+  .example-label-text {
+    display: none;
+  }
+
+  /* #exampleSelect sets its own height, so this has to outrank an id. */
+  .toolbar-group-file-mode select,
+  .toolbar-group-file-mode #exampleSelect {
+    width: 100%;
+    max-width: 100%;
+    height: 30px;
+    font-size: 11.5px;
+  }
+
+  /* This row carries both toggles, the example picker, the HDL chip and
+     Open/Save. Sizing the buttons to their content rather than sharing the
+     row equally is what keeps the chip's text readable; Open and Save give
+     up their words for the same reason. */
+  .toolbar-group-file-mode button {
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 0 6px;
+    height: 30px;
+    font-size: 11.5px;
+    font-weight: 550;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .toolbar-group-file-mode .lang-btn {
+    padding: 0 5px !important;
+  }
+
+  .toolbar-group-file-mode .eng-btn {
+    padding: 0 5px;
+  }
+
+  /* Row 2: Undo/Redo/Find and Dump Text/Dump Data/Settings share the row -
+     one row rather than two. The Editor group takes only what its three
+     buttons need so the other group, which grows to five in HDL mode, gets
+     the rest; either wraps rather than shrinking its labels away. */
+  .toolbar-group-editor {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  /* Undo, Redo, Find and Settings are icons here, each still a full
+     finger wide, so the row holds all of them without wrapping. */
+  .toolbar { grid-template-columns: auto 1fr; }
+  .toolbar #btnUndo .btn-text,
+  .toolbar #btnRedo .btn-text,
+  .toolbar #btnFind .btn-text,
+  .toolbar #btnSettings .btn-text { display: none; }
+  .toolbar .toolbar-group-editor button,
+  .toolbar .toolbar-group-config-stats #btnSettings {
+    flex: 0 0 40px;
+    font-size: 16px;
+    padding: 0;
+  }
+  .toolbar .toolbar-group-editor { flex-wrap: nowrap; }
+
+  .toolbar-group-config-stats {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .toolbar-group-editor,
+  .toolbar-group-config-stats {
+    display: flex;
+    width: 100%;
+    gap: 3px;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-group-editor button,
+  .toolbar-group-config-stats button,
+  .toolbar-group-config-stats .dl-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0 5px;
+    height: 30px;
+    font-size: 11.5px;
+    font-weight: 550;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  /* Sized to its own label rather than to `Waveform (.vcd)`, its longest
+     option, which is what a native select otherwise reserves room for. */
+  .toolbar-group-config-stats .dl-select {
+    flex: 0 0 96px;
+  }
+
+  /* Row 3: Assemble, Run, Step, Back, Reset - last action row, right
+     above the status line. */
+  .toolbar-group-simulation {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: flex;
+    width: 100%;
+    gap: 4px;
+  }
+
+  .toolbar-group-simulation button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 2px;
+    height: 30px;
+    font-size: 11.5px;
+    font-weight: 550;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .toolbar-row-status {
+    grid-column: 1 / -1;
+  }
+
+  .toolbar .stats {
+    font-size: 11px;
+    margin-left: auto;
+    margin-right: 0;
+    text-align: right;
+    white-space: nowrap;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.3;
+  }
+
+  .toolbar .stats .stat-sep { display: none; }
+
+  .toolbar .status {
+    font-size: 11.5px;
+  }
+
+  .editor-wrapper {
+    height: 208px;
+    min-height: 180px;
+    flex: none;
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
+  }
+
+  .console {
+    max-height: 110px;
+    font-size: 11px;
+    padding: 6px 8px;
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
+  }
+
+  /* Fixed small height (~4 lines) rather than the desktop drag-resizable
+     one — a status log this size is easy to scroll past to reach the
+     tabs below it; older messages are still there, just a scroll up
+     within the box away. `!important` because setConsoleHeight() sets
+     an inline height/max-height (the desktop drag handle, or a height
+     persisted from a previous desktop session) that would otherwise
+     win over this rule at any viewport width. */
+  .console {
+    height: 55px !important;
+    max-height: 55px !important;
+    min-height: 55px !important;
+  }
+
+  /* The drag handle resizes the desktop console; on mobile the height
+     is fixed (above), so there is nothing for it to do. */
+  .console-resizer {
+    display: none !important;
+  }
+
+  /* Same reasoning for the waveform strip's handle, and its height is
+     fixed shorter here so it does not swallow the whole viewport. */
+  .wave-resizer {
+    display: none !important;
+  }
+
+  body.wave-open .wave-dock {
+    flex: 0 0 190px !important;
+  }
+
+  .wave-names {
+    flex-basis: 120px;
+  }
+
+  .tab-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    width: 100%;
+    max-width: 100vw;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-bar button {
+    padding: 6px 10px;
+    font-size: 12px;
+    white-space: nowrap;
+    flex: 1 0 auto;
+  }
+
+  .panel-stack {
+    overflow: visible;
+  }
+
+  /* 2×2 grid collapses to a plain vertical stack on small screens. */
+  .panel-dock-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    flex: 0 0 auto;
+    min-height: 0;
+  }
+
+  .panel-hsplitter {
+    display: none;
+  }
+
+  /* Mobile tabbed view: exactly ONE panel is visible at a time — the chip
+     bar becomes a classic mutually-exclusive tab strip. All docked and
+     floating panels are hidden; the active one is shown, its header
+     fixed and its body (below) independently scrollable rather than
+     growing the whole page. */
+  .tab-content,
+  .tab-content.panel-docked,
+  .tab-content.panel-floating {
+    display: none;
+    padding: 0;
+    width: 100%;
+    max-width: 100vw;
+    box-sizing: border-box;
+  }
+
+  .tab-content.panel-mobile-active {
+    display: flex;
+    flex: 0 0 auto;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .tab-content.panel-floating {
+    position: static;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    resize: none;
+    z-index: auto;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  .tab-content.panel-floating > .panel-hdr {
+    cursor: default;
+  }
+
+  /* One panel at a time, named by the lit tab above it, so no panel
+     header: the filter moves to the end of the tab strip. */
+  .tab-content > .panel-hdr {
+    display: none;
+  }
+
+  .right-panel { position: relative; }
+  .right-panel > .tab-bar { padding-right: 44px; }
+  .mobile-find-btn:not([hidden]) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 44px;
+    height: 35px;
+    border: none;
+    background: #181825;
+    font-size: 16px;
+    cursor: pointer;
+  }
+
+  /* A bounded, independently-scrollable body — instead of growing to
+     full content height and pushing the page itself down; a long
+     table/board scrolls in place. Taller than the editor above
+     it: a panel is what you read on a phone, and the editor still holds
+     ten lines. */
+  .panel-body {
+    overflow: auto;
+    max-height: 278px;
+    flex: 0 0 auto;
+  }
+
+  .panel-vsplitter {
+    display: none;
+  }
+
+  .mem-toolbar {
+    gap: 4px;
+  }
+
+  .mem-toolbar input {
+    width: 80px;
+    font-size: 11px;
+    padding: 2px 4px;
+  }
+
+  .mem-toolbar input#memRows {
+    width: 44px;
+  }
+
+  .mem-toolbar button {
+    padding: 2px 6px;
+    font-size: 11px;
+  }
+
+  /* The base rule marks these !important (to beat the generic button
+     reset), so the override needs it too or this loses the cascade. */
+  .mem-view-mode-btn {
+    padding: 2px 8px !important;
+    font-size: 11px !important;
+  }
+
+  .mem-view {
+    font-size: 11px;
+    line-height: 16px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mem-legend {
+    font-size: 10.5px;
+    line-height: 1.3;
+  }
+
+  .disasm-toolbar {
+    gap: 4px;
+    font-size: 11px;
+  }
+
+  .disasm-toolbar label {
+    gap: 3px;
+  }
+
+  .disasm-show-group {
+    gap: 5px;
+  }
+
+  .disasm-order-hint {
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+
+  .mem-view-toggle {
+    padding: 1px;
+    gap: 1px;
+  }
+
+  .periph-board {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .periph-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .uart-controls {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .uart-controls input[type="text"] {
+    min-width: 120px;
+    flex: 1 1 auto;
+  }
+
+  .uart-controls select {
+    max-width: 100px;
+  }
+
+  #accelSection input[type="range"] {
+    min-width: 60px;
+  }
+
+  #accelXVal,
+  #accelYVal,
+  #accelZVal,
+  #accelTempVal {
+    width: auto !important;
+    font-size: 10px;
+  }
+
+  .cycles-panel {
+    width: 95vw;
+    max-width: 95vw;
+    margin: 10px;
+    max-height: 90vh;
+  }
+}
+
+/* Narrower than a modern phone: Open and Save give up their words so the
+   row still holds, rather than wrapping and clipping Assemble below it. */
+@media (max-width: 380px) {
+  #btnOpen .btn-text,
+  #btnSave .btn-text {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .header h1 {
+    font-size: 12px;
+  }
+}

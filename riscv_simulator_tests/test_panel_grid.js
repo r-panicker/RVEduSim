@@ -1,24 +1,15 @@
 const fs = require('fs');
 const path = require('path');
-let JSDOM;
-try {
-  JSDOM = require('jsdom').JSDOM;
-} catch (e) {
-  try {
-    JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM;
-  } catch (e2) {
-    JSDOM = require('/home/rajesh/.gemini/antigravity-ide/brain/7780d698-8baa-4d51-9b54-596f69dcec55/scratch/node_modules/jsdom').JSDOM;
-  }
-}
+const { JSDOM } = require('jsdom');
 
-const html = fs.readFileSync(path.resolve(__dirname, '../riscv_simulator.html'), 'utf8');
+const html = require('./page').html();
 const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously',
   resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true; // prevent the loader from fetching the CDN bundle (jsdom layout limitations); tests pre-inject the local bundle
     // Pre-inject CodeMirror 6 so the app can boot even when the CDN is
@@ -105,10 +96,8 @@ setTimeout(() => {
     win.innerWidth = 1400; // wide viewport → 2×2 grid eligible
     win.localStorage.clear();
 
-    // jsdom's init sequence aborts before initPanelDock() at a pre-existing
-    // updateDisassembly null-deref, so bootstrap the dock manually. The dock
-    // functions are function declarations exposed on window; initPanelDock()
-    // sets up the module-level panelDock state and builds the layout.
+    // The page booted with jsdom's default width and the stored layout; set
+    // the dock up again for the wide viewport and empty storage above.
     try { win.initPanelDock(); console.log('[bootstrap] initPanelDock OK'); }
     catch (e) { console.log('[bootstrap] initPanelDock THREW:', e.message); }
     // Force re-apply now that the dock state is initialised.
@@ -360,7 +349,7 @@ setTimeout(() => {
     win.dispatchEvent(new win.Event('resize'));
     const reClamped = parseFloat(rightPanel.style.width);
     check('Window resize re-clamps a stale wide dock width', Number.isFinite(reClamped) && reClamped <= 1000 - 360 - 6);
-    // --- 11. Main-splitter width is preserved (dock no longer jumps back to 50%) ---
+    // --- 11. Main-splitter width is preserved (the dock is not reset to 50%) ---
     console.log('\n[11] Relayout preserves the user-chosen dock width (no jump / blank space)');
     // User drags the main splitter to a dock narrower than the 50% grid target.
     win.innerWidth = 1400;
@@ -479,12 +468,11 @@ setTimeout(() => {
 
     // --- 15. Main-splitter drag re-clamps paired rows to the narrower dock ---
     console.log('\n[15] Main-splitter drag narrowing the dock re-clamps persisted pair widths');
-    // The reported regression: after dragging the main splitter narrower, the
-    // paired (2×2 grid) rows kept their old wide persisted column widths and
-    // overflowed the dock (blank space on the right / panels shifted left),
-    // while the solo full-width row behaved correctly. This test reproduces the
-    // exact path: wide pairs that fit the dock are persisted, then the main
-    // splitter is dragged to a 500px dock, and both pairs must be re-clamped.
+    // After the main splitter is dragged narrower, the paired (2×2 grid) rows
+    // must not keep wide persisted column widths that overflow the dock (blank
+    // space on the right, panels shifted left). Wide pairs that fit the dock
+    // are persisted, then the main splitter is dragged to a 500px dock, and
+    // both pairs must be re-clamped.
     ['registers', 'memory', 'peripherals', 'disassembly'].forEach(n => win.setPanelVisible(n, true));
     const rp15 = doc.querySelector('.right-panel');
     rp15.style.width = '1100px';
@@ -588,9 +576,9 @@ setTimeout(() => {
 
     // Give the panel a real width so the surplus-distribution path runs
     // (jsdom reports clientWidth 0 by default, which only exercises the
-    // natural-width case above). This is the behaviour that regressed:
-    // widening the panel must feed the text columns, not stretch Addr /
-    // Machine code, and must never collapse the last columns.
+    // natural-width case above). Widening the panel must feed the text
+    // columns, not stretch Addr / Machine code, and must never collapse the
+    // last columns.
     const disBody = doc.querySelector('#tab-disassembly > .panel-body');
     if (disBody && disTbl) {
       Object.defineProperty(disBody, 'clientWidth', { configurable: true, value: 1000 });

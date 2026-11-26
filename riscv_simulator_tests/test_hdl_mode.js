@@ -1,7 +1,7 @@
 /*
  * HDL simulation mode - end-to-end regression.
  *
- * Loads riscv_simulator.html in jsdom, assembles programs through the
+ * Loads the page (built from src/) in jsdom, assembles programs through the
  * normal assembler, asks the page for the artefacts it would hand to Icarus
  * (the generic testbench, the memory images, the stimulus files), and then
  * runs the REAL Icarus/WASM pipeline over the unmodified RV/*.v sources.
@@ -18,18 +18,15 @@
 const fs = require('fs');
 const path = require('path');
 const { installExamplesFetch } = require('./examples_fetch');
-let JSDOM;
-try { JSDOM = require('jsdom').JSDOM; }
-catch (e) { JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM; }
+const { JSDOM } = require('jsdom');
 
 const ROOT = path.resolve(__dirname, '..');
 const RV = require('./core_dir').coreDir('test_hdl_mode');
 // vendor/verisim/ is the repo's own vendored copy of the same engine the page
-// falls back to (see vendor/README.md) - a stray absolute scratchpad path
-// here previously meant this only worked inside one Claude Code session.
+// falls back to (see vendor/README.md), so the suite runs from any checkout.
 const ENGINE = process.env.HDL_ENGINE_DIR || path.join(ROOT, 'vendor', 'verisim');
 
-const html = fs.readFileSync(path.join(ROOT, 'riscv_simulator.html'), 'utf8');
+const html = require('./page').html();
 const CM6 = fs.readFileSync(path.join(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 const DESIGN = ['ALU.v', 'Decoder.v', 'Extend.v', 'MCycle.v', 'PC_Logic.v', 'ProgramCounter.v',
@@ -43,7 +40,7 @@ function check(label, cond) {
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously', resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {
@@ -323,7 +320,7 @@ setTimeout(async () => {
       bad.length > 0 && bad.every(h => /\.v$/.test(h.file) && h.line > 0));
     check('Catches an initial block with a delay', says(/`initial` with a delay/));
 
-    // The three things that made the first cut of this lint useless.
+    // Constructs a naive pattern match would misread as violations.
     check('A parameter list is not mistaken for a delay',
       win.hdlLintFile('p.v', 'module m #(parameter W = 8) (input x);\nendmodule')
         .every(h => !/delay/.test(h.msg)));
@@ -437,9 +434,9 @@ setTimeout(async () => {
     check('A libgcc helper call explains itself instead of "Unknown symbol"',
       errLines.some(l => /__mulsi3/.test(l) && /M extension/.test(l)));
 
-    // A program that does not fit its segment used to be reported only in the
-    // console, where the success message immediately followed it. Selecting an
-    // example now sizes the segment to fit it, so the overflow is forced.
+    // A program that does not fit its segment must be reported on the status
+    // bar, not only in the console where the success message would follow it.
+    // Selecting an example sizes the segment to fit it, so the overflow is forced.
     await win.loadExample('circle_accel');
     doc.getElementById('ms-codesize').value = '0x100';
     win.eval('applyAndCloseSettings()');
@@ -843,7 +840,7 @@ setTimeout(async () => {
       check('The same testbench serves a completely different program', icarus3.ok);
       if (icarus3.ok) {
         // A character time apart, as a terminal sends them. Both at cycle 0
-        // would now overrun the one-byte holding register and lose the CR,
+        // would overrun the one-byte holding register and lose the CR,
         // which is what the board does too.
         win.hdlSetRx([{ cycle: 0, byte: 0x41 }, { cycle: 200, byte: 0x0D }]);
         const rxFile = win.hdlRxFile();

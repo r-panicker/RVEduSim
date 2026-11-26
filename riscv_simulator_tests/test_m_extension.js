@@ -14,15 +14,14 @@
  *   3. a reference computed here with BigInt, following the RISC-V
  *      specification for division by zero and for -2**31 / -1.
  *
- * Agreement between 1 and 2 is what the processor change has to preserve;
+ * Agreement between 1 and 2 is what any change to the processor has to
+ * preserve;
  * 3 is there so that both agreeing on something wrong still fails.
  */
 const fs = require('fs');
 const path = require('path');
 const { installExamplesFetch } = require('./examples_fetch');
-let JSDOM;
-try { JSDOM = require('jsdom').JSDOM; }
-catch (e) { JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM; }
+const { JSDOM } = require('jsdom');
 
 const ROOT = path.resolve(__dirname, '..');
 const RV = require('./core_dir').coreDir('test_m_extension');
@@ -31,7 +30,7 @@ const ENGINE = process.env.HDL_ENGINE_DIR || path.join(ROOT, 'vendor', 'verisim'
 const DESIGN = ['ALU.v', 'Decoder.v', 'Extend.v', 'MCycle.v', 'PC_Logic.v', 'ProgramCounter.v',
                 'RegFile.v', 'Shifter.v', 'RV.v', 'Wrapper.v'];
 
-const html = fs.readFileSync(path.join(ROOT, 'riscv_simulator.html'), 'utf8');
+const html = require('./page').html();
 const CM6 = fs.readFileSync(path.join(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 let passed = 0, failed = 0;
@@ -147,7 +146,7 @@ async function makeIcarus(testbench, sources) {
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously', resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {

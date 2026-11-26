@@ -1,44 +1,33 @@
 // test_memory_row_granularity_and_shortcuts.js
-// Covers four related fixes:
+// Covers the Memory panel's rows and labels, and the keyboard shortcuts:
 //   1. The Memory panel is one 32-bit word per row (never two) in both Byte
 //      and Word mode, so a narrow-panel wrap can only ever separate a row's
 //      own Hex cell from its own Content cell - not from another word's.
 //   2. A label above a memory row (a code/data symbol, or an MMIO register's
-//      name) now carries a trailing ':', matching how a label reads in the
+//      name) carries a trailing ':', matching how a label reads in the
 //      program itself.
-//   3. The centre push button is bound to ArrowDown (not ArrowUp) - ←/↓/→
-//      share a row on most keyboards.
-//   4. A new keyboard shortcut for the accelerometer: hold X/Y/Z/T, then
-//      Left/Right nudges that axis (T = temperature), clamped to the same
-//      range as its slider; releasing the letter hands ←/→ back to the
-//      push buttons.
+//   3. J, K and L press BTNL, BTNC and BTNR while held; the arrow keys press
+//      no push button.
+//   4. Holding X/Y/Z/T, then , and . nudges that accelerometer axis by 5
+//      (T = temperature), clamped to the same range as its slider, without
+//      stepping; releasing the letter ends it.
+//   5. → steps and ← steps back.
 
 const fs = require('fs');
 const path = require('path');
 const { installExamplesFetch } = require('./examples_fetch');
-let JSDOM;
-try {
-  JSDOM = require('jsdom').JSDOM;
-} catch (e) {
-  try {
-    JSDOM = require(path.resolve(__dirname, 'node_modules/jsdom')).JSDOM;
-  } catch (e2) {
-    JSDOM = require('/home/rajesh/.gemini/antigravity-ide/brain/7780d698-8baa-4d51-9b54-596f69dcec55/scratch/node_modules/jsdom').JSDOM;
-  }
-}
+const { JSDOM } = require('jsdom');
 
 console.log('===========================================================');
 console.log('🚀 TESTING MEMORY ROW GRANULARITY, LABEL COLONS & SHORTCUTS');
 console.log('===========================================================');
-
-const htmlPath = path.resolve(__dirname, '../riscv_simulator.html');
-const htmlContent = fs.readFileSync(htmlPath, 'utf8');
+const htmlContent = require('./page').html();
 const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.min.js'), 'utf8');
 
 const dom = new JSDOM(htmlContent, {
   runScripts: 'dangerously',
   resources: 'usable',
-  url: 'http://localhost:8080/riscv_simulator.html',
+  url: 'http://localhost:8080/index.html',
   beforeParse(window) {
     window.__CM6_DISABLE_CDN = true;
     window.addEventListener('DOMContentLoaded', () => {

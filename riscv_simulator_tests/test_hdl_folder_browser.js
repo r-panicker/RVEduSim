@@ -21,8 +21,13 @@ function check(label, cond) {
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.txt': 'text/plain' };
 function serve() {
+  // The page is the minified build, with its styles and script inline;
+  // everything it fetches comes from the repository.
+  const page = require('../tools/page').inlinePage({ minify: true });
   const server = http.createServer((req, res) => {
-    const file = path.join(ROOT, decodeURIComponent(new URL(req.url, 'http://x').pathname));
+    const name = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    if (name === '/index.html') { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(page); return; }
+    const file = path.join(ROOT, name);
     if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
     fs.createReadStream(file).pipe(res);
@@ -35,7 +40,7 @@ const sources = fs.readdirSync(RV).filter(f => /\.v$/.test(f))
 
 (async () => {
   const server = await serve();
-  const url = 'http://127.0.0.1:' + server.address().port + '/riscv_simulator.html';
+  const url = 'http://127.0.0.1:' + server.address().port + '/index.html';
   const browser = await chromium.launch({ channel: process.env.CHROME_CHANNEL || 'chrome' });
   try {
     console.log('===========================================================');
