@@ -1,4 +1,3 @@
-// @ts-nocheck
 // ================================================================
 // Datapath animation
 // ================================================================
@@ -17,7 +16,7 @@
 import { compileAndAssembleC } from '../c/compile';
 import { cProgram } from '../c/state';
 import { ABI_NAMES } from '../isa/instructions';
-import { ALU_OP_NAMES, DECODER_TABLE, IMM_SRC_NAMES, aluCompute, ctlBit, extendImm, pcLogic } from '../machine/control';
+import { ALU_OP_NAMES, DECODER_TABLE, IMM_SRC_NAMES, aluCompute, ctlBit, extendImm, pcLogic, type AluFlags, type DecoderRow } from '../machine/control';
 import { getMemByte, readMem, setMemByte, writeMem } from '../machine/memory';
 import { pipeBhtIndex, pipeEvaluate, pipeline } from '../machine/pipeline';
 import { cpu, layout, oled, program, run, stepHistory, ui } from '../machine/state';
@@ -39,7 +38,28 @@ import { toggleWaveDock } from './waveform';
 import { byId } from './dom';
 
 
-export function dpHex(v: number) { return '0x' + (v >>> 0).toString(16).padStart(8, '0'); }
+// The instruction at the PC as the single-cycle diagram sees it: its
+// fields, and, when the diagram can draw it, every value on every wire.
+export interface DpFields {
+  pipe?: false; pc: number; instr: number; op: number; f3: number; f7: number;
+  rs1: number; rs2: number; rd: number; text: string;
+}
+export interface DpUnsupported extends DpFields { unsupported: string }
+export type DpCtrl = DecoderRow & { ALUControl: number };
+export interface DpModel extends DpFields {
+  unsupported: null; ctrl: DpCtrl;
+  rd1: number; rd2: number; extImm: number | null; srcA: number; srcB: number | null;
+  aluResult: number | null; flags: AluFlags; readData: number; result: number | null;
+  pcSrc: string; base: number; offset: number; pcIn: number;
+}
+export type DpEval = DpUnsupported | DpModel;
+
+// A control signal's value as the Decoder drives it, as bits.
+export function dpCtrlValue(c: DpCtrl, name: string): string {
+  return String((c as unknown as Record<string, string | number>)[name]);
+}
+
+export function dpHex(v: number | null | undefined) { return '0x' + (Number(v) >>> 0).toString(16).padStart(8, '0'); }
 
 // Why the diagram cannot show this instruction, or null when it can.
 // The datapath is the lecture's: word loads and stores only, no MCycle.
@@ -63,43 +83,42 @@ export function dpUnsupported(instr: number, op: number, f3: number, f7: number)
 
 // Every value on every wire for the instruction at the PC, from the
 // current state. Reads are peeks, so looking never consumes a UART byte.
-export function dpEvaluate() {
+export function dpEvaluate(): DpEval {
   const pcv = cpu.pc >>> 0;
   const instr = readMem(pcv, 4, true) >>> 0;
   const op = instr & 0x7F, f3 = (instr >>> 12) & 7, f7 = instr >>> 25;
   const rs1 = (instr >>> 15) & 31, rs2 = (instr >>> 20) & 31, rd = (instr >>> 7) & 31;
   const item = program.machineCode.find(it => it.address === pcv && it.bytes);
-  const m = {
+  const fields: DpFields = {
     pc: pcv, instr, op, f3, f7, rs1, rs2, rd,
     text: item ? (item.native || item.text || '').trim() : '',
-    unsupported: dpUnsupported(instr, op, f3, f7),
   };
-  if (m.unsupported) return m;
-  const c = Object.assign({}, DECODER_TABLE[op]);
+  const unsupported = dpUnsupported(instr, op, f3, f7);
+  if (unsupported) return { ...fields, unsupported };
+  const c: DpCtrl = Object.assign({ ALUControl: 0 }, DECODER_TABLE[op]);
   if (op === 0x33) c.ALUControl = (f3 << 1) | ((f7 >>> 5) & 1);
   else if (op === 0x13) c.ALUControl = (f3 << 1) | (f3 === 5 ? (instr >>> 30) & 1 : 0);
   else if (op === 0x63) c.ALUControl = 0b0001;
   else c.ALUControl = 0b0000;
-  m.ctrl = c;
-  m.rd1 = cpu.regs[rs1] >>> 0;
-  m.rd2 = cpu.regs[rs2] >>> 0;
-  m.extImm = extendImm(instr, c.ImmSrc);
-  const selA = ctlBit(c.ALUSrcA, 0) === '1' ? (ctlBit(c.ALUSrcA, 1) === '1' ? pcv : 0) : m.rd1;
-  const selB = ctlBit(c.ALUSrcB, 0) === '1' ? (ctlBit(c.ALUSrcB, 1) === '1' ? m.extImm : 4) : m.rd2;
-  m.srcA = selA >>> 0;
-  m.srcB = selB === null ? null : selB >>> 0;
-  const alu = aluCompute(m.srcA, m.srcB === null ? 0 : m.srcB, c.ALUControl);
-  m.aluResult = alu.result;
-  m.flags = alu.flags;
-  m.readData = readMem(m.aluResult === null ? 0 : m.aluResult, 4, true) >>> 0;
-  m.result = c.MemtoReg === '1' ? m.readData : m.aluResult;
-  m.pcSrc = pcLogic(c.PCS, f3, m.flags);
-  const base = ctlBit(m.pcSrc, 1) === '1' ? m.rd1 : pcv;
-  const offset = ctlBit(m.pcSrc, 0) === '1' ? (m.extImm === null ? 0 : m.extImm) : 4;
-  m.base = base >>> 0;
-  m.offset = offset >>> 0;
-  m.pcIn = (base + offset) >>> 0;
-  return m;
+  const rd1 = cpu.regs[rs1] >>> 0;
+  const rd2 = cpu.regs[rs2] >>> 0;
+  const extImm = extendImm(instr, c.ImmSrc);
+  const selA = ctlBit(c.ALUSrcA, 0) === '1' ? (ctlBit(c.ALUSrcA, 1) === '1' ? pcv : 0) : rd1;
+  const selB = ctlBit(c.ALUSrcB, 0) === '1' ? (ctlBit(c.ALUSrcB, 1) === '1' ? extImm : 4) : rd2;
+  const srcA = selA >>> 0;
+  const srcB = selB === null ? null : selB >>> 0;
+  const alu = aluCompute(srcA, srcB === null ? 0 : srcB, c.ALUControl);
+  const aluResult = alu.result;
+  const flags = alu.flags;
+  const readData = readMem(aluResult === null ? 0 : aluResult, 4, true) >>> 0;
+  const result = c.MemtoReg === '1' ? readData : aluResult;
+  const pcSrc = pcLogic(c.PCS, f3, flags);
+  const base = ctlBit(pcSrc, 1) === '1' ? rd1 : pcv;
+  const offset = ctlBit(pcSrc, 0) === '1' ? (extImm === null ? 0 : extImm) : 4;
+  return {
+    ...fields, unsupported: null, ctrl: c, rd1, rd2, extImm, srcA, srcB, aluResult, flags, readData,
+    result, pcSrc, base: base >>> 0, offset: offset >>> 0, pcIn: (base + offset) >>> 0,
+  };
 }
 
 // Wires, as routes through the diagram in its own coordinates: `segs`
@@ -115,7 +134,9 @@ export function dpEvaluate() {
 // RD1, RD2, ExtImm, ALUResult, funct3 and the ALUSrcA/ALUSrcB/PCSrc
 // buses), so the copy in index.html splits those into `a` and `b` halves
 // at the junction.
-export const DP_ROUTES = {
+// segs: the drawing's segments (data-e); pts: the path; park: a free spot.
+export interface DpWire { segs: (string | number)[]; pts: number[][]; park?: number[] }
+export const DP_ROUTES: Record<string, DpWire> = {
   pcImem:     { segs: ['76a', '76b'], pts: [[553, 993], [682, 993]], park: [470, 1200] },
   instr:      { segs: [77, 95], pts: [[919, 1034], [1009, 1034]], park: [800, 1300] },
   opcode:     { segs: [180], pts: [[1009, 469], [1278, 469]] },
@@ -166,7 +187,7 @@ export const DP_ROUTES = {
 
 // Each mux: its shape, the control bit that selects it, its inputs in
 // select order and its output, so the chosen path can be drawn through it.
-export const DP_MUXES = {
+export const DP_MUXES: Record<string, { e: number; sel: [string, number]; ins: number[][]; out: number[] }> = {
   off:  { e: 96,  sel: ['pcSrc', 0],    ins: [[129, 852], [129, 925]], out: [193, 887] },
   base: { e: 223, sel: ['pcSrc', 1],    ins: [[166, 1128], [166, 1052]], out: [230, 1090] },
   a1:   { e: 112, sel: ['ALUSrcA', 1],  ins: [[1786, 917], [1786, 989]], out: [1851, 952] },
@@ -176,16 +197,16 @@ export const DP_MUXES = {
   res:  { e: 88,  sel: ['MemtoReg', 0], ins: [[2787, 1481], [2787, 1403]], out: [2851, 1433] },
 };
 
-export const DP_BLOCKS = {
+export const DP_BLOCKS: Record<string, number> = {
   pcReg: 75, imem: 74, rf: 78, dmem: 81, decoder: 171, pcLogic: 287,
   extend: 107, alu: 141, adder: 126,
 };
-export const DP_CLOCKS = { pc: [116, 117], rf: [119, 120], dmem: [122, 123] };
+export const DP_CLOCKS: Record<string, number[]> = { pc: [116, 117], rf: [119, 120], dmem: [122, 123] };
 
-export const DP_REG_NAME = (i: string) => 'x' + i + (i ? ' (' + ABI_NAMES[i] + ')' : '');
+export const DP_REG_NAME = (i: number) => 'x' + i + (i ? ' (' + ABI_NAMES[i] + ')' : '');
 
-export function dpSelBit(m: { pcSrc: any; ctrl: { [x: string]: any; }; } | null, name: string, bit: number) {
-  const v = name === 'pcSrc' ? m.pcSrc : m.ctrl[name];
+export function dpSelBit(m: DpModel, name: string, bit: number) {
+  const v = name === 'pcSrc' ? m.pcSrc : dpCtrlValue(m.ctrl, name);
   return ctlBit(v, bit);
 }
 
@@ -194,10 +215,18 @@ export function dpSelBit(m: { pcSrc: any; ctrl: { [x: string]: any; }; } | null,
 // some of them, draws mux selections, glows blocks, and says what is
 // happening. Everything the hardware computes is shown, including values
 // no mux or enable lets through; those are drawn as unused.
-export function dpPhases(m: null) {
+// One step of the animation: the routes it lights ([route, kind, chip
+// text, how]), the blocks it glows, the muxes it draws, and its caption.
+export type DpRouteUse = [name: string, kind: string, text: string, how?: string];
+export interface DpPhase {
+  stage?: string; title: string; glow?: string[]; routes: DpRouteUse[]; muxes?: string[];
+  sequential?: boolean; edge?: boolean; caption: string;
+}
+
+export function dpPhases(m: DpEval) {
   const hx = dpHex;
-  const phases = [];
-  const fetch = {
+  const phases: DpPhase[] = [];
+  const fetch: DpPhase = {
     stage: 'F', title: 'Fetch',
     glow: ['pcReg', 'imem'],
     routes: [['pcImem', 'data', hx(m.pc)], ['instr', 'data', hx(m.instr)]],
@@ -206,22 +235,22 @@ export function dpPhases(m: null) {
       `returns <code>${hx(m.instr)}</code>${m.text ? ' - <code>' + escapeHtml(m.text) + '</code>' : ''}.`
   };
   phases.push(fetch);
-  if (m.unsupported) {
+  if (m.unsupported !== null) {
     phases.push({ title: 'Not in this datapath', routes: [], caption: escapeHtml(m.unsupported) +
       ' The next ▶ executes it anyway, so the program can carry on.' });
     return phases;
   }
   const c = m.ctrl;
-  const fmt = { 0x33: 'R', 0x13: 'I', 0x03: 'I', 0x67: 'I', 0x23: 'S', 0x63: 'B', 0x6F: 'J', 0x17: 'U', 0x37: 'U' }[m.op];
+  const fmt = ({ 0x33: 'R', 0x13: 'I', 0x03: 'I', 0x67: 'I', 0x23: 'S', 0x63: 'B', 0x6F: 'J', 0x17: 'U', 0x37: 'U' } as Record<number, string>)[m.op] ?? '';
   const uses = { rs1: 'RISB'.includes(fmt), rs2: 'RSB'.includes(fmt), rd: 'RIUJ'.includes(fmt) };
   const bin = (v: { toString: (arg0: number) => string; }, n: number) => v.toString(2).padStart(n, '0');
-  const ctl = (name: string, text?: string | undefined) => [name, /x/.test(c[name]) ? 'x' : 'ctrl', text || c[name]];
+  const ctl = (name: string, text?: string): DpRouteUse => [name, /x/.test(dpCtrlValue(c, name)) ? 'x' : 'ctrl', text || dpCtrlValue(c, name)];
   // A 2-bit select bus: the trunk carries the value, and each bit's own
   // branch is a don't-care or not on its own account.
-  const ctlBus = (name: string) => [
-    [name, /^x+$/.test(c[name]) ? 'x' : 'ctrl', c[name]],
-    [name + '0', ctlBit(c[name], 0) === 'x' ? 'x' : 'ctrl', '', 'nochip'],
-    [name + '1', ctlBit(c[name], 1) === 'x' ? 'x' : 'ctrl', '', 'nochip'],
+  const ctlBus = (name: string): DpRouteUse[] => [
+    [name, /^x+$/.test(dpCtrlValue(c, name)) ? 'x' : 'ctrl', dpCtrlValue(c, name)],
+    [name + '0', ctlBit(dpCtrlValue(c, name), 0) === 'x' ? 'x' : 'ctrl', '', 'nochip'],
+    [name + '1', ctlBit(dpCtrlValue(c, name), 1) === 'x' ? 'x' : 'ctrl', '', 'nochip'],
   ];
   phases.push({
     stage: 'D', title: 'Decoder',
@@ -281,7 +310,7 @@ export function dpPhases(m: null) {
         : `the ${IMM_SRC_NAMES[c.ImmSrc]}-type immediate <code>${ext}</code> (${m.extImm | 0}).`)
   });
   const aluName = ALU_OP_NAMES[c.ALUControl];
-  const pcsName = { '00': 'not a control instruction', '01': 'a branch', '10': 'jal', '11': 'jalr' }[c.PCS];
+  const pcsName = ({ '00': 'not a control instruction', '01': 'a branch', '10': 'jal', '11': 'jalr' } as Record<string, string>)[c.PCS];
   phases.push({
     stage: 'E', title: 'ALU and PC Logic',
     glow: ['alu', 'pcLogic'],
@@ -327,11 +356,11 @@ export function dpPhases(m: null) {
         (m.rd === 0 ? ' - but rd is x0, which the register file never writes.' : ' to be written to x' + m.rd + '.')
       : 'RegWrite is 0: Result reaches WD, but the register file will not take it.'
   });
-  const pcExplain = {
+  const pcExplain = ({
     '00': 'PC_IN = PC + 4.',
     '01': 'PC_IN = PC + ExtImm, the taken target.',
     '11': 'PC_IN = RD1 + ExtImm, jalr\'s target.',
-  }[m.pcSrc];
+  } as Record<string, string>)[m.pcSrc];
   phases.push({
     stage: 'W', title: 'PC Increment',
     glow: ['adder'],
@@ -357,8 +386,9 @@ export function dpPhases(m: null) {
 }
 
 // ---- State and rendering --------------------------------------------
-export let dpModel = null;
-export let dpPhaseList = [];
+export type PdpModel = ReturnType<typeof pdpEvaluate>;
+export let dpModel: DpEval | PdpModel | null = null;
+export let dpPhaseList: DpPhase[] = [];
 export let dpPhase = 0;             // 0 = nothing yet; k = phases 1..k shown
 export let dpStamp = '';
 export let dpSpeed = 1;
@@ -369,13 +399,15 @@ export const DP_OPEN_KEY = 'rvsim.dpOpen.v1';
 export const DP_H_KEY = 'rvsim.dpHeight.v1';
 export const DP_H_DEFAULT = 420;
 
-export const DP_KIND_COLOUR = { data: '#e64553', field: '#8839ef', ctrl: '#1e66f5', unused: '#9ca0b0', x: '#9ca0b0' };
+export const DP_KIND_COLOUR: Record<string, string> = { data: '#e64553', field: '#8839ef', ctrl: '#1e66f5', unused: '#9ca0b0', x: '#9ca0b0' };
 
 export function dpSvg() {
-  return document.getElementById(!pipeline.on ? 'dpSvg' : pipeline.predictor.on ? 'dpPipeBpSvg' : 'dpPipeSvg');
+  return document.getElementById(!pipeline.on ? 'dpSvg' : pipeline.predictor.on ? 'dpPipeBpSvg' : 'dpPipeSvg') as SVGSVGElement | null;
 }
-export function dpOverlayEl() { const svg = dpSvg(); return svg && svg.querySelector('.dp-overlay'); }
-export function dpEl(i: string | number) { const svg = dpSvg(); return svg && svg.querySelector(`[data-e="${i}"]`); }
+export function dpOverlayEl() { const svg = dpSvg(); return svg && svg.querySelector<SVGGElement>('.dp-overlay'); }
+export function dpEl(i: string | number) { const svg = dpSvg(); return svg && svg.querySelector<SVGElement>(`[data-e="${i}"]`); }
+// Whether the model is a single-cycle instruction the diagram draws.
+export function dpDrawable(m: typeof dpModel): m is DpModel { return !!m && m.pipe !== true && m.unsupported === null; }
 
 export function dpActive() {
   return !!dpSvg() && ui.engine !== 'hdl' &&
@@ -411,7 +443,7 @@ export function dpSync(force: boolean) {
   if (!force && stamp === dpStamp && dpModel) {
     if (dpBusy) return;
     dpModel = pipeline.on ? pdpEvaluate() : dpEvaluate();
-    dpPhaseList = pipeline.on ? [] : dpPhases(dpModel);
+    dpPhaseList = dpModel.pipe ? [] : dpPhases(dpModel);
     dpPhase = Math.min(dpPhase, dpPhaseList.length);
     dpRender(false);
     return;
@@ -428,13 +460,13 @@ export function dpSync(force: boolean) {
 export function dpClear() {
   const svg = dpSvg();
   if (!svg) return;
-  svg.querySelectorAll('.dp-lit-data, .dp-lit-field, .dp-lit-ctrl, .dp-lit-unused, .dp-lit-x, .dp-glow, .dp-glow-ctrl, .dp-edge')
+  svg.querySelectorAll<SVGElement>('.dp-lit-data, .dp-lit-field, .dp-lit-ctrl, .dp-lit-unused, .dp-lit-x, .dp-glow, .dp-glow-ctrl, .dp-edge')
     .forEach(el => {
       el.classList.remove('dp-lit-data', 'dp-lit-field', 'dp-lit-ctrl',
         'dp-lit-unused', 'dp-lit-x', 'dp-glow', 'dp-glow-ctrl', 'dp-edge');
       el.style.removeProperty('--sc');
     });
-  svg.querySelectorAll('.pl-lit').forEach(el => {
+  svg.querySelectorAll<SVGElement>('.pl-lit').forEach(el => {
     el.classList.remove('pl-lit', 'pl-thin');
     el.style.removeProperty('--pl');
     delete el.dataset.pl;
@@ -446,9 +478,9 @@ export function dpClear() {
 // The colour of the pipeline stage the step being drawn belongs to, so a
 // single-cycle step reads in the same colour as that stage in the
 // pipeline, its timeline and the clock beside the drawing.
-export let dpStageColour = null;
+export let dpStageColour: string | null = null;
 
-export function dpLight(routeName: string | number, kind: string) {
+export function dpLight(routeName: string, kind: string) {
   const r = DP_ROUTES[routeName];
   if (!r) return;
   const used = kind !== 'unused' && kind !== 'x';
@@ -469,7 +501,7 @@ export function dpLight(routeName: string | number, kind: string) {
   }
 }
 
-export function dpGlow(names: any) {
+export function dpGlow(names: string[] | undefined) {
   for (const n of names || []) {
     const el = dpEl(DP_BLOCKS[n]);
     if (!el) continue;
@@ -478,15 +510,16 @@ export function dpGlow(names: any) {
   }
 }
 
-export function dpNS(tag: string, attrs: { [x: string]: any; points?: string; fill?: any; stroke?: any; "stroke-width"?: number; "stroke-linecap"?: string; class?: string; x?: number; y?: number; width?: number; height?: number; "text-anchor"?: string; "font-weight"?: number; }) {
+export function dpNS(tag: string, attrs: Record<string, string | number>) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  for (const k in attrs) el.setAttribute(k, String(attrs[k]));
   return el;
 }
 
 // The chosen path through a mux, drawn inside its shape.
-export function dpDrawMux(name: string | number) {
+export function dpDrawMux(name: string) {
   const mx = DP_MUXES[name];
+  if (!dpDrawable(dpModel)) return;
   const bit = dpSelBit(dpModel, mx.sel[0], mx.sel[1]);
   const shape = dpEl(mx.e);
   if (bit !== '0' && bit !== '1') {
@@ -499,18 +532,19 @@ export function dpDrawMux(name: string | number) {
   }
   const from = mx.ins[+bit];
   const ov = dpOverlayEl();
+  if (!ov) return;
   ov.appendChild(dpNS('polyline', {
     points: `${from[0]},${from[1]} ${(from[0] + mx.out[0]) / 2},${mx.out[1]} ${mx.out[0]},${mx.out[1]}`,
     fill: 'none', stroke: dpStageColour || '#e64553', 'stroke-width': 9, 'stroke-linecap': 'round'
   }));
 }
 
-export function dpChip(text: string | any[], kind: string, parked: boolean) {
+export function dpChip(text: string, kind: string, parked: boolean) {
   const g = dpNS('g', { class: 'dp-chip' + (parked ? ' dp-parked' : '') });
   const fs = parked ? 26 : 34;
   const w = Math.max(40, text.length * fs * 0.6 + 22), h = fs + 16;
-  g.dataset.w = w;
-  g.dataset.h = h;
+  g.dataset.w = String(w);
+  g.dataset.h = String(h);
   const used = kind !== 'unused' && kind !== 'x';
   g.appendChild(dpNS('rect', { x: -w / 2, y: -h / 2, width: w, height: h,
     fill: (used && dpStageColour) || DP_KIND_COLOUR[kind] || '#e64553' }));
@@ -520,13 +554,13 @@ export function dpChip(text: string | any[], kind: string, parked: boolean) {
   return g;
 }
 
-export function dpRouteLength(pts: string | any[]) {
+export function dpRouteLength(pts: number[][]) {
   let len = 0;
   for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
   return len;
 }
 
-export function dpPointAt(pts: string | any[], frac: number) {
+export function dpPointAt(pts: number[][], frac: number) {
   const total = dpRouteLength(pts);
   let want = total * frac;
   for (let i = 1; i < pts.length; i++) {
@@ -544,7 +578,7 @@ export function dpPointAt(pts: string | any[], frac: number) {
 // straight run - below a horizontal run, right of a vertical one - which
 // keeps it off the blocks at either end and off the diagram's own labels,
 // which sit above and to the left of their wires.
-export function dpParkPoint(route: { pts: any; park: any; }, chip: { dataset: { w: string | number; h: string | number; }; }) {
+export function dpParkPoint(route: DpWire, chip?: SVGElement | null) {
   const pts = route.pts;
   let best = 1, bestLen = -1;
   for (let i = 1; i < pts.length; i++) {
@@ -555,17 +589,18 @@ export function dpParkPoint(route: { pts: any; park: any; }, chip: { dataset: { 
   const a = pts[best - 1], b = pts[best];
   const x = (a[0] + b[0]) / 2, y = (a[1] + b[1]) / 2;
   if (!chip) return [x, y];
-  const w = +chip.dataset.w, h = +chip.dataset.h;
+  const w = Number(chip.dataset.w), h = Number(chip.dataset.h);
   return Math.abs(b[1] - a[1]) > Math.abs(b[0] - a[0]) ? [x + w / 2 + 8, y] : [x, y + h / 2 + 8];
 }
 
-export function dpPlace(g: { setAttribute: (arg0: string, arg1: string) => void; }, xy: any[]) { g.setAttribute('transform', `translate(${xy[0]},${xy[1]})`); }
+export function dpPlace(g: Element, xy: number[]) { g.setAttribute('transform', `translate(${xy[0]},${xy[1]})`); }
 
 // Everything phases 1..k leave on the diagram, drawn at rest. The latest
 // phase's values are full size; earlier ones shrink to tags.
 export function dpDrawStatic(k: number) {
   dpClear();
   const ov = dpOverlayEl();
+  if (!ov) return;
   for (let p = 1; p <= k; p++) {
     const ph = dpPhaseList[p - 1];
     if (!ph) continue;
@@ -579,7 +614,7 @@ export function dpDrawStatic(k: number) {
     }
     if (p === k) dpGlow(ph.glow);
     for (const mx of ph.muxes || []) dpDrawMux(mx);
-    if (ph.edge && p === k) {
+    if (ph.edge && p === k && dpDrawable(dpModel)) {
       const c = dpModel.ctrl;
       const edgeEls = [DP_BLOCKS.pcReg, ...DP_CLOCKS.pc];
       if (c && c.RegWrite === '1' && dpModel.rd !== 0) edgeEls.push(DP_BLOCKS.rf, ...DP_CLOCKS.rf);
@@ -601,7 +636,8 @@ export function dpDrawStatic(k: number) {
 // every instruction; the format is what says which slices are an
 // immediate. HTML rather than part of the drawing, so it stays readable
 // at any zoom: dpPlaceEncoding() finds it room.
-export const DP_FORMATS = {
+// Each format's fields: [high bit, low bit, name, kind].
+export const DP_FORMATS: Record<string, [number, number, string, string][]> = {
   R:   [[31, 25, 'funct7', 'ctl'], [24, 20, 'rs2', 'reg'], [19, 15, 'rs1', 'reg'], [14, 12, 'funct3', 'ctl'], [11, 7, 'rd', 'reg'], [6, 0, 'opcode', 'ctl']],
   I:   [[31, 20, 'imm[11:0]', 'imm'], [19, 15, 'rs1', 'reg'], [14, 12, 'funct3', 'ctl'], [11, 7, 'rd', 'reg'], [6, 0, 'opcode', 'ctl']],
   Ish: [[31, 25, 'funct7', 'ctl'], [24, 20, 'shamt', 'imm'], [19, 15, 'rs1', 'reg'], [14, 12, 'funct3', 'ctl'], [11, 7, 'rd', 'reg'], [6, 0, 'opcode', 'ctl']],
@@ -611,8 +647,8 @@ export const DP_FORMATS = {
   J:   [[31, 12, 'imm[20|10:1|11|19:12]', 'imm'], [11, 7, 'rd', 'reg'], [6, 0, 'opcode', 'ctl']],
   raw: [[31, 0, 'no RV32I format', 'ctl']],
 };
-export const DP_FORMAT_IMMSRC = { I: '011', S: '110', B: '111', U: '000', J: '010' };
-export const DP_BRANCH_NAMES = { 0: 'beq', 1: 'bne', 4: 'blt', 5: 'bge', 6: 'bltu', 7: 'bgeu' };
+export const DP_FORMAT_IMMSRC: Record<string, string> = { I: '011', S: '110', B: '111', U: '000', J: '010' };
+export const DP_BRANCH_NAMES: Record<number, string> = { 0: 'beq', 1: 'bne', 4: 'blt', 5: 'bge', 6: 'bltu', 7: 'bgeu' };
 
 export function dpFormatOf(op: number, f3: number) {
   switch (op) {
@@ -629,7 +665,7 @@ export function dpFormatOf(op: number, f3: number) {
 
 // What one field says about this instruction; '' when its bits are
 // only a slice of the immediate, which the last row gathers.
-export function dpFieldMeaning(m: { op: number; rd: any; rs1: any; rs2: string; f3: number; ctrl: { ALUControl: string | number; }; }, fmt: string | null, name: string) {
+export function dpFieldMeaning(m: DpEval, fmt: string | null, name: string) {
   if (name === 'opcode') {
     const row = DECODER_TABLE[m.op];
     return '0x' + m.op.toString(16).padStart(2, '0') + ' · ' + (row ? row.row : 'no decoder row');
@@ -640,7 +676,7 @@ export function dpFieldMeaning(m: { op: number; rd: any; rs1: any; rs2: string; 
   if (name === 'shamt') return 'shift by ' + m.rs2;
   if (name === 'funct3') {
     if (m.op === 0x63) return DP_BRANCH_NAMES[m.f3] || 'not a branch';
-    if (m.ctrl && (m.op === 0x33 || m.op === 0x13)) return 'ALU ' + (ALU_OP_NAMES[m.ctrl.ALUControl] || '?');
+    if (m.unsupported === null && (m.op === 0x33 || m.op === 0x13)) return 'ALU ' + (ALU_OP_NAMES[m.ctrl.ALUControl] || '?');
     if (m.op === 0x03 || m.op === 0x23) return m.f3 === 2 ? 'word' : 'byte/half';
     return '';
   }
@@ -650,20 +686,21 @@ export function dpFieldMeaning(m: { op: number; rd: any; rs1: any; rs2: string; 
 
 // The Decoder's truth table as the lecture gives it, with the row this
 // instruction selects picked out.
-export const DP_ALUCTL_TEXT = {
+export const DP_ALUCTL_TEXT: Record<string, string> = {
   'DP Reg': '{funct3, funct7[5]}', 'DP Imm': "{funct3, 1'b0 /<br>imm[10]#}", branch: '0001 (sub)',
 };
 // The lecture's row order; an object's numeric keys would come out sorted.
 export const DP_CONTROL_ORDER = [0x33, 0x13, 0x03, 0x23, 0x63, 0x6F, 0x17, 0x37, 0x67];
-export function dpControlTable(m: { ctrl: { row: any; ALUControl: string | number; }; }) {
-  const cur = m.ctrl && m.ctrl.row;
+export function dpControlTable(m: DpEval) {
+  const ctrl = m.unsupported === null ? m.ctrl : null;
+  const cur = ctrl && ctrl.row;
   let rows = '';
   for (const op of DP_CONTROL_ORDER) {
     const c = DECODER_TABLE[op];
     const on = c.row === cur;
     let alu = DP_ALUCTL_TEXT[c.row] || '0000 (add)';
-    if (on && (c.row === 'DP Reg' || c.row === 'DP Imm')) {
-      alu += `<br>= ${m.ctrl.ALUControl.toString(2).padStart(4, '0')} (${ALU_OP_NAMES[m.ctrl.ALUControl] || '?'})`;
+    if (ctrl && on && (c.row === 'DP Reg' || c.row === 'DP Imm')) {
+      alu += `<br>= ${ctrl.ALUControl.toString(2).padStart(4, '0')} (${ALU_OP_NAMES[ctrl.ALUControl] || '?'})`;
     }
     const imm = c.ImmSrc + ' (' + (IMM_SRC_NAMES[c.ImmSrc] || 'R') + ')';
     rows += `<tr${on ? ' class="dp-ctl-on"' : ''}><td>${op.toString(16).toUpperCase().padStart(2, '0')}</td>` +
@@ -676,7 +713,7 @@ export function dpControlTable(m: { ctrl: { row: any; ALUControl: string | numbe
     '<div class="dp-ctl-note"># ALUControl[0] = (funct3 == 0x5) ? imm[10] : 1\'b0</div>';
 }
 
-export function dpDrawEncoding(m: { op: any; f3: any; instr: number; text: any; } | null) {
+export function dpDrawEncoding(m: DpEval | null) {
   const el = byId('dpEnc');
   if (!el) return;
   if (!m) { el.hidden = true; return; }
@@ -684,7 +721,7 @@ export function dpDrawEncoding(m: { op: any; f3: any; instr: number; text: any; 
   const fmt = dpFormatOf(m.op, m.f3);
   const fields = DP_FORMATS[fmt || 'raw'];
   const bit = (i: number) => (m.instr >>> i) & 1;
-  const bitsOf = (hi: string | number, lo: number) => { let str = ''; for (let i = hi; i >= lo; i--) str += bit(i); return str; };
+  const bitsOf = (hi: number, lo: number) => { let str = ''; for (let i = hi; i >= lo; i--) str += bit(i); return str; };
   let names = '', cells = '', ends = '', rows = '';
   for (const [hi, lo, name, kind] of fields) {
     const span = `grid-column: span ${hi - lo + 1}`;
@@ -696,7 +733,7 @@ export function dpDrawEncoding(m: { op: any; f3: any; instr: number; text: any; 
     rows += `<tr><td class="dp-enc-range">${hi}:${lo}</td><td class="dp-enc-bin">${bitsOf(hi, lo)}</td>` +
       `<td class="dp-enc-${kind}">${escapeHtml(name)}</td><td>${escapeHtml(dpFieldMeaning(m, fmt, name))}</td></tr>`;
   }
-  const immSrc = fmt === 'Ish' ? null : DP_FORMAT_IMMSRC[fmt];
+  const immSrc = !fmt || fmt === 'Ish' ? null : DP_FORMAT_IMMSRC[fmt];
   const imm = immSrc ? extendImm(m.instr, immSrc) : null;
   el.innerHTML =
     `<div class="dp-enc-title"><b>${fmt ? (fmt === 'Ish' ? 'I' : fmt) + '-type' : 'Encoding'}</b> ` +
@@ -723,12 +760,12 @@ export function dpPlaceEncoding() {
 // One clock period down the single-cycle drawing's left margin: the nine
 // steps, each in the colour of the pipeline stage it belongs to, all
 // inside a single cycle; the rising edge at the bottom starts the next.
-export const DP_STAGE_NAME = { F: 'Fetch', D: 'Decode', E: 'Execute', M: 'Memory', W: 'Writeback' };
+export const DP_STAGE_NAME: Record<string, string> = { F: 'Fetch', D: 'Decode', E: 'Execute', M: 'Memory', W: 'Writeback' };
 export const DP_CLK = { left: 320, y0: 120, y1: 1640, wLow: -300, wHigh: -195, bx0: -165, bx1: -25 };
 export function dpClockInit() {
   const svg = byId<SVGSVGElement>('dpSvg');
   if (!svg || svg.querySelector('#dpClock')) return;
-  const [vx, vy, vw, vh] = svg.getAttribute('viewBox').split(/[\s,]+/).map(Number);
+  const [vx, vy, vw, vh] = (svg.getAttribute('viewBox') ?? '0 0 0 0').split(/[\s,]+/).map(Number);
   svg.setAttribute('viewBox', `${vx - DP_CLK.left} ${vy} ${vw + DP_CLK.left} ${vh}`);
   const { y0, y1, wLow, wHigh, bx0, bx1 } = DP_CLK, mid = (y0 + y1) / 2;
   const NS = 'http://www.w3.org/2000/svg';
@@ -754,7 +791,7 @@ export function dpClockUpdate() {
     const state = i + 1 === dpPhase ? ' now' : i + 1 < dpPhase ? ' done' : '';
     const y = y0 + i * h;
     g.insertAdjacentHTML('beforeend',
-      `<g class="dp-clk-step${state}" style="--sc:${PDP_COLOUR[p.stage]}">` +
+      `<g class="dp-clk-step${state}" style="--sc:${PDP_COLOUR[p.stage ?? '']}">` +
       `<rect x="${bx0}" y="${y + 6}" width="${bx1 - bx0}" height="${h - 12}" rx="12"/>` +
       `<text x="${(bx0 + bx1) / 2}" y="${y + h / 2 + 24}" text-anchor="middle">${p.stage}</text></g>`);
   });
@@ -768,9 +805,9 @@ export function dpRender(animate: boolean) {
   const total = dpPhaseList.length;
   if (pipeline.on) {
     pdpRenderTimeline();
-    pdpDrawEncodings(dpModel);
+    pdpDrawEncodings(dpModel && dpModel.pipe ? dpModel : null);
   } else {
-    dpDrawEncoding(dpModel);
+    dpDrawEncoding(dpModel && !dpModel.pipe ? dpModel : null);
   }
   if (!dpModel) {
     dpClear();
@@ -798,8 +835,8 @@ export function dpRender(animate: boolean) {
     const ph = dpPhase ? dpPhaseList[dpPhase - 1] : null;
     const stage = ph && ph.stage ? DP_STAGE_NAME[ph.stage] : '';
     phaseEl.innerHTML = !ph ? '' : `${dpPhase}/${total} ` + (stage
-      ? (ph.title !== stage ? `<span class="dp-stage-name" style="color:${PDP_COLOUR[ph.stage]}">${stage} · </span>` + ph.title
-                            : `<span style="color:${PDP_COLOUR[ph.stage]}">${stage}</span>`)
+      ? (ph.title !== stage ? `<span class="dp-stage-name" style="color:${PDP_COLOUR[ph.stage ?? '']}">${stage} · </span>` + ph.title
+                            : `<span style="color:${PDP_COLOUR[ph.stage ?? '']}">${stage}</span>`)
       : escapeHtml(ph.title));
   }
   dpClockUpdate();
@@ -814,7 +851,7 @@ export function dpUpdateButtons() {
 }
 
 export function dpUpdateOwnButtons() {
-  const set = (id: string, on: boolean) => { const b = document.getElementById(id); if (b) b.disabled = !on; };
+  const set = (id: string, on: boolean) => { const b = byId<HTMLButtonElement>(id); if (b) b.disabled = !on; };
   const play = byId<HTMLButtonElement>('dpPlayBtn');
   if (play) play.textContent = pdpPlaying ? '⏸' : '▶▶';
   const tip = (id: string, t: string) => { const b = document.getElementById(id); if (b) b.title = t; };
@@ -845,27 +882,28 @@ export function dpAnimatePhase(k: number) {
   dpGlow(ph.glow);
   for (const mx of ph.muxes || []) dpDrawMux(mx);
   const ov = dpOverlayEl();
-  ph.routes.filter((r: string[]) => r[3] === 'nochip').forEach(([name, kind]) => dpLight(name, kind));
-  const moving = ph.routes.filter((r: string[]) => r[3] !== 'static' && r[3] !== 'nochip');
-  ph.routes.filter((r: string[]) => r[3] === 'static').forEach(([name, kind, text]) => {
+  if (!ov) return Promise.resolve(false);
+  ph.routes.filter(r => r[3] === 'nochip').forEach(([name, kind]) => dpLight(name, kind));
+  const moving = ph.routes.filter(r => r[3] !== 'static' && r[3] !== 'nochip');
+  ph.routes.filter(r => r[3] === 'static').forEach(([name, kind, text]) => {
     dpLight(name, kind);
     const chip = dpChip(text, kind, false);
     dpPlace(chip, dpParkPoint(DP_ROUTES[name], chip));
     ov.appendChild(chip);
   });
   const dur = 900 / dpSpeed;
-  const tokens = moving.map(([name, kind, text]: any, i: number) => {
+  const tokens = moving.map(([name, kind, text], i) => {
     const chip = dpChip(text, kind, false);
     const pts = DP_ROUTES[name].pts;
     dpPlace(chip, pts[0]);
     chip.style.opacity = '0';
     ov.appendChild(chip);
-    return { chip, pts, name, kind, delay: ph.sequential ? i * dur : 0 };
+    return { chip, pts, name, kind, delay: ph.sequential ? i * dur : 0, lit: false };
   });
   dpBusy = true;
   dpUpdateButtons();
   const start = performance.now();
-  const end = Math.max(...tokens.map((t: { delay: number; }) => t.delay + dur), 0);
+  const end = Math.max(...tokens.map(t => t.delay + dur), 0);
   return new Promise(resolve => {
     const frame = (now: number) => {
       if (my !== dpAnimToken) { resolve(false); return; }
@@ -951,11 +989,18 @@ export function dpSetSpeed(v: string) {
 // are the pipeline's own (pipeEvaluate), so the drawing shows what the
 // model is about to clock.
 export const PDP_DRAW = {"full":{"width":3460,"routes":{"f_pc":{"segs":["2.0","2.1"],"pts":[[501.5,903.5],[622,903.5]]},"f_pcf_mux":{"segs":["2.0","106.0","126.0","127.0","206.0"],"pts":[[501.5,903.5],[554.5,903.5],[554.5,1151.5],[138.5,1151.5],[138.5,1039.5],[170.6,1039.5]]},"f_pcf_d":{"segs":["2.0","106.0","106.1","201.0"],"pts":[[501.5,903.5],[554.5,903.5],[554.5,1496.5],[911,1496.5]]},"f_four":{"segs":["20.0"],"pts":[[56.5,762.5],[123.6,762.5]]},"f_addA":{"segs":["19.0"],"pts":[[187.5,797.5],[265.5,797.5]]},"f_addB":{"segs":["117.0"],"pts":[[232.5,998.5],[264.8,998.5]]},"f_pcin":{"segs":["105.0"],"pts":[[339.5,901.5],[426.5,901.5]]},"f_instr":{"segs":["3.0"],"pts":[[853.5,944.5],[911,944.5]]},"d_funct3":{"segs":["3.2","15.1","15.2","15.3","15.4","113.0","113.1"],"pts":[[965,944.5],[1026,944.5],[1026,238.5],[1219.7,238.5]]},"d_op":{"segs":["3.2","15.2","15.3","15.4","94.0"],"pts":[[965,944.5],[1026,944.5],[1026,379.5],[1219.9,379.5]]},"d_funct7":{"segs":["3.2","15.3","15.4","95.0"],"pts":[[965,944.5],[1026,944.5],[1026,511.5],[1219.9,511.5]]},"d_rs1":{"segs":["3.2","5.0","15.4"],"pts":[[965,944.5],[1026,944.5],[1026,905.5],[1209.5,905.5]]},"d_rs2":{"segs":["3.2","15.5","162.0"],"pts":[[965,944.5],[1026,944.5],[1026,1020.5],[1205,1020.5]]},"d_rd":{"segs":["3.2","6.0","15.5","15.6","197.0","199.0","199.1"],"pts":[[965,944.5],[1026,944.5],[1026,1143.5],[1081.5,1143.5],[1081.5,1447.5],[1768,1447.5]]},"d_imm":{"segs":["3.2","15.5","15.6","15.7","27.0"],"pts":[[965,944.5],[1026,944.5],[1026,1350.5],[1352,1350.5]]},"d_immsrc":{"segs":["110.0","110.1","110.2","115.0","115.1"],"pts":[[1445.5,656.5],[1445.5,651.6],[1596.5,651.6],[1596.5,1268.5],[1465.5,1268.5],[1465.5,1306.4]]},"d_ext":{"segs":["28.0"],"pts":[[1561.5,1350.5],[1768,1350.5]]},"d_rd1":{"segs":["153.0"],"pts":[[1569.5,946.5],[1648,946.5]]},"d_rd2":{"segs":["160.0"],"pts":[[1569.5,1128.5],[1648,1128.5]]},"d_rd1_e":{"segs":["141.0","152.0","169.0"],"pts":[[1713.5,992.5],[1743.5,992.5],[1743.5,899.5],[1768,899.5]]},"d_rd2_e":{"segs":["147.0","159.0","170.0"],"pts":[[1712.5,1175.5],[1746.5,1175.5],[1746.5,1080.5],[1768,1080.5]]},"d_pcd":{"segs":["201.2"],"pts":[[965,1496.5],[1768,1496.5]]},"d_pcs":{"segs":["109.0"],"pts":[[1451,170.5],[1768,170.5]]},"d_funct3_pc":{"segs":["3.2","15.1","15.2","15.3","15.4","113.0","x.25","x.26","x.27","x.28"],"pts":[[965,944.5],[1026,944.5],[1026,238.5],[1188,238.5],[1188,86.5],[1600,86.5],[1600,240.5],[1768,240.5]]},"d_regwrite":{"segs":["189.0"],"pts":[[1451,311.5],[1768,311.5]]},"d_memtoreg":{"segs":["188.0"],"pts":[[1451,372.5],[1768,372.5]]},"d_memwrite":{"segs":["186.0"],"pts":[[1451,435.5],[1768,435.5]]},"d_aluctl":{"segs":["184.0"],"pts":[[1454.5,506.5],[1768,506.5]]},"d_alusrcb":{"segs":["x.11"],"pts":[[1451,612],[1768,612]]},"e_rd1":{"segs":["141.2"],"pts":[[1823,899.5],[2077.9,899.5]]},"e_rd2":{"segs":["147.2"],"pts":[[1823,1080.5],[1994.4,1080.5]]},"e_srca":{"segs":["x.0","x.1"],"pts":[[2143.5,946.5],[2300,946.5]]},"e_fwdb":{"segs":["123.0","123.1"],"pts":[[2056.5,1128.5],[2304.2,1128.5]]},"e_wd":{"segs":["104.0","104.1","123.0","134.0"],"pts":[[2056.5,1128.5],[2078.5,1128.5],[2078.5,1278.5],[2628,1278.5]]},"e_ext":{"segs":["28.2","118.0","124.0"],"pts":[[1823,1350.5],[1868.5,1350.5],[1868.5,1223.5],[2304,1223.5]]},"e_ext_pc":{"segs":["21.0","21.1","28.2","107.0","118.1","208.0","208.1"],"pts":[[1823,1350.5],[1868.5,1350.5],[1868.5,1600.5],[42.5,1600.5],[42.5,835.5],[123.9,835.5]]},"e_pce":{"segs":["201.4","207.0","209.0","209.1","x.21","x.22"],"pts":[[1823,1496.5],[1837.5,1496.5],[1837.5,1551.5],[102.5,1551.5],[102.5,944],[169.5,944]]},"e_srcb":{"segs":["122.0"],"pts":[[2361.5,1175.5],[2392.6,1175.5]]},"e_alu":{"segs":["14.0"],"pts":[[2509.5,1024.5],[2628,1024.5]]},"e_flags":{"segs":["79.0","83.0"],"pts":[[2508.5,936.5],[2537.5,936.5],[2537.5,279.5]]},"e_rd":{"segs":["197.2"],"pts":[[1823,1447.5],[2628,1447.5]]},"e_pcs":{"segs":["109.2"],"pts":[[1823,170.5],[2433,170.5]]},"e_funct3":{"segs":["x.30"],"pts":[[1823,240.5],[2433,240.5]]},"e_regwrite":{"segs":["189.2"],"pts":[[1823,311.5],[2628,311.5]]},"e_memtoreg":{"segs":["188.2"],"pts":[[1823,372.5],[2628,372.5]]},"e_memwrite":{"segs":["186.2"],"pts":[[1823,435.5],[2628,435.5]]},"e_aluctl":{"segs":["183.0","184.2"],"pts":[[1823,506.5],[2452.5,506.5],[2452.5,881.6]]},"e_alusrcb":{"segs":["x.13","x.14","x.15","x.16"],"pts":[[1823,612],[2230,612],[2230,1062],[2333,1062],[2333,1111.6]]},"e_pcsrc_top":{"segs":["84.0","85.0","85.1","136.0","137.0"],"pts":[[2561.5,170.5],[2610.5,170.5],[2610.5,57.5],[158.5,57.5],[158.5,733.8]]},"e_pcsrc_low":{"segs":["84.0","85.0","136.0","137.0","226.0","sel.0"],"pts":[[2561.5,170.5],[2610.5,170.5],[2610.5,57.5],[158.5,57.5],[158.5,638.5],[209.5,638.5],[209.5,933.4]]},"m_addr":{"segs":["14.2","14.3"],"pts":[[2682,1024.5],[2876.4,1024.5]]},"m_alu_w":{"segs":["13.0","14.2","164.0"],"pts":[[2682,1024.5],[2715.5,1024.5],[2715.5,1408.5],[3167,1408.5]]},"m_fwd_ae":{"segs":["14.2","128.0","128.1","142.0","164.0","164.1","165.0","165.1"],"pts":[[2682,1024.5],[2715.5,1024.5],[2715.5,1560.5],[1944.5,1560.5],[1944.5,994.5],[2078.8,994.5]]},"m_fwd_be":{"segs":["14.2","128.0","128.1","148.0","164.0","164.1","165.1"],"pts":[[2682,1024.5],[2715.5,1024.5],[2715.5,1560.5],[1944.5,1560.5],[1944.5,1174.5],[1991.2,1174.5]]},"m_wd":{"segs":["134.2"],"pts":[[2682,1278.5],[2784.2,1278.5]]},"m_dmwd":{"segs":["133.0"],"pts":[[2846.5,1307.5],[2879.2,1307.5]]},"m_rdata":{"segs":["24.0"],"pts":[[3111.5,1021.5],[3167,1021.5]]},"m_rd":{"segs":["197.4"],"pts":[[2682,1447.5],[3167,1447.5]]},"m_regwrite":{"segs":["189.4"],"pts":[[2682,311.5],[3167,311.5]]},"m_memtoreg":{"segs":["188.4"],"pts":[[2682,372.5],[3167,372.5]]},"m_memwrite":{"segs":["185.0","186.4","186.5"],"pts":[[2682,435.5],[2998.5,435.5],[2998.5,961.2]]},"w_rdata":{"segs":["12.0","23.0","24.2"],"pts":[[3221,1021.5],[3274.5,1021.5],[3274.5,1330.5],[3325.8,1330.5]]},"w_alu":{"segs":["13.2"],"pts":[[3221,1408.5],[3329.1,1408.5]]},"w_memtoreg":{"segs":["187.0","188.6"],"pts":[[3221,372.5],[3362.5,372.5],[3362.5,1303]]},"w_result":{"segs":["11.0","11.1","22.0"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5]]},"w_rf":{"segs":["11.0","11.1","22.0","29.0","30.0","30.1","100.0","100.1","100.2","100.3"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[1164.5,1650.5],[1164.5,1199.5],[1213.1,1199.5]]},"w_fwd_1d":{"segs":["11.0","11.1","22.0","100.1","100.2","100.3","154.0","171.0","171.1"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[1613.5,1650.5],[1613.5,1040.5],[1649,1040.5]]},"w_fwd_2d":{"segs":["11.0","11.1","22.0","100.1","100.2","100.3","161.0","171.1"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[1613.5,1650.5],[1613.5,1222.5],[1647.5,1222.5]]},"w_fwd_ae":{"segs":["11.0","11.1","22.0","100.2","100.3","166.1","166.2","167.0"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[1905.5,1650.5],[1905.5,947.5],[2078.6,947.5]]},"w_fwd_be":{"segs":["11.0","11.1","22.0","100.2","100.3","166.2","168.0"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[1905.5,1650.5],[1905.5,1129.5],[1992.7,1129.5]]},"w_fwd_m":{"segs":["11.0","11.1","22.0","100.3","135.0","163.0"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[2747.5,1650.5],[2747.5,1341.5],[2786.7,1341.5]]},"w_rd":{"segs":["195.0","196.0","197.6","198.1","200.0"],"pts":[[3221,1447.5],[3250.5,1447.5],[3250.5,1704.5],[1124.5,1704.5],[1124.5,1142.5],[1209.7,1142.5]]},"w_regwrite":{"segs":["189.6","189.7","190.0","191.0","192.0","193.0","194.0","194.1"],"pts":[[3221,311.5],[3364.5,311.5],[3364.5,4.5],[1156.5,4.5],[1156.5,730.5],[1428.5,730.5],[1428.5,831.7]]},"h_stallf":{"segs":["264.0"],"pts":[[463.5,1948.4],[463.5,1013.5]]},"h_stalld":{"segs":["263.0"],"pts":[[927.5,1945.8],[927.5,1522.5]]},"h_flushd":{"segs":["262.0"],"pts":[[956.5,1949.6],[956.5,1513.5]]},"h_flushe":{"segs":["261.0"],"pts":[[1797.5,1947.6],[1797.5,1511.5]]},"h_fwd_1d":{"segs":["155.0","256.0","257.0"],"pts":[[1730.5,1951.1],[1730.5,1081.5],[1683.5,1081.5],[1683.5,1051.5]]},"h_fwd_2d":{"segs":["255.0"],"pts":[[1678.5,1950],[1678.5,1233.5]]},"h_fwd_ae":{"segs":["259.0"],"pts":[[2113.5,1946.8],[2113.5,1002.5]]},"h_fwd_be":{"segs":["258.0"],"pts":[[2028.5,1950.5],[2028.5,1185.5]]},"h_fwd_m":{"segs":["260.0"],"pts":[[2820.5,1953.7],[2820.5,1361.5]]},"e_srca_alu":{"segs":["x.2"],"pts":[[2365,946.5],[2384.6,946.5]]},"e_zero":{"segs":["x.3"],"pts":[[2280,899.5],[2300,899.5]]},"e_pce_a":{"segs":["201.4","209.0","x.4","x.5","x.6"],"pts":[[1823,1496.5],[1837.5,1496.5],[1837.5,1525],[2205,1525],[2205,994.5],[2300,994.5]]},"e_rd1_pc":{"segs":["x.0","x.17","x.18","x.19","x.20"],"pts":[[2143.5,946.5],[2155,946.5],[2155,1740],[72,1740],[72,992],[169.5,992]]},"d_alusrca":{"segs":["x.7"],"pts":[[1454.5,573.5],[1768,573.5]]},"e_alusrca":{"segs":["x.9","x.10"],"pts":[[1823,573.5],[2332.5,573.5],[2332.5,883.6]]},"e_four":{"segs":["x.24"],"pts":[[2281,1175.5],[2300.5,1175.5]]}},"muxes":{"pcTop":{"e":"16","ins":{"0":[124.5,762.5],"1":[124.5,835.5]},"out":[189.5,797.5]},"fwd1D":{"e":"149","ins":{"0":[1648.5,946.5],"1":[1648.5,1040.5]},"out":[1713.5,992.5]},"fwd2D":{"e":"156","ins":{"0":[1648.5,1128.5],"1":[1648.5,1222.5]},"out":[1713.5,1175.5]},"fwdAE":{"e":"139","ins":{"00":[2076.5,899.5],"01":[2076.5,947.5],"10":[2076.5,994.5]},"out":[2141.5,946.5]},"fwdBE":{"e":"143","ins":{"00":[1992.5,1080.5],"01":[1992.5,1129.5],"10":[1992.5,1174.5]},"out":[2057.5,1128.5]},"fwdM":{"e":"130","ins":{"0":[2784.5,1278.5],"1":[2784.5,1341.5]},"out":[2848.5,1307.5]},"result":{"e":"8","ins":{"1":[3327.5,1330.5],"0":[3327.5,1408.5]},"out":[3392.5,1360.5]},"pcLow":{"e":"muxPC","ins":{"00":[169.5,1039.5],"01":[169.5,944],"11":[169.5,992]},"out":[234.5,998.5]},"aluSrcA":{"e":"muxA","ins":{"01":[2300,899.5],"x0":[2300,946.5],"11":[2300,994.5]},"out":[2365,946.5]},"aluSrcB":{"e":"119","ins":{"x0":[2300.5,1128.5],"01":[2300.5,1175.5],"11":[2300.5,1223.5]},"out":[2365.5,1175.5]}},"blocks":{"pc":"1","im":"0","rf":"4","decoder":"86","extend":"26","alu":"55","pcLogic":"82","dm":"7","regD":"223","regE":"224","regM":"225","regW":"217","hazard":"242","adder":"41"}},"bp":{"width":3460,"routes":{"f_pc":{"segs":["2.0","2.1"],"pts":[[541.5,903.5],[622,903.5]]},"f_pcf_d":{"segs":["2.0","106.0","106.1","201.0"],"pts":[[541.5,903.5],[554.5,903.5],[554.5,1496.5],[911,1496.5]]},"f_four":{"segs":["20.0"],"pts":[[56.5,762.5],[123.6,762.5]]},"f_addA":{"segs":["19.0"],"pts":[[187.5,797.5],[265.5,797.5]]},"f_addB":{"segs":["b.0"],"pts":[[234.5,998.5],[264.8,998.5]]},"f_pcin":{"segs":["b.4"],"pts":[[433,922.5],[462,922.5]]},"f_instr":{"segs":["3.0"],"pts":[[853.5,944.5],[911,944.5]]},"d_funct3":{"segs":["3.2","15.1","15.2","15.3","15.4","113.0","113.1"],"pts":[[965,944.5],[1026,944.5],[1026,238.5],[1219.7,238.5]]},"d_op":{"segs":["3.2","15.2","15.3","15.4","94.0"],"pts":[[965,944.5],[1026,944.5],[1026,379.5],[1219.9,379.5]]},"d_funct7":{"segs":["3.2","15.3","15.4","95.0"],"pts":[[965,944.5],[1026,944.5],[1026,511.5],[1219.9,511.5]]},"d_rs1":{"segs":["3.2","5.0","15.4"],"pts":[[965,944.5],[1026,944.5],[1026,905.5],[1209.5,905.5]]},"d_rs2":{"segs":["3.2","15.5","162.0"],"pts":[[965,944.5],[1026,944.5],[1026,1020.5],[1205,1020.5]]},"d_rd":{"segs":["3.2","6.0","15.5","15.6","197.0","199.0","199.1"],"pts":[[965,944.5],[1026,944.5],[1026,1143.5],[1081.5,1143.5],[1081.5,1447.5],[1768,1447.5]]},"d_imm":{"segs":["3.2","15.5","15.6","15.7","27.0"],"pts":[[965,944.5],[1026,944.5],[1026,1350.5],[1352,1350.5]]},"d_immsrc":{"segs":["110.0","110.1","110.2","115.0","115.1"],"pts":[[1445.5,656.5],[1445.5,651.6],[1596.5,651.6],[1596.5,1268.5],[1465.5,1268.5],[1465.5,1306.4]]},"d_ext":{"segs":["28.0"],"pts":[[1561.5,1350.5],[1768,1350.5]]},"d_rd1":{"segs":["153.0"],"pts":[[1569.5,946.5],[1648,946.5]]},"d_rd2":{"segs":["160.0"],"pts":[[1569.5,1128.5],[1648,1128.5]]},"d_rd1_e":{"segs":["141.0","152.0","169.0"],"pts":[[1713.5,992.5],[1743.5,992.5],[1743.5,899.5],[1768,899.5]]},"d_rd2_e":{"segs":["147.0","159.0","170.0"],"pts":[[1712.5,1175.5],[1746.5,1175.5],[1746.5,1080.5],[1768,1080.5]]},"d_pcd":{"segs":["201.2"],"pts":[[965,1496.5],[1768,1496.5]]},"d_pcs":{"segs":["109.0"],"pts":[[1451,170.5],[1768,170.5]]},"d_funct3_pc":{"segs":["3.2","15.1","15.2","15.3","15.4","113.0","x.25","x.26","x.27","x.28"],"pts":[[965,944.5],[1026,944.5],[1026,238.5],[1188,238.5],[1188,86.5],[1600,86.5],[1600,240.5],[1768,240.5]]},"d_regwrite":{"segs":["189.0"],"pts":[[1451,311.5],[1768,311.5]]},"d_memtoreg":{"segs":["188.0"],"pts":[[1451,372.5],[1768,372.5]]},"d_memwrite":{"segs":["186.0"],"pts":[[1451,435.5],[1768,435.5]]},"d_aluctl":{"segs":["184.0"],"pts":[[1454.5,506.5],[1768,506.5]]},"d_alusrcb":{"segs":["x.11"],"pts":[[1451,612],[1768,612]]},"e_rd1":{"segs":["141.2"],"pts":[[1823,899.5],[2077.9,899.5]]},"e_rd2":{"segs":["147.2"],"pts":[[1823,1080.5],[1994.4,1080.5]]},"e_srca":{"segs":["x.0","x.1"],"pts":[[2143.5,946.5],[2300,946.5]]},"e_fwdb":{"segs":["123.0","123.1"],"pts":[[2056.5,1128.5],[2304.2,1128.5]]},"e_wd":{"segs":["104.0","104.1","123.0","134.0"],"pts":[[2056.5,1128.5],[2078.5,1128.5],[2078.5,1278.5],[2628,1278.5]]},"e_ext":{"segs":["28.2","118.0","124.0"],"pts":[[1823,1350.5],[1868.5,1350.5],[1868.5,1223.5],[2304,1223.5]]},"e_ext_pc":{"segs":["21.0","21.1","28.2","107.0","118.1","208.0","208.1"],"pts":[[1823,1350.5],[1868.5,1350.5],[1868.5,1600.5],[42.5,1600.5],[42.5,835.5],[123.9,835.5]]},"e_pce":{"segs":["201.4","207.0","207.1","209.0","209.1","x.21","x.22"],"pts":[[1823,1496.5],[1837.5,1496.5],[1837.5,1551.5],[102.5,1551.5],[102.5,957],[169.5,957]]},"e_srcb":{"segs":["122.0"],"pts":[[2361.5,1175.5],[2392.6,1175.5]]},"e_alu":{"segs":["14.0"],"pts":[[2509.5,1024.5],[2628,1024.5]]},"e_flags":{"segs":["79.0","83.0"],"pts":[[2508.5,936.5],[2537.5,936.5],[2537.5,279.5]]},"e_rd":{"segs":["197.2"],"pts":[[1823,1447.5],[2628,1447.5]]},"e_pcs":{"segs":["109.2"],"pts":[[1823,170.5],[2433,170.5]]},"e_funct3":{"segs":["x.30"],"pts":[[1823,240.5],[2433,240.5]]},"e_regwrite":{"segs":["189.2"],"pts":[[1823,311.5],[2628,311.5]]},"e_memtoreg":{"segs":["188.2"],"pts":[[1823,372.5],[2628,372.5]]},"e_memwrite":{"segs":["186.2"],"pts":[[1823,435.5],[2628,435.5]]},"e_aluctl":{"segs":["183.0","184.2"],"pts":[[1823,506.5],[2452.5,506.5],[2452.5,881.6]]},"e_alusrcb":{"segs":["x.13","x.14","x.15","x.16"],"pts":[[1823,612],[2230,612],[2230,1062],[2333,1062],[2333,1111.6]]},"e_pcsrc_top":{"segs":["84.0","84.1","85.0","85.1","136.0","137.0"],"pts":[[2561.5,170.5],[2610.5,170.5],[2610.5,57.5],[158.5,57.5],[158.5,733.8]]},"e_pcsrc_low":{"segs":["84.0","84.1","85.0","136.0","137.0","226.0","b.1"],"pts":[[2561.5,170.5],[2610.5,170.5],[2610.5,57.5],[158.5,57.5],[158.5,638.5],[209.5,638.5],[209.5,933.4]]},"m_addr":{"segs":["14.2","14.3"],"pts":[[2682,1024.5],[2876.4,1024.5]]},"m_alu_w":{"segs":["13.0","14.2","164.0"],"pts":[[2682,1024.5],[2715.5,1024.5],[2715.5,1408.5],[3167,1408.5]]},"m_fwd_ae":{"segs":["14.2","128.0","128.1","142.0","164.0","164.1","165.0","165.1"],"pts":[[2682,1024.5],[2715.5,1024.5],[2715.5,1560.5],[1944.5,1560.5],[1944.5,994.5],[2078.8,994.5]]},"m_fwd_be":{"segs":["14.2","128.0","128.1","148.0","164.0","164.1","165.1"],"pts":[[2682,1024.5],[2715.5,1024.5],[2715.5,1560.5],[1944.5,1560.5],[1944.5,1174.5],[1991.2,1174.5]]},"m_wd":{"segs":["134.2"],"pts":[[2682,1278.5],[2784.2,1278.5]]},"m_dmwd":{"segs":["133.0"],"pts":[[2846.5,1307.5],[2879.2,1307.5]]},"m_rdata":{"segs":["24.0"],"pts":[[3111.5,1021.5],[3167,1021.5]]},"m_rd":{"segs":["197.4"],"pts":[[2682,1447.5],[3167,1447.5]]},"m_regwrite":{"segs":["189.4"],"pts":[[2682,311.5],[3167,311.5]]},"m_memtoreg":{"segs":["188.4"],"pts":[[2682,372.5],[3167,372.5]]},"m_memwrite":{"segs":["185.0","186.4","186.5"],"pts":[[2682,435.5],[2998.5,435.5],[2998.5,961.2]]},"w_rdata":{"segs":["12.0","23.0","24.2"],"pts":[[3221,1021.5],[3274.5,1021.5],[3274.5,1330.5],[3325.8,1330.5]]},"w_alu":{"segs":["13.2"],"pts":[[3221,1408.5],[3329.1,1408.5]]},"w_memtoreg":{"segs":["187.0","188.6"],"pts":[[3221,372.5],[3362.5,372.5],[3362.5,1303]]},"w_result":{"segs":["11.0","11.1","22.0"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5]]},"w_rf":{"segs":["11.0","11.1","22.0","29.0","30.0","30.1","100.0","100.1","100.2","100.3"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[1164.5,1650.5],[1164.5,1199.5],[1213.1,1199.5]]},"w_fwd_1d":{"segs":["11.0","11.1","22.0","100.1","100.2","100.3","154.0","171.0","171.1"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[1613.5,1650.5],[1613.5,1040.5],[1649,1040.5]]},"w_fwd_2d":{"segs":["11.0","11.1","22.0","100.1","100.2","100.3","161.0","171.1"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[1613.5,1650.5],[1613.5,1222.5],[1647.5,1222.5]]},"w_fwd_ae":{"segs":["11.0","11.1","22.0","100.2","100.3","166.1","166.2","167.0"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[1905.5,1650.5],[1905.5,947.5],[2078.6,947.5]]},"w_fwd_be":{"segs":["11.0","11.1","22.0","100.2","100.3","166.2","168.0"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[1905.5,1650.5],[1905.5,1129.5],[1992.7,1129.5]]},"w_fwd_m":{"segs":["11.0","11.1","22.0","100.3","135.0","163.0"],"pts":[[3393.5,1360.5],[3439.5,1360.5],[3439.5,1650.5],[2747.5,1650.5],[2747.5,1341.5],[2786.7,1341.5]]},"w_rd":{"segs":["195.0","196.0","197.6","198.1","200.0"],"pts":[[3221,1447.5],[3250.5,1447.5],[3250.5,1704.5],[1124.5,1704.5],[1124.5,1142.5],[1209.7,1142.5]]},"w_regwrite":{"segs":["189.6","189.7","190.0","191.0","192.0","193.0","194.0","194.1"],"pts":[[3221,311.5],[3364.5,311.5],[3364.5,4.5],[1156.5,4.5],[1156.5,730.5],[1428.5,730.5],[1428.5,831.7]]},"h_stallf":{"segs":["264.0"],"pts":[[503.5,1948.4],[503.5,1013.5]]},"h_stalld":{"segs":["263.0"],"pts":[[927.5,1945.8],[927.5,1522.5]]},"h_flushd":{"segs":["262.0"],"pts":[[956.5,1949.6],[956.5,1513.5]]},"h_flushe":{"segs":["261.0"],"pts":[[1797.5,1947.6],[1797.5,1511.5]]},"h_fwd_1d":{"segs":["155.0","256.0","257.0"],"pts":[[1730.5,1951.1],[1730.5,1081.5],[1683.5,1081.5],[1683.5,1051.5]]},"h_fwd_2d":{"segs":["255.0"],"pts":[[1678.5,1950],[1678.5,1233.5]]},"h_fwd_ae":{"segs":["259.0"],"pts":[[2113.5,1946.8],[2113.5,1002.5]]},"h_fwd_be":{"segs":["258.0"],"pts":[[2028.5,1950.5],[2028.5,1185.5]]},"h_fwd_m":{"segs":["260.0"],"pts":[[2820.5,1953.7],[2820.5,1361.5]]},"e_srca_alu":{"segs":["x.2"],"pts":[[2365,946.5],[2384.6,946.5]]},"e_zero":{"segs":["x.3"],"pts":[[2280,899.5],[2300,899.5]]},"e_pce_a":{"segs":["201.4","209.0","x.4","x.5","x.6"],"pts":[[1823,1496.5],[1837.5,1496.5],[1837.5,1525],[2205,1525],[2205,994.5],[2300,994.5]]},"e_rd1_pc":{"segs":["x.0","x.17","x.18","x.19","x.20"],"pts":[[2143.5,946.5],[2155,946.5],[2155,1740],[72,1740],[72,1030],[169.5,1030]]},"d_alusrca":{"segs":["x.7"],"pts":[[1454.5,573.5],[1768,573.5]]},"e_alusrca":{"segs":["x.9","x.10"],"pts":[[1823,573.5],[2332.5,573.5],[2332.5,883.6]]},"e_four":{"segs":["x.24"],"pts":[[2281,1175.5],[2300.5,1175.5]]},"e_nextpc":{"segs":["b.2","b.3"],"pts":[[339.5,901.5],[398,901.5]]},"e_nextpc_bp":{"segs":["b.2","b.5","b.6","b.7"],"pts":[[339.5,901.5],[362,901.5],[362,1455],[640,1455],[640,1435]]},"bp_pred":{"segs":["b.8","b.9","b.10"],"pts":[[575,1305],[380,1305],[380,945],[398,945]]},"bp_miss":{"segs":["b.11","b.12"],"pts":[[575,1250],[415.5,1250],[415.5,970]]},"bp_pcf":{"segs":["2.0","106.0","b.13"],"pts":[[541.5,903.5],[554.5,903.5],[554.5,1390],[575,1390]]},"bp_pcsrc":{"segs":["84.1","136.0","137.0","b.14","b.15","b.16"],"pts":[[2561.5,170.5],[2610.5,170.5],[2610.5,57.5],[605,57.5],[605,1195],[800,1195],[800,1215]]},"bp_pce":{"segs":["201.4","207.1","209.0","209.1","b.17"],"pts":[[1823,1496.5],[1837.5,1496.5],[1837.5,1551.5],[760,1551.5],[760,1435]]}},"muxes":{"pcTop":{"e":"16","ins":{"0":[124.5,762.5],"1":[124.5,835.5]},"out":[189.5,797.5]},"fwd1D":{"e":"149","ins":{"0":[1648.5,946.5],"1":[1648.5,1040.5]},"out":[1713.5,992.5]},"fwd2D":{"e":"156","ins":{"0":[1648.5,1128.5],"1":[1648.5,1222.5]},"out":[1713.5,1175.5]},"fwdAE":{"e":"139","ins":{"00":[2076.5,899.5],"01":[2076.5,947.5],"10":[2076.5,994.5]},"out":[2141.5,946.5]},"fwdBE":{"e":"143","ins":{"00":[1992.5,1080.5],"01":[1992.5,1129.5],"10":[1992.5,1174.5]},"out":[2057.5,1128.5]},"fwdM":{"e":"130","ins":{"0":[2784.5,1278.5],"1":[2784.5,1341.5]},"out":[2848.5,1307.5]},"result":{"e":"8","ins":{"1":[3327.5,1330.5],"0":[3327.5,1408.5]},"out":[3392.5,1360.5]},"pcLow":{"e":"muxPC","ins":{"0":[169.5,957],"1":[169.5,1030]},"out":[234.5,998.5]},"aluSrcA":{"e":"muxA","ins":{"01":[2300,899.5],"x0":[2300,946.5],"11":[2300,994.5]},"out":[2365,946.5]},"aluSrcB":{"e":"119","ins":{"x0":[2300.5,1128.5],"01":[2300.5,1175.5],"11":[2300.5,1223.5]},"out":[2365.5,1175.5]},"pcM":{"e":"muxM","ins":{"1":[398,901.5],"0":[398,945]},"out":[433,922.5]}},"blocks":{"pc":"1","im":"0","rf":"4","decoder":"86","extend":"26","alu":"55","pcLogic":"82","dm":"7","regD":"223","regE":"224","regM":"225","regW":"217","hazard":"242","adder":"41","bp":"bp"}}};
-export const PDP_COLOUR = { F: '#209fb5', D: '#40a02b', E: '#fe640b', M: '#8839ef', W: '#d20f39', H: '#1e66f5' };
-export const PDP_STAGE_NAMES = { F: 'Fetch', D: 'Decode', E: 'Execute', M: 'Memory', W: 'Writeback' };
-export const PDP_FWD_FROM = { '00': 'E', '01': 'W', '10': 'M' };
+export const PDP_COLOUR: Record<string, string> = { F: '#209fb5', D: '#40a02b', E: '#fe640b', M: '#8839ef', W: '#d20f39', H: '#1e66f5' };
+export const PDP_STAGE_NAMES: Record<string, string> = { F: 'Fetch', D: 'Decode', E: 'Execute', M: 'Memory', W: 'Writeback' };
+export const PDP_FWD_FROM: Record<string, string> = { '00': 'E', '01': 'W', '10': 'M' };
 
-export function pdpTable() { return PDP_DRAW[pipeline.predictor.on ? 'bp' : 'full']; }
+// A pipelined drawing (tools/pdp_build.py writes PDP_DRAW): its wires, its
+// muxes (shape, inputs by select value, output) and its blocks.
+export interface PdpTable {
+  width: number; routes: Record<string, DpWire>;
+  muxes: Record<string, { e: string; ins: Record<string, number[]>; out: number[] }>;
+  blocks: Record<string, string>;
+}
+export function pdpTable(): PdpTable { return PDP_DRAW[pipeline.predictor.on ? 'bp' : 'full']; }
 
 export function pdpText(addr: number) {
   const item = program.machineCode.find(it => it.address === (addr >>> 0) && it.bytes);
@@ -965,14 +1010,14 @@ export function pdpText(addr: number) {
 export function pdpEvaluate() {
   const s = pipeEvaluate();
   return {
-    pipe: true, s, cycle: cpu.totalCycles,
+    pipe: true as const, s, cycle: cpu.totalCycles,
     st: { F: s.instrF ? { pc: s.pcF, instr: s.instrF } : null, D: pipeline.regs.D, E: pipeline.regs.E, M: pipeline.regs.M, W: pipeline.regs.W },
   };
 }
 
 // Every wire this cycle uses, as [route, stage or 'off', chip text].
-export function pdpRoutes(m: { s: any; st: any; }) {
-  const s = m.s, st = m.st, out: any[][] = [];
+export function pdpRoutes(m: PdpModel) {
+  const s = m.s, st = m.st, out: [route: string, stage: string, chip: string | null][] = [];
   const on = (r: string, stage: string, chip?: string | null | undefined) => out.push([r, stage, chip === undefined ? null : chip]);
   const off = (r: string) => out.push([r, 'off', null]);
   const hex = dpHex;
@@ -1101,8 +1146,8 @@ export function pdpRoutes(m: { s: any; st: any; }) {
 }
 
 // Which input each mux passes, and whose value it is.
-export function pdpMuxes(m: { s: any; st: any; }) {
-  const s = m.s, st = m.st, out = [];
+export function pdpMuxes(m: PdpModel) {
+  const s = m.s, st = m.st, out: [mux: string, sel: string, stage: string][] = [];
   if (pipeline.predictor.on) {
     if (st.E) {
       out.push(['pcTop', s.pcSrcE ? '1' : '0', 'E']);
@@ -1129,19 +1174,19 @@ export function pdpMuxes(m: { s: any; st: any; }) {
   return out;
 }
 
-export function pdpHazardNotes(m: { s: any; st: any; }) {
-  const s = m.s, st = m.st, H = pipeline.hazards, notes = [];
-  const reg = (i: string) => 'x' + i;
-  if (s.forwardAE !== '00') notes.push(`ForwardAE = ${s.forwardAE}: rs1E (${reg(st.E.rs1)}) is ${s.forwardAE === '10' ? 'rdM' : 'rdW'}, so SrcA takes ${s.forwardAE === '10' ? 'ALUResultM' : 'ResultW'}`);
-  if (s.forwardBE !== '00') notes.push(`ForwardBE = ${s.forwardBE}: rs2E (${reg(st.E.rs2)}) is ${s.forwardBE === '10' ? 'rdM' : 'rdW'}, so it takes ${s.forwardBE === '10' ? 'ALUResultM' : 'ResultW'}`);
-  if (s.forward1D) notes.push(`Forward1D: rs1D (${reg(st.D.dec.rs1)}) is being written this edge, so RD1 takes ResultW`);
-  if (s.forward2D) notes.push(`Forward2D: rs2D (${reg(st.D.dec.rs2)}) is being written this edge, so RD2 takes ResultW`);
-  if (s.forwardM) notes.push(`ForwardM: the store's data (${reg(st.M.rs2)}) is the load in W, so WriteDataM takes ResultW`);
-  if (s.lwStall) notes.push(`lwStall: the load in E writes ${reg(st.E.rd)}, which Decode reads. StallF and StallD hold F and D, FlushE puts a bubble in E`);
+export function pdpHazardNotes(m: PdpModel) {
+  const s = m.s, st = m.st, H = pipeline.hazards, notes: string[] = [];
+  const reg = (i: number) => 'x' + i;
+  if (s.forwardAE !== '00') notes.push(`ForwardAE = ${s.forwardAE}: rs1E (${reg(st.E!.rs1)}) is ${s.forwardAE === '10' ? 'rdM' : 'rdW'}, so SrcA takes ${s.forwardAE === '10' ? 'ALUResultM' : 'ResultW'}`);
+  if (s.forwardBE !== '00') notes.push(`ForwardBE = ${s.forwardBE}: rs2E (${reg(st.E!.rs2)}) is ${s.forwardBE === '10' ? 'rdM' : 'rdW'}, so it takes ${s.forwardBE === '10' ? 'ALUResultM' : 'ResultW'}`);
+  if (s.forward1D) notes.push(`Forward1D: rs1D (${reg(st.D!.dec.rs1)}) is being written this edge, so RD1 takes ResultW`);
+  if (s.forward2D) notes.push(`Forward2D: rs2D (${reg(st.D!.dec.rs2)}) is being written this edge, so RD2 takes ResultW`);
+  if (s.forwardM) notes.push(`ForwardM: the store's data (${reg(st.M!.rs2)}) is the load in W, so WriteDataM takes ResultW`);
+  if (s.lwStall) notes.push(`lwStall: the load in E writes ${reg(st.E!.rd)}, which Decode reads. StallF and StallD hold F and D, FlushE puts a bubble in E`);
   if (s.drain) notes.push('the instruction in Decode is not a datapath instruction: F and D hold until E, M and W are empty');
   if (s.serialExec) notes.push('the pipeline behind it is empty, so the functional model executes it now, in Decode');
   if (pipeline.predictor.on) {
-    const hx = (v: number) => '<code>' + dpHex(v) + '</code>';
+    const hx = (v: number | undefined) => '<code>' + dpHex(v) + '</code>';
     if (s.mispredict) {
       const why = s.brMiss
         ? `predicted ${s.prPCSrcE ? 'taken' : 'not taken'}, but PCSrcE is ${s.pcSrcE ? 1 : 0}`
@@ -1168,7 +1213,7 @@ export function pdpHazardNotes(m: { s: any; st: any; }) {
   return notes;
 }
 
-export function pdpLight(name: string | number, stage: string) {
+export function pdpLight(name: string, stage: string) {
   const r = pdpTable().routes[name];
   if (!r) return;
   for (const i of r.segs) {
@@ -1183,16 +1228,16 @@ export function pdpLight(name: string | number, stage: string) {
     el.dataset.pl = stage;
     el.style.setProperty('--pl', PDP_COLOUR[stage]);
     el.classList.add('pl-lit');
-    if (parseFloat(el.getAttribute('stroke-width')) < 5) el.classList.add('pl-thin');
+    if (parseFloat(el.getAttribute('stroke-width') ?? '') < 5) el.classList.add('pl-thin');
   }
 }
 
-export function pdpChip(text: string | any[], stage: string) {
+export function pdpChip(text: string, stage: string) {
   const g = dpNS('g', { class: 'dp-chip dp-parked' });
   const fs = 26;
   const w = Math.max(40, text.length * fs * 0.6 + 18), h = fs + 14;
-  g.dataset.w = w;
-  g.dataset.h = h;
+  g.dataset.w = String(w);
+  g.dataset.h = String(h);
   g.appendChild(dpNS('rect', { x: -w / 2, y: -h / 2, width: w, height: h, fill: PDP_COLOUR[stage] }));
   const t = dpNS('text', { x: 0, y: 0, 'text-anchor': 'middle' });
   t.textContent = text;
@@ -1200,21 +1245,22 @@ export function pdpChip(text: string | any[], stage: string) {
   return g;
 }
 
-export function pdpDrawMux(name: string | number, sel: string | number, stage: string | number) {
+export function pdpDrawMux(name: string, sel: string, stage: string) {
   const mx = pdpTable().muxes[name];
   if (!mx) return;
   const shape = dpEl(mx.e);
   if (shape) { shape.classList.add('pl-lit'); shape.style.setProperty('--pl', PDP_COLOUR[stage]); }
   const from = mx.ins[sel];
-  if (!from) return;
-  dpOverlayEl().appendChild(dpNS('polyline', {
+  const ov = dpOverlayEl();
+  if (!from || !ov) return;
+  ov.appendChild(dpNS('polyline', {
     points: `${from[0]},${from[1]} ${(from[0] + mx.out[0]) / 2},${mx.out[1]} ${mx.out[0]},${mx.out[1]}`,
     fill: 'none', stroke: PDP_COLOUR[stage], 'stroke-width': 9, 'stroke-linecap': 'round'
   }));
 }
 
-export function pdpHazardRoutes(m: { s: any; }) {
-  const s = m.s, out = [];
+export function pdpHazardRoutes(m: PdpModel) {
+  const s = m.s, out: [route: string, label: string][] = [];
   if (s.stallF) out.push(['h_stallf', 'StallF']);
   if (s.stallD) out.push(['h_stalld', 'StallD']);
   if (s.flushD) out.push(['h_flushd', 'FlushD']);
@@ -1228,19 +1274,20 @@ export function pdpHazardRoutes(m: { s: any; }) {
 }
 
 // Where each stage lies across the drawing, for its instruction's label.
-export const PDP_STAGE_X = { F: [0, 911], D: [965, 1768], E: [1823, 2628], M: [2682, 3167], W: [3221, 3460] };
+export const PDP_STAGE_X: Record<string, number[]> = { F: [0, 911], D: [965, 1768], E: [1823, 2628], M: [2682, 3167], W: [3221, 3460] };
 
-export function pdpCaption(m: never) {
+export function pdpCaption(m: PdpModel) {
   const notes = pdpHazardNotes(m);
   return notes.join('. ').replace(/\.\./g, '.') + (/[.>]$/.test(notes[notes.length - 1]) ? '' : '.');
 }
 
 // Each stage's instruction above it, alternating rows so neighbours
 // do not collide.
-export function pdpStageLabels(m: { st: { [x: string]: any; }; }) {
+export function pdpStageLabels(m: PdpModel) {
   const ov = dpOverlayEl(), width = pdpTable().width, xs = PDP_STAGE_X;
+  if (!ov) return;
   const fs = 50;
-  ['F', 'D', 'E', 'M', 'W'].forEach((k, i) => {
+  (['F', 'D', 'E', 'M', 'W'] as const).forEach((k, i) => {
     const r = m.st[k];
     const text = r ? pdpText(r.pc) : 'bubble';
     const w = (text.length + 2) * fs * 0.56;
@@ -1258,9 +1305,10 @@ export function pdpStageLabels(m: { st: { [x: string]: any; }; }) {
 
 // One clock cycle, drawn whole: every stage's wires, the mux choices, the
 // hazard unit's signals and the values.
-export function pdpDraw(m: never) {
+export function pdpDraw(m: PdpModel) {
   dpClear();
   const ov = dpOverlayEl(), t = pdpTable().routes;
+  if (!ov) return;
   const routes = pdpRoutes(m);
   routes.filter(r => r[1] === 'off').forEach(([n]) => pdpLight(n, 'off'));
   routes.filter(r => r[1] !== 'off').forEach(([n, st]) => pdpLight(n, st));
@@ -1285,13 +1333,13 @@ export function pdpDraw(m: never) {
 
 // The five instructions' encodings beside the drawing, in program order:
 // the oldest, in Writeback, first.
-export function pdpDrawEncodings(m: { st: { [x: string]: any; }; } | null) {
+export function pdpDrawEncodings(m: PdpModel | null) {
   const el = byId('dpEnc');
   if (!el) return;
   if (!m) { el.hidden = true; return; }
   el.hidden = false;
   let html = '';
-  for (const k of ['W', 'M', 'E', 'D', 'F']) {
+  for (const k of ['W', 'M', 'E', 'D', 'F'] as const) {
     const r = m.st[k];
     html += `<div class="pdp-enc-row"><div class="pdp-enc-head"><b style="color:${PDP_COLOUR[k]}">${k}</b> ` +
       (r ? `<code>${escapeHtml(pdpText(r.pc))}</code>` : '<i>bubble</i>') + '</div>';
@@ -1316,10 +1364,10 @@ export function pdpDrawEncodings(m: { st: { [x: string]: any; }; } | null) {
 
 // The BHT's entries: every one when the table is small, otherwise those
 // in use. The entries Fetch and Execute read this cycle are marked.
-export function pdpBhtTable(m: { s: any; st: { E: { pc: number; }; }; }) {
+export function pdpBhtTable(m: PdpModel) {
   const s = m.s, n = pipeline.predictor.entries, bht = pipeline.regs.bht;
   const iF = pipeBhtIndex(s.pcF), iE = m.st.E ? pipeBhtIndex(m.st.E.pc) : -1;
-  const rows = [];
+  const rows: string[] = [];
   for (let i = 0; i < n; i++) {
     if (n > 16 && i !== iF && i !== iE && !bht.pr[i] && !bht.bta[i]) continue;
     const marks = (i === iF ? `<b style="color:${PDP_COLOUR.F}">F</b>` : '') + (i === iE ? `<b style="color:${PDP_COLOUR.E}">E</b>` : '');
@@ -1367,17 +1415,25 @@ export function dpSetView(v: string) {
 }
 export function dpToggleView() { dpSetView(dpView === 'timeline' ? 'diagram' : 'timeline'); }
 
+// The timeline: each cycle's column (the instruction in each stage, by
+// sequence number, and what the hazard unit did), each instruction's row,
+// and a cell where the two meet.
+export type TlRec = { seq: number; pc: number };
+export interface TlCol { cyc: number; live?: boolean; st: (TlRec | null)[]; stall?: boolean; flushD?: boolean; flushE?: boolean; miss?: boolean; serial?: boolean }
+export interface TlCell { k: number; bub?: boolean; stall?: boolean; flush?: boolean; miss?: boolean }
+export interface TlRow { pc: number; nop: boolean; quashed?: boolean; cells: Record<number, TlCell> }
+
 export function pdpRenderTimeline() {
   const host = byId('dpTimeline');
   if (!host || dpView !== 'timeline') return;
   if (!program.assembled || !pipeline.regs) { host.innerHTML = '<p class="pdp-tl-empty">Assemble a program to chart it.</p>'; return; }
   // A few columns before the window, so bubbles already in flight at its
   // left edge are known.
-  const all: any[] = [];
+  const all: TlCol[] = [];
   for (let t = pipeline.regs.trace; t && all.length < PDP_TL_COLS + 3; t = t.prev) all.unshift(t);
   if (!run.finished) {
     const s = pipeEvaluate();
-    const rec = (r) => r ? { seq: r.seq, pc: r.pc } : null;
+    const rec = (r: { seq: number; pc: number } | null) => r ? { seq: r.seq, pc: r.pc } : null;
     all.push({
       cyc: cpu.totalCycles, live: true,
       st: [s.instrF ? { seq: pipeline.regs.seqF, pc: s.pcF } : null, rec(pipeline.regs.D), rec(pipeline.regs.E), rec(pipeline.regs.M), rec(pipeline.regs.W)],
@@ -1390,8 +1446,8 @@ export function pdpRenderTimeline() {
   // instruction itself if it was quashed. A serial instruction leaves D
   // by executing, and the pipeline starting up or running dry is just
   // empty.
-  const bubs = all.map(() => [null, null, null, null, null]);
-  const info = new Map();
+  const bubs = all.map((): (number | null)[] => [null, null, null, null, null]);
+  const info = new Map<number, { nop?: boolean; pc?: number }>();
   for (let ci = 1; ci < all.length; ci++) {
     const a = all[ci - 1], b = all[ci];
     for (let k = 1; k < 5; k++) {
@@ -1399,7 +1455,8 @@ export function pdpRenderTimeline() {
       const src = a.st[k - 1], carried = bubs[ci - 1][k - 1];
       if (carried !== null) { bubs[ci][k] = carried; continue; }
       if (!src || (k === 2 && a.serial)) continue;
-      if (b.st[k - 1] && b.st[k - 1].seq === src.seq) {
+      const held = b.st[k - 1];
+      if (held && held.seq === src.seq) {
         const key = src.seq - 0.5 + ci * 1e-4;
         info.set(key, { nop: true });
         bubs[ci][k] = key;
@@ -1410,22 +1467,23 @@ export function pdpRenderTimeline() {
     }
   }
   const lastCol = all[all.length - 1];
-  const live = lastCol && lastCol.live ? new Set(lastCol.st.filter(Boolean).map((r: { seq: { seq: any; }; }) => r.seq)
+  const live = lastCol && lastCol.live ? new Set(lastCol.st.filter((r): r is TlRec => !!r).map(r => r.seq)
     .concat(bubs[all.length - 1].filter(key => key !== null))) : null;
   // A phone has room only for what is in flight, and not for addresses.
   const phone = mobileMode(), onlyLive = phone && !!live;
   const letters = ['F', 'D', 'E', 'M', 'W'];
   const render = (n: number) => {
     let cols = all.slice(-n), off = all.length - cols.length;
-    const rows = new Map();
-    const rowAt = (key: never, pc: any) => {
-      if (!rows.has(key)) rows.set(key, { pc, nop: !!(info.get(key) || {}).nop, cells: {} });
-      return rows.get(key);
+    const rows = new Map<number, TlRow>();
+    const rowAt = (key: number, pc: number | undefined) => {
+      let row = rows.get(key);
+      if (!row) rows.set(key, row = { pc: pc ?? 0, nop: !!(info.get(key) || {}).nop, cells: {} });
+      return row;
     };
     cols.forEach((c, ci) => {
-      c.st.forEach((r: { seq: any; pc: any; }, k: number) => {
+      c.st.forEach((r, k) => {
         if (!r) return;
-        const cell = { k };
+        const cell: TlCell = { k };
         if (c.stall && k <= 1) cell.stall = true;
         if ((c.flushD && k === 0) || (c.flushE && k === 1)) cell.flush = true;
         if (c.miss && k === 2) cell.miss = true;
@@ -1477,8 +1535,8 @@ export function pdpRenderTimeline() {
   let n = render(PDP_TL_COLS);
   const room = host.clientWidth - 20;
   for (let tries = 0; tries < 3 && room > 0; tries++) {
-    const table = host.firstElementChild, th = table.querySelector('th');
-    if (table.offsetWidth <= room || n <= 1) break;
+    const table = host.firstElementChild as HTMLElement | null, th = table && table.querySelector('th');
+    if (!table || !th || table.offsetWidth <= room || n <= 1) break;
     const cell = (table.offsetWidth - th.offsetWidth) / n;
     const fit = Math.max(1, Math.floor((room - th.offsetWidth) / cell));
     if (fit >= n) break;
@@ -1491,7 +1549,7 @@ export function pdpRenderTimeline() {
 export function setDpHeight(px: number | null, persist: boolean) {
   const dock = byId('dpDock');
   if (!dock) return;
-  const h = Math.max(200, Math.min(px, window.innerHeight - 160));
+  const h = Math.max(200, Math.min(px ?? DP_H_DEFAULT, window.innerHeight - 160));
   dock.style.flex = '0 0 ' + h + 'px';
   if (persist) { try { localStorage.setItem(DP_H_KEY, String(h)); } catch (e) { /* private mode */ } }
 }
@@ -1535,8 +1593,10 @@ export function toggleDpDock() {
 // The first instruction the diagrams do not draw, or null. The same set
 // for both: no MCycle, word loads and stores only, nothing outside the
 // decoder table (FP, atomics, ecall, fence, CSRs).
-export let dpBlockKey: string | null = null, dpBlockVal = null;
-export const DP_MULTI_BLOCK = { msg: 'The datapath is not available in Multi-cycle mode.' };
+// Why the diagram cannot show the program: a message, or the first line it cannot draw.
+export interface DpBlock { msg?: string; line?: number; text?: string; why?: string }
+export let dpBlockKey: string | null = null, dpBlockVal: DpBlock | null = null;
+export const DP_MULTI_BLOCK: DpBlock = { msg: 'The datapath is not available in Multi-cycle mode.' };
 export function dpBlocker() {
   if (pipeline.arch === 'multi') return DP_MULTI_BLOCK;
   const key = program.assembled + ':' + program.machineCode.length + ':' + (editorState.lastAssembledCode || '').length + ':' + editorState.language;
@@ -1565,7 +1625,7 @@ export function dpBlocker() {
 export function vizShown() {
   const hdl = ui.engine === 'hdl';
   if (mobileMode()) {
-    const pd = panelDock && panelDock[hdl ? 'waveform' : 'datapath'];
+    const pd = panelDock[hdl ? 'waveform' : 'datapath'];
     return !!(pd && pd.visible);
   }
   return document.body.classList.contains(hdl ? 'wave-open' : 'dp-open');
@@ -1596,7 +1656,7 @@ export function toggleVisualisation() {
 export let floatStepsWanted = false;
 export function floatOnDpTab() {
   return ui.engine !== 'hdl' && document.body.classList.contains('dp-in-panel') &&
-    !!(panelDock && panelDock.datapath && panelDock.datapath.visible) &&
+    !!(panelDock.datapath && panelDock.datapath.visible) &&
     typeof mobileTab !== 'undefined' && mobileTab === 'datapath';
 }
 export function floatStepsMode() {
@@ -1614,7 +1674,7 @@ export function updateFloatSteps() {
   const dp = floatStepsMode() === 'dp';
   bar.dataset.mode = dp ? 'dp' : 'tb';
   const mirror = (btn: HTMLButtonElement, src: string, label: string, title?: string | undefined) => {
-    const s = document.getElementById(src);
+    const s = byId<HTMLButtonElement>(src);
     btn.textContent = label;
     btn.title = title || (s ? s.title : '');
     btn.disabled = !s || s.disabled;
@@ -1698,7 +1758,7 @@ export function updateDatapathPanelAvailability() {
   const hdlBtn = byId<HTMLButtonElement>('engBtnHdl');
   const show = mobileMode() && !(hdlBtn && hdlBtn.classList.contains('active')) && !dpBlocker();
   if (chip) chip.style.display = show ? '' : 'none';
-  if (!show && panelDock && panelDock.datapath && panelDock.datapath.visible) {
+  if (!show && panelDock.datapath && panelDock.datapath.visible) {
     setPanelVisible('datapath', false);
   }
   syncDatapathPanelHost();
@@ -1709,7 +1769,7 @@ export function initDatapath() {
   const dock = byId('dpDock');
   if (bar && dock) {
     let startY = 0, startH = 0;
-    const move = (e: { clientY: number; }) => setDpHeight(startH + (startY - e.clientY), false);
+    const move = (e: MouseEvent) => setDpHeight(startH + (startY - e.clientY), false);
     const up = () => {
       bar.classList.remove('dragging');
       window.removeEventListener('pointermove', move);
@@ -1816,19 +1876,22 @@ export function onDatapathLoad() {
   } else {
     bootSimulator();
   }
-  window.getLanguageMode = () => editorState.language;
-  window.getPcToCLineMap = () => cProgram.pcToLine;
-  window.getCLineToPcsMap = () => cProgram.lineToPcs;
-  window.getRegs = () => cpu.regs;
-  window.getPc = () => cpu.pc;
-  window.getMachineCode = () => program.machineCode;
-  window.getBreakpoints = () => run.breakpoints;
-  window.getCurrentExecLine = () => run.currentLine;
+  // Hooks for the test suites, which read the page's state from Node.
+  Object.assign(window, {
+    getLanguageMode: () => editorState.language,
+    getPcToCLineMap: () => cProgram.pcToLine,
+    getCLineToPcsMap: () => cProgram.lineToPcs,
+    getRegs: () => cpu.regs,
+    getPc: () => cpu.pc,
+    getMachineCode: () => program.machineCode,
+    getBreakpoints: () => run.breakpoints,
+    getCurrentExecLine: () => run.currentLine,
+    getExecHistory: () => stepHistory.entries,
+    getOledBuffer: () => oled.pages[oled.front],
+    getHeldAxisKeys: () => heldAxisKeys,
+    getCFunctionLocals: () => cProgram.functionLocals,
+    getMemViewMode: () => memViewMode,
+    getDisasmViewMode: () => ui.disasmView,
+  });
   Object.defineProperty(window, 'runTimerId', { get: () => run.timerId, configurable: true });
-  window.getExecHistory = () => stepHistory.entries;
-  window.getOledBuffer = () => oled.pages[oled.front];
-  window.getHeldAxisKeys = () => heldAxisKeys;
-  window.getCFunctionLocals = () => cProgram.functionLocals;
-  window.getMemViewMode = () => memViewMode;
-  window.getDisasmViewMode = () => ui.disasmView;
 }

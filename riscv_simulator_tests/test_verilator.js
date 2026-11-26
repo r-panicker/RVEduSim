@@ -142,7 +142,7 @@ const arch = t => JSON.stringify(t.steps.map(s => [s.cyc, s.pc, s.instr, s.regw,
 async function checkpointSection(dir, cache) {
   const vl = createVerilator({ root: VL_ROOT, cacheDir: cache });
   // The same page with the checkpoint module left out: every replay from reset.
-  const noCk = html.replace('let ck = state.off ? null : state;', 'let ck = null;');
+  const noCk = html.replace(/let ck = ["']off["'] in state \? null : state;/, 'let ck = null;');
   check('(the page can be built without checkpoints, for reference)', noCk !== html);
   const cp = makePage(createRunner(NATIVE), { next: dir }, vl);
   const cq = makePage(createRunner(NATIVE), { next: dir }, vl, noCk);

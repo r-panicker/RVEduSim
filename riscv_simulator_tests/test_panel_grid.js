@@ -222,10 +222,12 @@ setTimeout(() => {
     // A persisted column width must NOT force a lone panel to stay narrow.
     const dockState = JSON.parse(win.localStorage.getItem('rvsim.panelDock.v1'));
     dockState.peripherals.wbasis = 300;
+    dockState.rowHeights = [333, 167];
     win.localStorage.setItem('rvsim.panelDock.v1', JSON.stringify(dockState));
     win.initPanelDock();
     win.applyPanelDock();
     const rows3b = stack.querySelectorAll('.panel-dock-row');
+    check('Saved row heights are read back on load', rows3b[0] && rows3b[0].style.flex === '0 0 333px');
     const lonePanelB = rows3b[1] && rows3b[1].querySelector('.tab-content');
     check('Lone panel ignores persisted wbasis (full-width flex)', lonePanelB && lonePanelB.style.flex === '1 1 0px');
     // The paired row-1 panels still honour their persisted wbasis.

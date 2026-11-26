@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The Verilog sources the HDL engine compiles: files added by hand, the
 // prebuilt core, a source folder that is read again on change, and the
 // file list and Wrapper check.
@@ -7,7 +6,7 @@ import { hdlLog, hdlStatus } from './engine';
 import { hdlReportLint } from './lint';
 import { hdlSyncReferenceWrapperDepths } from './memory-images';
 import { hdlDiscardTrace } from './run';
-import { hdlActivity, hdlSources } from './state';
+import { hdlActivity, hdlSources, type HdlFolder, type HdlSource } from './state';
 import { hdlFindWrapper, hdlStripNoise } from './verilog';
 import { ui } from '../machine/state';
 import { setSimEngineMode } from '../ui/engine-mode';
@@ -16,6 +15,7 @@ import { escapeHtml } from '../ui/panels';
 import { updateToolbarButtonStates } from '../ui/run-control';
 import { hdlRefreshRegPathHint } from '../ui/waveform';
 import { byId } from '../ui/dom';
+import { errorMessage } from '../errors';
 export function hdlAddFiles(fileList: any[] | FileList) {
   const pending = [];
   for (const file of fileList) {
@@ -51,7 +51,8 @@ export async function hdlLoadPrebuiltProcessor() {
     const loaded = await Promise.all(HDL_PREBUILT_FILES.map(async name => {
       const resp = await fetch('examples/hdl/' + name);
       if (!resp.ok) throw new Error(name + ' - HTTP ' + resp.status);
-      return { name: name, src: await resp.text() };
+      const f: HdlSource = { name: name, src: await resp.text() };
+      return f;
     }));
     for (const f of loaded) if (/^\s*module\s+Wrapper\b/m.test(f.src)) f.isPrebuilt = true;
     hdlForgetFolder();
@@ -63,7 +64,7 @@ export async function hdlLoadPrebuiltProcessor() {
       'processor is built - load your own sources when you have them.', 'sys');
     hdlStatus('prebuilt processor loaded', 'ok');
   } catch (e) {
-    hdlLog('Could not load the prebuilt processor (' + e.message + '). It is fetched ' +
+    hdlLog('Could not load the prebuilt processor (' + errorMessage(e) + '). It is fetched ' +
       'from examples/hdl/, so the page has to be served over http rather than ' +
       'opened as a file.', 'err');
     hdlStatus('prebuilt processor unavailable', 'err');
@@ -101,12 +102,15 @@ export const HDL_FOLDER_SKIP = /^\.|\.(cache|runs|sim|hw|ip_user_files|gen)$|^(n
 export const HDL_SOURCE_RE = /\.(v|sv|vh|svh)$/i;
 export const HDL_FOLDER_MAX = 500;
 
-export function hdlFolderMakeState(kind: string, name: any, extra?: { path?: any; handle?: any; } | undefined) {
-  return Object.assign({ kind, name, pending: false, excluded: new Set() }, extra);
+export function hdlFolderMakeState(kind: HdlFolder['kind'], name: string, extra?: { path?: string; handle?: any }): HdlFolder {
+  return Object.assign({ kind, name, pending: false, excluded: new Set<string>() }, extra);
 }
 
-export async function hdlWalkHandle(dir: any[], rel: string, out: { path: any; src: any; }[]) {
-  for await (const [name, entry] of dir.entries()) {
+// A file of a source folder, by its path in the folder.
+export interface FolderFile { path: string; src: string }
+
+export async function hdlWalkHandle(dir: any, rel: string, out: FolderFile[]): Promise<FolderFile[]> {
+  for await (const [name, entry] of dir.entries() as AsyncIterable<[string, any]>) {
     if (out.length >= HDL_FOLDER_MAX) break;
     const r = rel ? rel + '/' + name : name;
     if (entry.kind === 'directory') {
@@ -122,26 +126,26 @@ export async function hdlWalkHandle(dir: any[], rel: string, out: { path: any; s
 // that sits under the Wrapper, so that a testbench or an old copy beside
 // them does not become a second top level. Headers stay, since any of
 // them may be included. With no Wrapper in the folder, everything stays.
-export function hdlFolderSelect(all: any[]) {
-  const files = all.filter((f) => !f.path.split('/').slice(0, -1).some((d: string) => HDL_FOLDER_SKIP.test(d)))
-    .sort((a: { path: string; }, b: { path: any; }) => a.path.localeCompare(b.path));
-  const defs = new Map();
-  const stripped = new Map();
+export function hdlFolderSelect(all: FolderFile[]) {
+  const files = all.filter(f => !f.path.split('/').slice(0, -1).some(d => HDL_FOLDER_SKIP.test(d)))
+    .sort((a, b) => a.path.localeCompare(b.path));
+  const defs = new Map<string, FolderFile[]>();
+  const stripped = new Map<FolderFile, string>();
   for (const f of files) {
     const src = hdlStripNoise(f.src);
     stripped.set(f, src);
     for (const m of src.matchAll(/\bmodule\s+([A-Za-z_]\w*)/g)) {
       if (!defs.has(m[1])) defs.set(m[1], []);
-      defs.get(m[1]).push(f);
+      defs.get(m[1])!.push(f);
     }
   }
-  if (!defs.has('Wrapper')) return { files, skipped: [], dups: [] };
+  if (!defs.has('Wrapper')) return { files, skipped: [] as FolderFile[], dups: [] as string[] };
   const reached = new Set(['Wrapper']);
   const queue = ['Wrapper'];
   while (queue.length) {
-    const mod = queue.shift();
-    for (const f of defs.get(mod)) {
-      const src = stripped.get(f);
+    const mod = queue.shift()!;
+    for (const f of defs.get(mod) ?? []) {
+      const src = stripped.get(f) ?? '';
       const at = src.search(new RegExp('\\bmodule\\s+' + mod + '\\b'));
       const end = src.indexOf('endmodule', at);
       const body = src.slice(at, end < 0 ? src.length : end);
@@ -154,40 +158,41 @@ export function hdlFolderSelect(all: any[]) {
       }
     }
   }
-  const keep = [], skipped = [];
+  const keep: FolderFile[] = [], skipped: FolderFile[] = [];
   for (const f of files) {
-    const mods = [...stripped.get(f).matchAll(/\bmodule\s+([A-Za-z_]\w*)/g)].map(m => m[1]);
+    const mods = [...(stripped.get(f) ?? '').matchAll(/\bmodule\s+([A-Za-z_]\w*)/g)].map(m => m[1]);
     if (!mods.length || /\.(vh|svh)$/i.test(f.path) || mods.some(m => reached.has(m))) keep.push(f);
     else skipped.push(f);
   }
-  const dups = [...reached].filter(m => defs.get(m).length > 1)
-    .map(m => m + ' (' + defs.get(m).map((f: { path: { path: any; }; }) => f.path).join(', ') + ')');
+  const dups = [...reached].filter(m => (defs.get(m) ?? []).length > 1)
+    .map(m => m + ' (' + (defs.get(m) ?? []).map(f => f.path).join(', ') + ')');
   return { files: keep, skipped, dups };
 }
 
 // Files are named by their base name, which is what error messages and
 // the file list show; two of the same name in different subfolders get
 // their paths instead.
-export function hdlFolderName(list: any[]) {
-  const count = new Map();
+export function hdlFolderName(list: FolderFile[]): HdlSource[] {
+  const count = new Map<string, number>();
   for (const f of list) {
-    const base = f.path.split('/').pop();
+    const base = f.path.split('/').pop() ?? f.path;
     count.set(base, (count.get(base) || 0) + 1);
   }
-  return list.map((f) => {
-    const base = f.path.split('/').pop();
-    return { name: count.get(base) > 1 ? f.path.replace(/\//g, '__') : base, src: f.src, folderPath: f.path };
+  return list.map(f => {
+    const base = f.path.split('/').pop() ?? f.path;
+    return { name: (count.get(base) ?? 0) > 1 ? f.path.replace(/\//g, '__') : base, src: f.src, folderPath: f.path };
   });
 }
 
 // Puts a folder's sources in place of the folder files loaded before,
 // keeping any file dropped in by hand, which also wins over a folder
 // file of the same name. Returns whether anything changed.
-export function hdlApplyFolderFiles(list: any[], first: boolean) {
+export function hdlApplyFolderFiles(list: FolderFile[], first: boolean) {
   const f = hdlSources.folder;
-  const sel = hdlFolderSelect(list.filter((x) => !f.excluded.has(x.path)));
+  if (!f) return false;
+  const sel = hdlFolderSelect(list.filter(x => !f.excluded.has(x.path)));
   const own = first ? [] : hdlSources.files.filter(x => !x.folderPath);
-  const incoming = hdlFolderName(sel.files).filter((x) => !own.some(o => o.name === x.name));
+  const incoming = hdlFolderName(sel.files).filter(x => !own.some(o => o.name === x.name));
   const before = hdlSources.files.filter(x => x.folderPath);
   const same = before.length === incoming.length &&
     before.every((x, i) => x.name === incoming[i].name && x.src === incoming[i].src);
@@ -196,10 +201,10 @@ export function hdlApplyFolderFiles(list: any[], first: boolean) {
   renderHdlFileList();
   if (first) {
     hdlLog('Loaded ' + incoming.length + ' file(s) from the folder ' + f.name + ': ' +
-      incoming.map((x) => x.name).join(', '), 'sys');
+      incoming.map(x => x.name).join(', '), 'sys');
   } else {
     const was = new Map(before.map(x => [x.name, x.src]));
-    const changes = [];
+    const changes: string[] = [];
     for (const x of incoming) {
       if (!was.has(x.name)) changes.push(x.name + ' added');
       else if (was.get(x.name) !== x.src) changes.push(x.name + ' changed');
@@ -222,13 +227,13 @@ export function hdlApplyFolderFiles(list: any[], first: boolean) {
 
 // Reads the folder again if there is one. A folder that has gone, or can
 // no longer be read, leaves the loaded files as they were.
-export function hdlReadFolder(first?: boolean | undefined) {
+export function hdlReadFolder(first = false): Promise<boolean> {
   if (!hdlSources.folder || hdlSources.folder.pending || hdlSources.folder.kind === 'snapshot') return Promise.resolve(false);
   if (hdlSources.folderReading) return hdlSources.folderReading;
   const f = hdlSources.folder;
   hdlSources.folderReading = (async () => {
     try {
-      let list;
+      let list: FolderFile[];
       if (f.kind === 'native') {
         list = await window.rvNative.readFolder(f.path);
       } else {
@@ -242,7 +247,7 @@ export function hdlReadFolder(first?: boolean | undefined) {
       if (f !== hdlSources.folder) return false;
       return hdlApplyFolderFiles(list, first);
     } catch (e) {
-      hdlLog('Could not read the folder ' + f.name + ' (' + (e && e.message || e) +
+      hdlLog('Could not read the folder ' + f.name + ' (' + errorMessage(e) +
         '); the files loaded from it are unchanged.', 'warn');
       return false;
     } finally {
@@ -259,9 +264,10 @@ export async function hdlPickFolder() {
       if (!dir) return;
       hdlSources.folder = hdlFolderMakeState('native', dir.split(/[\\/]/).filter(Boolean).pop() || dir, { path: dir });
     } else if (window.showDirectoryPicker) {
-      if (hdlSources.folder && hdlSources.folder.pending) {
-        if ((await hdlSources.folder.handle.requestPermission({ mode: 'read' })) !== 'granted') return;
-        hdlSources.folder.pending = false;
+      const folder = hdlSources.folder;
+      if (folder && folder.pending) {
+        if ((await folder.handle.requestPermission({ mode: 'read' })) !== 'granted') return;
+        folder.pending = false;
       } else {
         const handle = await window.showDirectoryPicker({ id: 'hdl-sources', mode: 'read' });
         hdlSources.folder = hdlFolderMakeState('handle', handle.name, { handle });
@@ -273,8 +279,8 @@ export async function hdlPickFolder() {
     }
     if (await hdlReadFolder(true) && ui.engine !== 'hdl') setSimEngineMode('hdl');
   } catch (e) {
-    if (e && e.name === 'AbortError') return;
-    hdlLog('Could not open the folder (' + (e && e.message || e) + ').', 'err');
+    if ((e as Error | null)?.name === 'AbortError') return;
+    hdlLog('Could not open the folder (' + errorMessage(e) + ').', 'err');
   }
 }
 
@@ -307,8 +313,8 @@ export function hdlRenderFolderButton() {
 
 // One IndexedDB record holds the browser's folder handle, which
 // localStorage cannot store.
-export function hdlFolderStore(op: string, value?: undefined) {
-  return new Promise((resolve, reject) => {
+export function hdlFolderStore(op: 'get' | 'put' | 'delete', value?: unknown) {
+  return new Promise<any>((resolve, reject) => {
     if (!window.indexedDB) { resolve(null); return; }
     const open = indexedDB.open('rvsim', 1);
     open.onupgradeneeded = () => open.result.createObjectStore('kv');
@@ -325,15 +331,15 @@ export function hdlFolderStore(op: string, value?: undefined) {
 
 export function hdlInitFolder() {
   const input = byId<HTMLInputElement>('hdlFolderInput');
-  if (input) input.addEventListener('change', e => {
-    const picked = Array.from(e.target.files || []);
-    e.target.value = '';
+  if (input) input.addEventListener('change', () => {
+    const picked = Array.from(input.files || []);
+    input.value = '';
     if (!picked.length) return;
     const root = (picked[0].webkitRelativePath || '').split('/')[0] || 'folder';
     Promise.all(picked
       .filter(f => HDL_SOURCE_RE.test(f.name))
       .slice(0, HDL_FOLDER_MAX)
-      .map(f => f.text().then((src: any) => ({ path: (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name, src }))))
+      .map(f => f.text().then(src => ({ path: (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name, src }))))
       .then(list => {
         hdlForgetFolder();
         hdlSources.folder = hdlFolderMakeState('snapshot', root);

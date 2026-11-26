@@ -21,7 +21,7 @@ import { errorMessage } from '../errors';
 // visible and refreshes it rather than toggling. On mobile (≤800px) the
 // tabbed view is active, so it also switches the visible tab.
 export function switchTab(tab: string) {
-  if (panelDock && panelDock[tab]) {
+  if (panelDock[tab]) {
     if (mobileMode()) setMobileTab(tab);
     if (!panelDock[tab].visible) setPanelVisible(tab, true);
     else refreshPanel(tab);
@@ -156,7 +156,7 @@ export function updateWaveformPanelAvailability() {
   const hdlBtn = byId<HTMLButtonElement>('engBtnHdl');
   const show = mobileMode() && !!(hdlBtn && hdlBtn.classList.contains('active'));
   if (chip) chip.style.display = show ? '' : 'none';
-  if (!show && panelDock && panelDock.waveform && panelDock.waveform.visible) {
+  if (!show && panelDock.waveform && panelDock.waveform.visible) {
     setPanelVisible('waveform', false);
   }
   syncWaveformPanelHost();
@@ -169,7 +169,7 @@ export function updateLocalsPanelAvailability() {
   const chip = byId<HTMLButtonElement>('panelChip-locals');
   const isC = editorState.language === 'c';
   if (chip) chip.style.display = isC ? '' : 'none';
-  if (!isC && panelDock && panelDock.locals && panelDock.locals.visible) {
+  if (!isC && panelDock.locals && panelDock.locals.visible) {
     setPanelVisible('locals', false);
   }
 }

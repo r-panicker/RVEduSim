@@ -1,14 +1,13 @@
-// @ts-nocheck
 // The waveform viewer, the HDL downloads (VCD and testbench) and the HDL
 // simulation settings.
 
-import { hdlVcdText } from '../hdl/checkpoints';
+import { hdlVcdText, type HdlWave } from '../hdl/checkpoints';
 import { HDL_MAX_CYCLES, HDL_VL_MAX_RUN, hdlCyclesFor, hdlLog, hdlNative, hdlStatus } from '../hdl/engine';
 import { hdlQueueResim } from '../hdl/inputs';
 import { hdlDiscoverRegBank, hdlMemFiles } from '../hdl/memory-images';
 import { hdlCurrentInputs, hdlDiscardTrace, hdlWithBusy } from '../hdl/run';
 import { hdlCurrentCycle, hdlSeek } from '../hdl/seek';
-import { hdlActivity, hdlBuild, hdlConfig, hdlRec, hdlSources } from '../hdl/state';
+import { hdlActivity, hdlBuild, hdlConfig, hdlRec, hdlSources, hdlRecording } from '../hdl/state';
 import { hdlPostSynthCheck, loadYosysEngine } from '../hdl/synthesis';
 import { hdlBuildTestbench } from '../hdl/testbench';
 import { hdlFindWrapper } from '../hdl/verilog';
@@ -20,11 +19,12 @@ import { updateWaveformPanelAvailability } from './examples-language';
 import { downloadTextFile } from './execution';
 import { escapeHtml, mobileMode, panelDock, setMobileTab, setPanelVisible } from './panels';
 import { updateToolbarButtonStates } from './run-control';
-import { byId } from './dom';
+import { byId, targetEl } from './dom';
+import { errorMessage } from '../errors';
 
 export function hdlDownloadVcd() {
   if (!hdlBuild.lastVcd) return;
-  downloadTextFile('cg3207_hdl.vcd', hdlVcdText(hdlBuild.lastVcd));
+  downloadTextFile('cg3207_hdl.vcd', hdlVcdText(hdlBuild.lastVcd) ?? '');
 }
 
 // ---- Waveforms -------------------------------------------------------
@@ -54,10 +54,10 @@ export const WAVE_DEFAULT_SIGNALS = [
 ];
 
 export let waveOpen = false;
-export let waveParsed = null;       // parseVcd() result
-export let waveParsedFrom = null;   // the hdlLastVcd it was parsed from
+export let waveParsed: ParsedVcd | null = null;
+export let waveParsedFrom: HdlWave | null = null;   // the waveform it was parsed from
 export let waveParsedAt = 0, waveParseMs = 0;
-export let waveSignals = [];        // full dotted paths, in display order
+export let waveSignals: string[] = [];   // full dotted paths, in display order
 export let waveStart = 0;           // leftmost cycle on screen
 export let waveSpan = waveDefaultSpan();
 // Once the span has been chosen deliberately, a layout change must not
@@ -66,14 +66,24 @@ export let waveSpanChosen = false;
 export let waveDropped = 0;         // chosen signals the current VCD no longer has
 
 // ---- VCD parsing ------------------------------------------------------
+// A signal: its VCD id, its name with any bit range (ref), its dotted path.
+export interface WaveVar { id: string; ref: string; path: string; width: number; name: string }
+export interface WaveScope { name: string; children: Map<string, WaveScope>; vars: WaveVar[] }
+// One id's changes: the times, and the value from each on.
+export interface WaveChanges { times: number[]; values: string[] }
+export interface ParsedVcd {
+  timescale: string; vars: WaveVar[]; byPath: Map<string, WaveVar>;
+  changes: Map<string, WaveChanges>; root: WaveScope; endTime: number;
+}
+
 // Narrow by design: this reads what Icarus or Verilator writes for the
 // testbench hdl/testbench.ts generates, not arbitrary VCD.
-export function parseVcd(text: string | string[]) {
-  const vars = [];                // {id, ref, path, width}
-  const byPath = new Map();
-  const changes = new Map();      // id -> {times: [], values: []}
-  const root = { name: '', children: new Map(), vars: [] };
-  const scopeStack = [];
+export function parseVcd(text: string): ParsedVcd {
+  const vars: WaveVar[] = [];
+  const byPath = new Map<string, WaveVar>();
+  const changes = new Map<string, WaveChanges>();
+  const root: WaveScope = { name: '', children: new Map(), vars: [] };
+  const scopeStack: WaveScope[] = [];
   let node = root;
   let timescale = '';
   let endTime = 0;
@@ -88,7 +98,7 @@ export function parseVcd(text: string | string[]) {
   for (let i = 0; i < tok.length; i++) {
     const cmd = tok[i];
     if (cmd === '$timescale') {
-      const parts = [];
+      const parts: string[] = [];
       while (++i < tok.length && tok[i] !== '$end') parts.push(tok[i]);
       timescale = parts.join('');
     } else if (cmd === '$scope') {
@@ -108,7 +118,7 @@ export function parseVcd(text: string | string[]) {
       const name = tok[i + 4];
       const range = (tok[i + 5] && tok[i + 5] !== '$end') ? tok[i + 5] : '';
       if (id && name) {
-        const scopePath = [];
+        const scopePath: string[] = [];
         for (const s of scopeStack) if (s.name) scopePath.push(s.name);
         if (node.name) scopePath.push(node.name);
         const path = scopePath.concat(name).join('.');
@@ -122,7 +132,7 @@ export function parseVcd(text: string | string[]) {
     }
   }
 
-  const record = (id: any, value: any) => {
+  const record = (id: string, value: string) => {
     let c = changes.get(id);
     if (!c) { c = { times: [], values: [] }; changes.set(id, c); }
     // Icarus can emit the same value twice at one timestamp; keeping only
@@ -164,9 +174,9 @@ export function parseVcd(text: string | string[]) {
 // the UI counts in is cycles. Derive the ratio from CLK's own edges
 // rather than assuming the stock testbench's 10, so an edited clock
 // cannot silently slide the cursor off the instruction it marks.
-export function waveTicksPerCycle(p: never) {
+export function waveTicksPerCycle(p: ParsedVcd | null) {
   const clk = p && (p.byPath.get('cg3207_hdl_tb.CLK') ||
-    p.vars.find((v: { name: string; }) => v.name === 'CLK' || v.name === 'clk'));
+    p.vars.find(v => v.name === 'CLK' || v.name === 'clk'));
   const c = clk && p.changes.get(clk.id);
   if (!c || c.times.length < 3) return 10;
   // Two transitions make a full period.
@@ -181,21 +191,21 @@ export function waveEnsureParsed() {
   // parsing all of it every time would take most of the run's time.
   if (waveParsed && hdlActivity.chunked && performance.now() - waveParsedAt < 10 * waveParseMs) return waveParsed;
   const t0 = performance.now();
-  waveParsed = parseVcd(hdlVcdText(hdlBuild.lastVcd));
+  const parsed = waveParsed = parseVcd(hdlVcdText(hdlBuild.lastVcd) ?? '');
   waveParsedFrom = hdlBuild.lastVcd;
   waveParsedAt = performance.now();
   waveParseMs = waveParsedAt - t0;
-  waveApplySignalChoice(waveParsed);
-  return waveParsed;
+  waveApplySignalChoice(parsed);
+  return parsed;
 }
 
 // A chosen set survives a re-run, and a re-run over edited Verilog can
 // legitimately no longer have a signal. Drop those, but count them, so a
 // shrinking list is reported rather than silent.
-export function waveApplySignalChoice(p: { byPath: { has: (arg0: any) => any; }; } | null) {
+export function waveApplySignalChoice(p: ParsedVcd) {
   const chosen = waveLoadSignals();
   if (chosen && chosen.length) {
-    const kept = chosen.filter((path: any) => p.byPath.has(path));
+    const kept = chosen.filter(path => p.byPath.has(path));
     waveDropped = chosen.length - kept.length;
     if (kept.length) { waveSignals = kept; return; }
   }
@@ -203,18 +213,18 @@ export function waveApplySignalChoice(p: { byPath: { has: (arg0: any) => any; };
   waveSignals = waveResolveDefaults(p);
 }
 
-export function waveResolveDefaults(p: never) {
-  const out: any[] = [];
+export function waveResolveDefaults(p: ParsedVcd) {
+  const out: string[] = [];
   for (const want of WAVE_DEFAULT_SIGNALS) {
     // Match on the tail of the path so 'dut.PC' finds it under whatever
     // the top-level testbench scope happens to be called.
-    const hit = p.vars.find((v: { path: string; }) => v.path === want || v.path.endsWith('.' + want));
+    const hit = p.vars.find(v => v.path === want || v.path.endsWith('.' + want));
     if (hit && !out.includes(hit.path)) out.push(hit.path);
   }
   return out;
 }
 
-export function waveLoadSignals() {
+export function waveLoadSignals(): string[] | null {
   try { return JSON.parse(localStorage.getItem(WAVE_SIG_KEY) || 'null'); }
   catch (e) { return null; }
 }
@@ -224,7 +234,7 @@ export function waveSaveSignals() {
   catch (e) { /* private mode */ }
 }
 
-export function waveAddSignal(path: any) {
+export function waveAddSignal(path: string) {
   if (!waveParsed || !waveParsed.byPath.has(path) || waveSignals.includes(path)) return;
   waveSignals.push(path);
   waveSaveSignals();
@@ -232,7 +242,7 @@ export function waveAddSignal(path: any) {
   renderWavePicker();
 }
 
-export function waveRemoveSignal(path: any) {
+export function waveRemoveSignal(path: string) {
   const i = waveSignals.indexOf(path);
   if (i < 0) return;
   waveSignals.splice(i, 1);
@@ -241,7 +251,7 @@ export function waveRemoveSignal(path: any) {
   renderWavePicker();
 }
 
-export function waveToggleSignal(path: any) {
+export function waveToggleSignal(path: string) {
   if (waveSignals.includes(path)) waveRemoveSignal(path); else waveAddSignal(path);
 }
 
@@ -254,7 +264,7 @@ export function waveResetSignals() {
 }
 
 // Index of the last change at or before `time`, or -1 before the first.
-export function waveChangeIndexAt(c: { times: string | any[]; }, time: number) {
+export function waveChangeIndexAt(c: WaveChanges, time: number) {
   let lo = 0, hi = c.times.length - 1, ans = -1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
@@ -264,7 +274,7 @@ export function waveChangeIndexAt(c: { times: string | any[]; }, time: number) {
 }
 
 // Last value at or before `time`; null before the signal's first change.
-export function waveValueAt(p: { changes: { get: (arg0: any) => any; }; }, id: any, time: any) {
+export function waveValueAt(p: ParsedVcd, id: string, time: number) {
   const c = p.changes.get(id);
   if (!c || !c.times.length) return null;
   const i = waveChangeIndexAt(c, time);
@@ -272,7 +282,7 @@ export function waveValueAt(p: { changes: { get: (arg0: any) => any; }; }, id: a
 }
 
 // 'b1010' -> 'a'; 'x'/'z' runs stay symbolic rather than lying with a 0.
-export function waveFormatValue(raw: string | any[] | null | undefined, width: any) {
+export function waveFormatValue(raw: string | null | undefined, width: number) {
   if (raw === null || raw === undefined) return '';
   if (raw.length === 1) return raw;
   const bits = raw.slice(1);
@@ -295,7 +305,7 @@ export function setWaveHeight(px: number | null, persist: boolean) {
   const dock = waveDockEl();
   if (!dock) return;
   const max = Math.max(120, window.innerHeight - 220);
-  const h = Math.max(120, Math.min(px, max));
+  const h = Math.max(120, Math.min(px ?? WAVE_H_DEFAULT, max));
   dock.style.flex = '0 0 ' + h + 'px';
   if (persist) { try { localStorage.setItem(WAVE_H_KEY, String(h)); } catch (e) { /* private mode */ } }
 }
@@ -387,7 +397,7 @@ export function toggleWaveDock() {
 // mobile, where the strip is a panel.
 export function waveRevealForRun() {
   if (mobileMode()) {
-    if (!panelDock || !panelDock.waveform) return;
+    if (!panelDock.waveform) return;
     if (!panelDock.waveform.visible) setPanelVisible('waveform', true);
     setMobileTab('waveform');
     return;
@@ -513,15 +523,15 @@ export function initWavePicker() {
   const list = byId('wavePickerList');
   if (list) {
     list.addEventListener('click', e => {
-      const item = e.target.closest('.wave-picker-item');
-      if (item) waveToggleSignal(item.getAttribute('data-path'));
+      const item = targetEl(e)?.closest('.wave-picker-item');
+      if (item) waveToggleSignal(item.getAttribute('data-path') ?? '');
     });
   }
   const names = byId('waveNames');
   if (names) {
     names.addEventListener('click', e => {
-      const btn = e.target.closest('.wave-name-remove');
-      if (btn) waveRemoveSignal(btn.getAttribute('data-path'));
+      const btn = targetEl(e)?.closest('.wave-name-remove');
+      if (btn) waveRemoveSignal(btn.getAttribute('data-path') ?? '');
     });
   }
   // Clicking away closes it, the way any dropdown behaves - otherwise the
@@ -529,7 +539,7 @@ export function initWavePicker() {
   document.addEventListener('pointerdown', e => {
     const el = byId('wavePicker');
     if (!el || el.hidden) return;
-    if (e.target.closest('#wavePicker') || e.target.closest('#waveAddBtn')) return;
+    if (targetEl(e)?.closest('#wavePicker') || targetEl(e)?.closest('#waveAddBtn')) return;
     toggleWavePicker();
   });
 }
@@ -631,7 +641,7 @@ export function updateWaveHeaderAndDraw() {
 }
 
 // A long run's waveform keeps only its last stretch.
-export function waveFirstCycle(p: never) {
+export function waveFirstCycle(p: ParsedVcd) {
   let t = Infinity;
   for (const c of p.changes.values()) if (c.times.length && c.times[0] < t) t = c.times[0];
   return Number.isFinite(t) ? Math.floor(t / waveTicksPerCycle(p)) : 0;
@@ -743,7 +753,7 @@ export function waveShortLabel(path: string) {
   return clashes ? tail2 : parts[parts.length - 1];
 }
 
-export function drawWaveNames(p: never) {
+export function drawWaveNames(p: ParsedVcd) {
   const host = byId('waveNames');
   if (!host) return;
   let html = '<div class="wave-names-axis">cycle</div>';
@@ -996,12 +1006,14 @@ export function setHdlLiveWave(v: string) { hdlConfig.liveWave = v === 'live' ? 
 // Each sets the options that cost run time. They stay visible and can be
 // changed one by one, after which the preset reads Custom; with no
 // waveform recorded, its two sub-settings do not count.
-export const HDL_DETAIL = {
+// A Detail preset: what a run records and checks.
+export interface HdlDetail { trace: boolean; vcd: boolean; top: boolean; live: string; compare: boolean; synth: boolean }
+export const HDL_DETAIL: Record<string, HdlDetail> = {
   full:     { trace: true,  vcd: true,  top: false, live: 'live',  compare: false, synth: false },
   balanced: { trace: true,  vcd: true,  top: true,  live: 'pause', compare: false, synth: false },
   fastest:  { trace: false, vcd: false, top: true,  live: 'pause', compare: false, synth: false }
 };
-export function hdlDetailNow() {
+export function hdlDetailNow(): HdlDetail {
   return { trace: hdlConfig.traceEnabled, vcd: hdlConfig.dumpVcd, top: hdlConfig.waveTop, live: hdlConfig.liveWave,
            compare: hdlConfig.compareEnabled, synth: hdlConfig.synthEnabled };
 }
@@ -1009,38 +1021,38 @@ export function hdlDetailMatch() {
   const now = hdlDetailNow();
   for (const name in HDL_DETAIL) {
     const p = HDL_DETAIL[name];
-    if (Object.keys(p).every(k => (!now.vcd && (k === 'top' || k === 'live')) || p[k] === now[k])) return name;
+    if ((Object.keys(p) as (keyof HdlDetail)[]).every(k => (!now.vcd && (k === 'top' || k === 'live')) || p[k] === now[k])) return name;
   }
   return 'custom';
 }
 // Puts every control in step with the settings, which a preset or Reset
 // Defaults changes without touching the controls.
 export function hdlRefreshDetail() {
-  const byId = (id: string) => document.getElementById(id);
-  const set = (id: string, prop: string, v: string | boolean) => { const el = byId(id); if (el && el[prop] !== v) el[prop] = v; };
-  set('hdlTrace', 'checked', hdlConfig.traceEnabled);
-  set('hdlVcd', 'checked', hdlConfig.dumpVcd);
-  set('hdlWaveTop', 'value', hdlConfig.waveTop ? 'top' : 'all');
-  set('hdlLiveWave', 'value', hdlConfig.liveWave);
-  set('hdlCompare', 'checked', hdlConfig.compareEnabled);
-  set('hdlSynth', 'checked', hdlConfig.synthEnabled);
+  const check = (id: string, v: boolean) => { const el = byId<HTMLInputElement>(id); if (el && el.checked !== v) el.checked = v; };
+  const choose = (id: string, v: string) => { const el = byId<HTMLSelectElement>(id); if (el && el.value !== v) el.value = v; };
+  check('hdlTrace', hdlConfig.traceEnabled);
+  check('hdlVcd', hdlConfig.dumpVcd);
+  choose('hdlWaveTop', hdlConfig.waveTop ? 'top' : 'all');
+  choose('hdlLiveWave', hdlConfig.liveWave);
+  check('hdlCompare', hdlConfig.compareEnabled);
+  check('hdlSynth', hdlConfig.synthEnabled);
   const scope = byId('hdlWaveScopeRow');
   if (scope) scope.style.display = hdlConfig.dumpVcd ? 'flex' : 'none';
   const lw = byId('hdlLiveWaveRow');
   if (lw) lw.style.display = hdlConfig.dumpVcd && hdlConfig.simulator === 'verilator' ? 'flex' : 'none';
-  const sel = byId('hdlDetail');
+  const sel = byId<HTMLSelectElement>('hdlDetail');
   if (sel) {
     const m = hdlDetailMatch();
-    const custom = sel.querySelector('option[value="custom"]');
+    const custom = sel.querySelector<HTMLOptionElement>('option[value="custom"]');
     if (custom) custom.hidden = m !== 'custom';
     sel.value = m;
   }
 }
-export function setHdlDetail(name: string | string[], quiet: boolean) {
+export function setHdlDetail(name: string, quiet: boolean) {
   const p = HDL_DETAIL[name];
   if (!p) { hdlRefreshDetail(); return; }
   const now = hdlDetailNow();
-  const said = [];
+  const said: string[] = [];
   if (now.vcd !== p.vcd) said.push('waveform ' + (p.vcd ? 'on' : 'off'));
   if (p.vcd && now.top !== p.top) said.push('waveform signals: ' + (p.top ? 'Wrapper only' : 'all'));
   if (p.vcd && now.live !== p.live) said.push('waveform built ' + (p.live === 'live' ? 'while running' : 'on Pause'));
@@ -1081,10 +1093,10 @@ export function hdlInitSimulator() {
   setHdlSimulator(saved === 'verilator' ? 'verilator' : 'icarus', true);
 }
 
-export function setHdlSimulator(v: string, restoring?: boolean | undefined) {
+export function setHdlSimulator(v: string, restoring = false) {
   if (v !== 'verilator' || !hdlVerilatorAvail) v = 'icarus';
   const changed = v !== hdlConfig.simulator;
-  hdlConfig.simulator = v;
+  hdlConfig.simulator = v as typeof hdlConfig.simulator;
   hdlShowCycles();
   hdlRefreshDetail();
   const sel = byId<HTMLSelectElement>('hdlSimulator');
@@ -1123,7 +1135,7 @@ export function setHdlSynth(on: boolean) {
   if (!hdlConfig.synthEnabled || was) return;
   if (!hdlRec.trace || !hdlBuild.lastRtlOut) {
     loadYosysEngine().catch(e => {
-      hdlLog(String(e && e.message ? e.message : e), 'err');
+      hdlLog(errorMessage(e), 'err');
       hdlStatus('the synthesiser failed to load', 'err');
     });
     return;
@@ -1131,13 +1143,14 @@ export function setHdlSynth(on: boolean) {
   hdlWithBusy(async () => {
     try {
       const wrapper = hdlFindWrapper();
+      if (!wrapper) throw new Error('No Wrapper among the sources.');
       loadProgram(program.machineCode);
       const mem = hdlMemFiles(wrapper.src);
-      await hdlPostSynthCheck(hdlBuild.lastRtlOut, hdlRec.trace.budget,
+      await hdlPostSynthCheck(hdlBuild.lastRtlOut, hdlRecording().budget,
                               hdlConfig.traceEnabled ? 2 : 1, mem.files);
       hdlSeek(hdlRec.idx);
     } catch (e) {
-      hdlLog(String(e && e.message ? e.message : e), 'err');
+      hdlLog(errorMessage(e), 'err');
       setStatus('Post-synthesis check failed - see the console', 'error');
     }
     return null;

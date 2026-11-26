@@ -1,4 +1,3 @@
-// @ts-nocheck
 // The code editor: CodeMirror 6 language modes, theme, gutters, tooltips
 // and autocomplete, the editor proxy and history, the console log and
 // status bar, and the editor/dock splitter.
@@ -144,7 +143,7 @@ export let riscvLanguage: any = null, cLanguage: any = null, riscvHighlightStyle
     setPipeStagesEffect: any = null, pipeStagesField: any = null;
 
 // Helper: format instruction signature with active operand parameter highlighted
-export function formatActiveInstructionSignature(formatStr: string | string[], operandIndex: any) {
+export function formatActiveInstructionSignature(formatStr: string, operandIndex: number) {
   if (!formatStr) return '';
   const spaceIdx = formatStr.indexOf(' ');
   if (spaceIdx === -1) {
@@ -508,7 +507,7 @@ class PipeStageMarker extends CM6.GutterMarker {
     for (const L of this.text.split(' ')) {
       const b = document.createElement('b');
       b.textContent = L;
-      b.style.color = PDP_COLOUR[L];
+      b.style.color = PDP_COLOUR[L as keyof typeof PDP_COLOUR];
       el.appendChild(b);
     }
     return el;
@@ -1019,7 +1018,7 @@ export function resetExecutionForSourceChange() {
 
 export function initSplitter() {
   const splitter = byId('mainSplitter');
-  const rightPanel = document.querySelector('.right-panel');
+  const rightPanel = document.querySelector<HTMLElement>('.right-panel');
   if (!splitter || !rightPanel) return;
   let dragging = false;
   // The editor needs a usable width even when the user drags the splitter
@@ -1038,7 +1037,7 @@ export function initSplitter() {
   });
   splitter.addEventListener('pointermove', (e) => {
     if (!dragging) return;
-    const mainRect = splitter.parentElement.getBoundingClientRect();
+    const mainRect = splitter.parentElement!.getBoundingClientRect();
     const width = mainRect.right - e.clientX;
     rightPanel.style.width = clamp(width) + 'px';
     rightPanel.style.minWidth = '';

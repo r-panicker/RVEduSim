@@ -274,15 +274,15 @@ export async function hdlCompile(src: string, generation: string) {
 // files are all read by the testbench at $value$plusargs time. The
 // checkpoints a run writes come back as { cycle: { txt, mem: [] } }.
 export const HDL_RUN_KEEP = /^(dump\.vcd|ck_s?\d+(_m\d+\.mem|\.txt))$/;
-export async function hdlSimulate(vvpBytes: any, memFiles: { 'AA_IROM.mem': string; 'AA_DMEM.mem': string; } & { 'stim.mem': string; 'uart_rx.mem': string; }, plusargs: string[]) {
-  const files = Object.assign({ 'sim.vvp': vvpBytes }, memFiles);
+export async function hdlSimulate(vvpBytes: Uint8Array, memFiles: HdlToolFiles, plusargs: string[]) {
+  const files: HdlToolFiles = Object.assign({ 'sim.vvp': vvpBytes }, memFiles);
   const r = await hdlTool('vvp', files, ['/sim.vvp'].concat(plusargs || []),
     { merge: true, keep: HDL_RUN_KEEP });
   return hdlDecodeRun(r);
 }
 
 // A Verilator model takes the same plusargs and files as vvp does.
-export async function hdlRunModel(model: any, files: any, plusargs: string[]) {
+export async function hdlRunModel(model: unknown, files: HdlToolFiles, plusargs: string[]) {
   const id = ++hdlActivity.jobSeq;
   hdlNativeJobs.add(id);
   let r;

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Live runs with Verilator, in the desktop app.
 // The model keeps running until Pause, a breakpoint or the cycle limit,
 // taking inputs as they change. Its records stream into the recording,
@@ -9,10 +8,10 @@
 // there it takes no input and runs at full speed, and what follows joins
 // onto the recording.
 
-import { HDL_CK_VERIFY, HDL_VL_CK_EVERY, hdlCheckFrom, hdlJoinCheck, hdlJoinSplit, hdlRecordList, hdlShiftVcd, hdlVcdFromBytes, hdlVlCkFailed, hdlVlCkMerge, hdlVlCkPick } from './checkpoints';
+import { HDL_CK_VERIFY, HDL_VL_CK_EVERY, type HdlCheckpoint, hdlCheckFrom, hdlJoinCheck, hdlJoinSplit, hdlRecordList, hdlShiftVcd, hdlVcdFromBytes, hdlVlCkFailed, hdlVlCkMerge, hdlVlCkPick } from './checkpoints';
 import { hdlCompareWithJs } from './compare';
 import { hdlRxFile, hdlStimFile, hdlSyncRx } from './compile';
-import { HDL_LIVE_PRE_KEEP, HDL_LIVE_VCD_MAX, HDL_RUN_KEEP, HDL_VCD_WINDOW, hdlClearConsole, hdlDecodeCk, hdlLog, hdlNativeJobs, hdlRunModel, hdlStatus } from './engine';
+import { HDL_LIVE_PRE_KEEP, HDL_LIVE_VCD_MAX, HDL_RUN_KEEP, HDL_VCD_WINDOW, type HdlToolFiles, hdlClearConsole, hdlDecodeCk, hdlDecodeRun, hdlLog, hdlNativeJobs, hdlRunModel, hdlStatus } from './engine';
 import { hdlBreakAt, hdlCaptureBaseInputs, hdlWithBusy } from './run';
 import { hdlApplyPer, hdlCaptureBase, hdlCutTrace, hdlSeek, hdlTrimTrace } from './seek';
 import { hdlReadFolder } from './sources';
@@ -28,6 +27,19 @@ import { renderUartTerminal, updateOledCanvas, updatePeripherals } from '../ui/p
 import { updateToolbarButtonStates } from '../ui/run-control';
 import { updateWaveView, waveRevealForRun } from '../ui/waveform';
 
+// A live run: the job id of the model running, the parser its output
+// feeds, the cycle it joins on (from), where it is to stop (stopAt, -1 for
+// not yet), how far breakpoints (checked) and peripheral events
+// (preApplied) have been looked at, and, for a run from a checkpoint, the
+// split of its output: what is to be checked against the recording (over),
+// what is held back until the check passes (held), and the check itself.
+export interface HdlLiveRun {
+  id: number; parser: ReturnType<typeof hdlTraceParser>; from: number;
+  stopAt: number; stopSent: boolean; checked: number; preApplied: number;
+  ck: HdlCheckpoint | null; split: ReturnType<typeof hdlJoinSplit> | null;
+  over: string[]; held: string[]; ckFailed: boolean; check?: () => void;
+}
+
 export function hdlLiveCapable() {
   return hdlConfig.simulator === 'verilator' && !!(window.rvNative && window.rvNative.vlLive);
 }
@@ -40,10 +52,10 @@ export function hdlLiveStop() {
   hdlStatus('pausing...', 'busy');
 }
 // Inputs the model applied go onto the timeline with the cycle it chose.
-export function hdlLiveTakeInputs(parser: { trace?: any; feed?: (text: any) => void; takeInputs: any; finish?: () => any; }) {
+export function hdlLiveTakeInputs(parser: ReturnType<typeof hdlTraceParser>) {
   for (const e of parser.takeInputs()) {
-    if ('byte' in e) hdlRec.rx.push(e);
-    else hdlRec.stim.push(e);
+    if (e.byte !== undefined) hdlRec.rx.push({ cycle: e.cycle, byte: e.byte });
+    else hdlRec.stim.push({ cycle: e.cycle, code: e.code ?? 0, value: e.value ?? 0 });
   }
 }
 
@@ -73,7 +85,8 @@ export async function hdlRunLive() {
       hdlSyncRx();
     }
     const epoch = hdlRec.epoch;
-    const from = resume ? hdlRec.trace.budget : 0;
+    const prior = resume ? hdlRec.trace : null;
+    const from = prior ? prior.budget : 0;
     const budget = from + hdlConfig.cycleBudget;
     const prep = await hdlPrepareRun({ quiet: resume });
     if (!prep || epoch !== hdlRec.epoch) return null;
@@ -90,38 +103,38 @@ export async function hdlRunLive() {
       if (from > HDL_VCD_WINDOW) plus.push('+VCDFROM=' + (from - HDL_VCD_WINDOW));
     }
     plus.push('+LIVE', '+LIVEFROM=' + from, '+HZ=' + hdlLiveHz());
-    const files = Object.assign({}, mem.files, { 'stim.mem': hdlStimFile(), 'uart_rx.mem': hdlRxFile() });
+    const files: HdlToolFiles = Object.assign({}, mem.files, { 'stim.mem': hdlStimFile(), 'uart_rx.mem': hdlRxFile() });
 
     // Resume starts from the newest checkpoint that leaves some of the
     // recording to check the replay against and, with a live waveform,
     // comes before the waveform's window.
-    let ck = resume && ckOn() ? hdlVlCkPick(hdlRec.trace, joinKey, from - (liveWave ? HDL_VCD_WINDOW : HDL_CK_VERIFY)) : null;
-    const kept = resume && hdlRec.trace.joinKey === joinKey && hdlRec.trace.vlCks ? hdlRec.trace.vlCks : [];
-    const checkLo = ck ? hdlCheckFrom(hdlRec.trace, ck.k) : 0;
-    const oldRecs = ck ? hdlRecordList(hdlRec.trace, checkLo, from - 2) : null;
+    let ck = prior && ckOn() ? hdlVlCkPick(prior, joinKey, from - (liveWave ? HDL_VCD_WINDOW : HDL_CK_VERIFY)) : null;
+    const kept = prior && prior.joinKey === joinKey && prior.vlCks ? prior.vlCks : [];
+    const checkLo = ck && prior ? hdlCheckFrom(prior, ck.k) : 0;
+    const oldRecs = ck && prior ? hdlRecordList(prior, checkLo, from - 2) : [];
 
-    if (resume) hdlSeek(hdlCutTrace(hdlRec.trace, from).steps.length);
-    const parser = hdlTraceParser(resume ? hdlRec.trace : null);
+    if (prior) hdlSeek(hdlCutTrace(prior, from).steps.length);
+    const parser = hdlTraceParser(prior ?? undefined);
     const t = parser.trace;
     if (!resume) {
       t.budget = 0;
       hdlRec.trace = t;
       hdlSeek(0);
     }
-    const live = hdlActivity.live = { id: 0, parser, from, stopAt: -1, stopSent: false, checked: resume ? t.steps.length : 0,
-                             preApplied: resume ? t.pre.length : 0, ck: null, split: null, over: [], held: [] };
+    const live: HdlLiveRun = hdlActivity.live = { id: 0, parser, from, stopAt: -1, stopSent: false, checked: resume ? t.steps.length : 0,
+                             preApplied: resume ? t.pre.length : 0, ck: null, split: null, over: [], held: [], ckFailed: false };
     updateToolbarButtonStates();
     // A run from a checkpoint holds back what it prints until the stretch
     // before `from` has been checked against the recording.
-    const launch = (c: { k: string; txt: any; mem: { forEach: (arg0: (m: any, i: string) => void) => void; }; } | null) => {
+    const launch = (c: HdlCheckpoint | null): Promise<{ cancelled?: boolean; files: Record<string, Uint8Array> }> => {
       const id = live.id = ++hdlActivity.jobSeq;
       hdlNativeJobs.add(id);
       const p = plus.concat('+TRACEFROM=' + (c ? c.k : from), ckOn() ? ['+CKEVERY=' + HDL_VL_CK_EVERY] : []);
-      const f = Object.assign({}, files);
+      const f: HdlToolFiles = Object.assign({}, files);
       if (c) {
         p.push('+CKLOAD=' + c.k);
         f['ck_load.txt'] = c.txt;
-        c.mem.forEach((m: any, i: string) => { f['ck_load_m' + i + '.mem'] = m; });
+        c.mem.forEach((m, i) => { f['ck_load_m' + i + '.mem'] = m; });
       }
       live.ck = c;
       live.split = c ? hdlJoinSplit(from) : null;
@@ -131,9 +144,9 @@ export async function hdlRunLive() {
       if (live.stopSent) hdlLiveSend('stop');
       return run.finally(() => hdlNativeJobs.delete(id));
     };
-    live.check = () => {
+    const check = live.check = () => {
       const ok = hdlJoinCheck(oldRecs, live.over.join(''), checkLo, from - 2);
-      const held = live.held.join('') + live.split.take();
+      const held = live.held.join('') + (live.split ? live.split.take() : '');
       live.split = null;
       live.over = live.held = [];
       if (ok) parser.feed(held);
@@ -205,7 +218,7 @@ export async function hdlRunLive() {
       if (liveWave && !waveStopped && !waveBusy && performance.now() - lastWave > 500) {
         waveBusy = true;
         lastWave = performance.now();
-        window.rvNative.vlLiveRead(live.id, 'dump.vcd', HDL_LIVE_VCD_MAX).then((b: { data: any; }) => {
+        window.rvNative.vlLiveRead(live.id, 'dump.vcd', HDL_LIVE_VCD_MAX).then((b: { data: Uint8Array | null } | null) => {
           waveBusy = false;
           if (!b || hdlActivity.live !== live) return;
           // Running faster than a waveform can be followed: the model
@@ -224,21 +237,21 @@ export async function hdlRunLive() {
         }, () => { waveBusy = false; });
       }
     };
-    const replaying = (c: { k: { toLocaleString: () => string; }; } | null) => hdlStatus(!resume ? 'starting live...' : c
+    const replaying = (c: HdlCheckpoint | null) => hdlStatus(!resume ? 'starting live...' : c
       ? 'replaying cycles ' + c.k.toLocaleString() + ' to ' + from.toLocaleString() + '...'
       : 'replaying to cycle ' + from.toLocaleString() + '...', 'busy');
     replaying(ck);
     const timer = setInterval(tick, 100);
-    let r;
+    let r: Awaited<ReturnType<typeof launch>>;
     try {
       r = await launch(ck);
       if (live.split && !r.cancelled) {
         const s = live.split.end();
         if (s.over) live.over.push(s.over);
         if (s.main) live.held.push(s.main);
-        live.check();
+        check();
       }
-      if (live.ckFailed && epoch === hdlRec.epoch) {
+      if (live.ckFailed && ck && epoch === hdlRec.epoch) {
         hdlVlCkFailed(ck.k, compiled.key);
         ck = null;
         live.ckFailed = false;
@@ -256,8 +269,6 @@ export async function hdlRunLive() {
 
     t.budget = t.final ? t.final.cyc : budget;
     t.regBank = compiled.regBank;
-    t.raw = null;
-    t.ckKey = null;
     t.joinKey = joinKey;
     t.vlCks = ckOn() ? hdlVlCkMerge(kept, hdlDecodeCk(r.files)) : null;
     const cutEnd = hdlTrimTrace(t);
@@ -275,18 +286,18 @@ export async function hdlRunLive() {
       t.vcdScope = hdlConfig.waveTop ? 'top' : 'all';
     } else {
       hdlStatus('building the waveform...', 'busy');
-      const wf = Object.assign({}, mem.files, { 'stim.mem': hdlStimFile(), 'uart_rx.mem': hdlRxFile() });
+      const wf: HdlToolFiles = Object.assign({}, mem.files, { 'stim.mem': hdlStimFile(), 'uart_rx.mem': hdlRxFile() });
       // From the newest checkpoint before the window, printing the stretch
       // up to the end, which is checked against the recording.
       const c = ckOn() && t.budget > HDL_VCD_WINDOW ? hdlVlCkPick(t, joinKey, t.budget - HDL_VCD_WINDOW) : null;
-      let s = null;
+      let s: ReturnType<typeof hdlDecodeRun> | null = null;
       if (c) {
-        c.mem.forEach((m: any, i: string) => { wf['ck_load_m' + i + '.mem'] = m; });
+        c.mem.forEach((m, i) => { wf['ck_load_m' + i + '.mem'] = m; });
         s = await hdlRunModel(compiled.model, Object.assign({ 'ck_load.txt': c.txt }, wf),
           hdlPlusargs(t.budget, lvl).concat('+TRACEFROM=' + c.k, '+CKLOAD=' + c.k));
         if (epoch !== hdlRec.epoch) return null;
         const lo = hdlCheckFrom(t, c.k), hi = t.budget - 2;
-        if (hdlJoinCheck(hdlRecordList(t, lo, hi), s.out, lo, hi)) s.vcd = hdlShiftVcd(s.vcd, c.k);
+        if (hdlJoinCheck(hdlRecordList(t, lo, hi), s.out, lo, hi)) s.vcd = s.vcd && hdlShiftVcd(s.vcd, c.k);
         else { hdlVlCkFailed(c.k, compiled.key); t.vlCks = null; s = null; }
       }
       if (!s) s = await hdlRunModel(compiled.model, wf, hdlPlusargs(t.budget, 0));
@@ -316,14 +327,14 @@ export async function hdlRunLive() {
 // Run once the page has loaded every module (main.ts), in page order.
 export function onLiveLoad() {
   if (window.rvNative && window.rvNative.onVlLiveData) {
-    window.rvNative.onVlLiveData((id: any, text: any) => {
+    window.rvNative.onVlLiveData((id: number, text: string) => {
       const live = hdlActivity.live;
       if (!live || live.id !== id) return;
       if (!live.split) { live.parser.feed(text); return; }
       const s = live.split.feed(text);
       if (s.over) live.over.push(s.over);
       if (s.main) live.held.push(s.main);
-      if (s.seen >= live.from + 2) live.check();
+      if (s.seen >= live.from + 2) live.check?.();
     });
   }
   onClockChange(() => hdlLiveSend('hz ' + hdlLiveHz()));

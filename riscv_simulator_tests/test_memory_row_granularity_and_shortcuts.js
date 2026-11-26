@@ -12,6 +12,7 @@
 //      (T = temperature), clamped to the same range as its slider, without
 //      stepping; releasing the letter ends it.
 //   5. → steps and ← steps back.
+//   6. Double-clicking a byte edits its word: Enter writes it, Escape does not.
 
 const fs = require('fs');
 const path = require('path');
@@ -159,6 +160,33 @@ setTimeout(async () => {
     if (win.eval('cpu.pc') !== pc0 || win.eval('cpu.instructionCount') !== 0)
       throw new Error('← should step back');
     console.log('✅ → steps and ← steps back');
+
+    // --- [6] Double-clicking a data byte edits its whole word ---
+    win.eval('resetAll()');
+    win.memGo('data');
+    win.setMemViewMode('byte');
+    const base = win.eval('layout.dataBase') >>> 0;
+    const dbl = () => {
+      const cell = doc.querySelector(`#memView [data-addr="${base}"]`);
+      if (!cell) throw new Error('The data segment should show its first byte');
+      cell.dispatchEvent(new win.MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      const input = doc.getElementById('memWordEditInput');
+      if (!input) throw new Error('Double-clicking a data byte should open the word editor');
+      return input;
+    };
+    const key = (el, k) => el.dispatchEvent(new win.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+    let wordIn = dbl();
+    wordIn.value = '0x11223344';
+    key(wordIn, 'Enter');
+    if (doc.getElementById('memWordEditOverlay')) throw new Error('Enter should close the word editor');
+    if (win.eval(`readMem(${base}, 4) >>> 0`) !== 0x11223344)
+      throw new Error('Enter should write the word, got 0x' + (win.eval(`readMem(${base}, 4) >>> 0`)).toString(16));
+    wordIn = dbl();
+    wordIn.value = '0x55';
+    key(wordIn, 'Escape');
+    if (doc.getElementById('memWordEditOverlay')) throw new Error('Escape should close the word editor');
+    if (win.eval(`readMem(${base}, 4) >>> 0`) !== 0x11223344) throw new Error('Escape should leave the word as it was');
+    console.log('✅ Double-clicking a byte edits its word: Enter writes it, Escape leaves it');
 
     console.log('\n===========================================================');
     console.log('🎉 ALL MEMORY ROW GRANULARITY & SHORTCUT TESTS PASSED!');

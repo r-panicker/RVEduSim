@@ -1,9 +1,10 @@
 // HDL mode's state: the settings, the loaded sources, the recording being
 // stepped through, what has been built for it, and what is running. Each
 // group is one object that every part of HDL mode reads and writes.
-//
-// The recording and the build products are typed where their modules are;
-// until those are modules too they are held as `any`.
+
+import type { HdlCheckpoint, HdlWave } from './checkpoints';
+import type { hdlMemFiles } from './memory-images';
+import type { HdlLiveRun } from './live';
 
 // Cycles a run records, per simulator: long enough to use the inputs while
 // it runs (about 11 s natively with Icarus). A post-synthesis run is
@@ -23,13 +24,23 @@ export const hdlConfig = {
 };
 
 // isPrebuilt: the shipped reference core, whose Wrapper sizes are adjusted to the program.
-export interface HdlSource { name: string; src: string; isPrebuilt?: boolean }
+// folderPath: where a file loaded from a source folder sits in it.
+export interface HdlSource { name: string; src: string; isPrebuilt?: boolean; folderPath?: string }
+
+// A source folder, read through the desktop app's bridge (by path), a File
+// System Access handle, or once from <input webkitdirectory> (a snapshot).
+// pending: the browser wants the read permission granted again; excluded:
+// the files removed from the list, by their path in the folder.
+export interface HdlFolder {
+  kind: 'native' | 'handle' | 'snapshot'; name: string;
+  pending: boolean; excluded: Set<string>;
+  path?: string; handle?: any;
+}
 
 export const hdlSources = {
   files: [] as HdlSource[],
-  // { kind: 'native' | 'handle' | 'snapshot', name, path, handle, ... }
-  folder: null as any,
-  folderReading: null as Promise<unknown> | null,
+  folder: null as HdlFolder | null,
+  folderReading: null as Promise<boolean> | null,
 };
 
 export interface TimedInput { cycle: number; code: number; value: number }
@@ -53,6 +64,12 @@ export interface HdlStep {
 // A recorded run: its instructions, the peripheral records before the first
 // one (all of them without the architectural trace), and what the run that
 // made it was given and produced.
+// A design built for one source set: Icarus's bytecode, or a Verilator
+// model in the desktop app; the register file's path; whether Icarus's
+// checkpoint module (ck) or Verilator's checkpoints (vlCk) are built in.
+export interface HdlCompiled { key: string; vvp: Uint8Array | null; model?: unknown; regBank: string | null; ck: boolean; vlCk?: boolean }
+export type HdlMemImages = ReturnType<typeof hdlMemFiles>;
+
 export interface HdlTimeline { stim: TimedInput[]; rx: TimedByte[] }
 
 export interface HdlTrace {
@@ -70,7 +87,7 @@ export interface HdlTrace {
   timeline?: HdlTimeline;                                  // the inputs it was recorded with
   joinKey?: string;                                        // what a later run must match to join on
   regBank?: string | null;                                 // the register file's path, if found
-  vlCks?: any[] | null;                                    // Verilator's checkpoints, newest first
+  vlCks?: HdlCheckpoint[] | null;                          // Verilator's checkpoints, newest first
   vcdScope?: 'top' | 'all' | null;
 }
 
@@ -91,23 +108,23 @@ export const hdlRec = {
 };
 
 export const hdlBuild = {
-  vvpCache: null as any,           // { key, vvp, regBank }: compiled once per source set
-  memCache: null as any,           // { key, mem }: the memory images last built
+  vvpCache: null as HdlCompiled | null,                      // compiled once per source set
+  memCache: null as { key: unknown[]; mem: HdlMemImages } | null,   // the memory images last built
   dmemBytes: 1 << 14,              // the DMEM window, read back from the Wrapper
-  lastVcd: null as any,            // the waveform: VCD text (Verilator) or a VCD doc (Icarus)
+  lastVcd: null as HdlWave | null, // the waveform: VCD text (Verilator) or a VCD doc (Icarus)
   lastRtlOut: null as string | null,   // output of the latest behavioural run
 };
 
 export const hdlCheckpoints = {
-  set: null as any,                // { key, every, at: Map<cycle, { txt, mem }> }
-  off: null as any,                // { key, why }: sources whose checkpoints are off
-  vlOff: null as any,              // the compiled design whose Verilator checkpoints are off
+  set: null as { key: string; every: number; at: Map<number, { txt: string; mem: string[] }> } | null,
+  off: null as { key: string } | null,     // sources whose checkpoints are off
+  vlOff: null as string | null,            // the compiled design whose Verilator checkpoints are off
 };
 
 export const hdlActivity = {
   running: false,
   jobSeq: 0,                       // id of the engine's next job
-  live: null as any,               // a live Verilator run
+  live: null as HdlLiveRun | null, // a live Verilator run
   chunked: null as { stop: boolean } | null,                // during an Icarus run in chunks
   paced: null as { cyc: number; applied: number } | null,   // a run without the trace at Real time
   play: null as HdlPlayback | null,                         // playback at Real time

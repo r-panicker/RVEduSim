@@ -56,8 +56,12 @@ with no host installed it runs silently. Where HDL mode or the datapath drawing 
 shared action (Step, Reset, refreshing the registers or the toolbar), the shared function calls
 them by name.
 
-`npm run typecheck` runs `tsc` over all of `src/ts` under `strict`; a module that starts with
-`// @ts-nocheck` is not yet typed. The styles are joined in the order of
+`npm run typecheck` runs `tsc` over all of `src/ts` under `strict`. `src/ts/globals.d.ts`
+declares what is on `window` besides the modules' exports (the CodeMirror bundle, which ships
+no declarations and is typed `any`, the desktop app's `rvNative` bridge, test hooks).
+`ui/dom.ts` has `byId<T>()`, an element lookup typed by what the id names in `index.html`, and
+`targetEl()`, the element an event happened on; `errors.ts` has `errorMessage()` for whatever a
+`catch` receives. The styles are joined in the order of
 `src/styles/order.json`. `dist/index.html` names `app.js` and `app.css` with a hash of their
 content (`app.js?v=…`), so a browser never runs a cached copy of an older build.
 

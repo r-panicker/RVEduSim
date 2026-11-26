@@ -1,4 +1,3 @@
-// @ts-nocheck
 // HDL mode: the files and plusargs a run is given, and compiling the
 // sources once per set.
 
@@ -63,7 +62,7 @@ export async function hdlEnsureCompiled(quiet: any) {
   const dbuf = hdlHasDoubleBuffer();
   const state = hdlCkState(hdlConfig.simulator === 'verilator');
   const vl = hdlConfig.simulator === 'verilator';
-  let ck = state.off ? null : state;
+  let ck = 'off' in state ? null : state;
   const build = () => ({
     tb: hdlBuildTestbench({ regBankPath: rb }),
     ck: ck ? hdlBuildCkModule(ck, rb, dbuf, vl) : ''
@@ -74,7 +73,7 @@ export async function hdlEnsureCompiled(quiet: any) {
     if (!quiet) hdlLog('Reusing the compiled design (sources unchanged).', 'sys');
     return hdlBuild.vvpCache;
   }
-  if (state.off) hdlLog('Checkpoints are off for these sources (' + state.off +
+  if ('off' in state) hdlLog('Checkpoints are off for these sources (' + state.off +
     '), so an input change replays the run from reset.', 'sys');
 
   if (vl) {
