@@ -408,7 +408,7 @@ async function compileAndAssembleC(cSourceText) {
   const asmText = combinedItems.map(item => item.text).join('\n');
   lastGeneratedAsm = asmText;
 
-  const mc = assemble(asmText, layout.baseAddress);
+  const mc = assemble(asmText, layout.baseAddress, { language: editorLanguageMode, report: log });
   if (!mc) {
     log('Failed to assemble Godbolt emitted assembly.', 'error');
     setStatus('Assembly Error', 'error');
@@ -539,17 +539,17 @@ function stepOnce() {
   const prePeriph = capturePeriphState();
   const preRegs = Int32Array.from(cpu.regs);
   const preFp = fpBits.slice();
-  const preReservation = lrReservation;
+  const preReservation = cpu.reservation;
   const prePc = cpu.pc;
   const cycBefore = cpu.totalCycles;
   const instrBefore = cpu.instructionCount;
   const startSourceLine = sourceLineForPc(cpu.pc);
   let line = startSourceLine;   // of the last instruction executed
   let fault = null;
-  const prePipe = pipeMode ? pipeSnapshot() : null;
+  const prePipe = pipeline.on ? pipeSnapshot() : null;
   let pipeSig = null;
   try {
-    if (pipeMode) {
+    if (pipeline.on) {
       pipeSig = run.statementStepping ? pipeStatementStep() : pipeStep();
     } else if (run.statementStepping && startSourceLine > 0) {
       let stepsTaken = 0;
@@ -589,7 +589,7 @@ function stepOnce() {
   run.currentLine = sourceLineForPc(cpu.pc);
   highlightCurrentLine();
   updateRegisters(); updateMemoryView(); updateMachineCode(); updateDisassembly(); updateStats();
-  if (pipeMode) {
+  if (pipeline.on) {
     const ev = pipeEvents(pipeSig);
     if (pipeDone()) {
       programFinished = true;
@@ -598,12 +598,12 @@ function stepOnce() {
       log(`Program completed after ${cpu.totalCycles} cycles, ${cpu.instructionCount} instructions.`, 'success');
       setStatus('Program finished', 'success');
     } else if (run.statementStepping && cpu.totalCycles - cycBefore > 1) {
-      setStatus(`Statement step over line ${pipeStmtLine}: ${cpu.totalCycles - cycBefore} cycles, now at cycle ${cpu.totalCycles}`);
+      setStatus(`Statement step over line ${pipeline.stmtLine}: ${cpu.totalCycles - cycBefore} cycles, now at cycle ${cpu.totalCycles}`);
     } else {
       setStatus(`Cycle ${cpu.totalCycles}` + (ev ? ': ' + ev : ''));
     }
     log(run.statementStepping && cpu.totalCycles - cycBefore > 1
-      ? `Cycles ${cycBefore + 1}-${cpu.totalCycles}: statement at line ${pipeStmtLine} retired (${instructionsExecuted} instructions)`
+      ? `Cycles ${cycBefore + 1}-${cpu.totalCycles}: statement at line ${pipeline.stmtLine} retired (${instructionsExecuted} instructions)`
       : `Cycle ${cpu.totalCycles}` + (ev ? ': ' + ev : ''), 'info');
   } else if (run.statementStepping && instructionsExecuted > 1) {
     setStatus(`Statement step over line ${startSourceLine} — ${instructionsExecuted} instruction` +
@@ -637,7 +637,7 @@ function stepBack() {
   restorePeriphState(st.periph);
   cpu.regs.set(st.regs);
   fpBits.set(st.fp);
-  lrReservation = st.reservation;
+  cpu.reservation = st.reservation;
   cpu.pc = st.pc;
   if (st.pipe) { pipeRestore(st.pipe); programFinished = false; }
   run.currentLine = st.line;
@@ -876,7 +876,7 @@ function runProgram() {
       setStatus('Program finished', 'success');
     } else if (stopReason === 'breakpoint') {
       programFinished = false;
-      if (pipeMode && pipe.E) setStatus(`Stopped at breakpoint (line ${sourceLineForPc(pipe.E.pc)}, in Execute)`, 'warn');
+      if (pipeline.on && pipeline.regs.E) setStatus(`Stopped at breakpoint (line ${sourceLineForPc(pipeline.regs.E.pc)}, in Execute)`, 'warn');
       else setStatus(`Stopped at breakpoint (line ${run.currentLine})`, 'warn');
     } else if (stopReason === 'paused') {
       programFinished = false;
@@ -918,7 +918,7 @@ function runProgram() {
       // Pipelined, a count is a cycle, and a breakpoint stops the run
       // once its instruction has entered Execute: from there on nothing
       // can flush it.
-      if (pipeMode) {
+      if (pipeline.on) {
         try {
           pipeStep();
         } catch (e) {
@@ -930,8 +930,8 @@ function runProgram() {
         count++;
         batchCount++;
         if (!run.running || pipeDone()) { stopReason = 'exit'; break; }
-        if (hasBreakpoints && pipe.E) {
-          const line = sourceLineForPc(pipe.E.pc);
+        if (hasBreakpoints && pipeline.regs.E) {
+          const line = sourceLineForPc(pipeline.regs.E.pc);
           if (line >= 1 && run.breakpoints.has(line)) {
             log(`Breakpoint hit at line ${line}, now in Execute`, 'warn');
             stopReason = 'breakpoint';
@@ -1010,8 +1010,8 @@ function toggleRunPause() {
   // In HDL mode the Run button drives the Verilog engine instead of the
   // JavaScript model. Pause ends a live Verilator run, or a chunked Icarus
   // run after its current chunk, or else playback of the recording.
-  if (simEngineMode === 'hdl') {
-    if (hdlLive) { hdlLiveStop(); return; }
+  if (ui.engine === 'hdl') {
+    if (hdlActivity.live) { hdlLiveStop(); return; }
     if (hdlChunkedStop()) return;
     if (hdlStopPlay()) {
       setStatus('HDL playback paused at cycle ' + cpu.totalCycles + ' - Run carries on', 'info');
@@ -1075,7 +1075,7 @@ function resetAll() {
     highlightCurrentLine();
     setStatus('Reset');
     let mc = [];
-    try { if (editor.value.trim()) mc = assemble(editor.value); } catch (e) { }
+    try { if (editor.value.trim()) mc = assemble(editor.value, undefined, { language: editorLanguageMode, report: log }); } catch (e) { }
     highlightFirstLine(mc);
   }
   updateRegisters();

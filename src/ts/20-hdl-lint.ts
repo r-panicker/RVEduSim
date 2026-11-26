@@ -6,25 +6,6 @@
 // at all - after synthesis. Everything reported carries a file and a line,
 // and nothing here blocks a run.
 
-// Blank out comments and string literals so a keyword inside either is
-// never mistaken for code, while keeping every byte offset intact so
-// line numbers stay true.
-function hdlStripNoise(src) {
-  let out = src.split('');
-  let i = 0, n = src.length;
-  const blank = (a, b) => { for (let k = a; k < b && k < n; k++) if (out[k] !== '\n') out[k] = ' '; };
-  while (i < n) {
-    const two = src.substr(i, 2);
-    if (two === '//') { const e = src.indexOf('\n', i); blank(i, e < 0 ? n : e); i = e < 0 ? n : e; }
-    else if (two === '/*') { const e = src.indexOf('*/', i + 2); blank(i, e < 0 ? n : e + 2); i = e < 0 ? n : e + 2; }
-    else if (src[i] === '"') {
-      let j = i + 1;
-      while (j < n && src[j] !== '"' && src[j] !== '\n') j += (src[j] === '\\' ? 2 : 1);
-      blank(i, j + 1); i = j + 1;
-    } else i++;
-  }
-  return out.join('');
-}
 
 const HDL_LINT_OK_TASKS = /^\$(readmemh|readmemb|signed|unsigned|clog2|bits|size|left|right|high|low|increment|dimensions|fatal|error|warning|info)\b/;
 
@@ -141,7 +122,7 @@ function hdlLintFile(name, rawSrc) {
 // Lint every uploaded source except anything that looks like a testbench.
 function hdlSynthLint() {
   const out = [];
-  for (const f of hdlFiles) {
+  for (const f of hdlSources.files) {
     if (/(^|[_\-])tb\.v$|_tb\.|testbench/i.test(f.name)) continue;
     out.push.apply(out, hdlLintFile(f.name, f.src));
   }
@@ -158,11 +139,11 @@ function hdlSynthLint() {
 // Report to the console. Called when sources are loaded, so the feedback
 // arrives before the first run rather than after it.
 function hdlReportLint(quietWhenClean) {
-  if (!hdlFiles.length) return 0;
+  if (!hdlSources.files.length) return 0;
   const hits = hdlSynthLint();
   if (!hits.length) {
     if (!quietWhenClean) {
-      hdlLog('Synthesis lint: nothing to flag in ' + hdlFiles.length + ' file(s).', 'sys');
+      hdlLog('Synthesis lint: nothing to flag in ' + hdlSources.files.length + ' file(s).', 'sys');
     }
     return 0;
   }

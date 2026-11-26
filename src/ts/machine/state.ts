@@ -18,11 +18,20 @@ export const cpu = {
   lastChangedReg: -1,
   lastChangedMem: [] as MemWrite[],
   lastExecutedRd: -1,
+  // The address lr.w reserved, cleared by the sc.w that uses it. With one
+  // hart nothing else can break a reservation, so sc.w fails only when no
+  // lr.w reserved that address since the last sc.w.
+  reservation: null as number | null,
 };
 
 // Sparse memory: 64 KB pages, created on first write (see memory-map.ts).
 export const memory = {
   pages: new Map<number, Uint8Array>(),
+  // The next address sbrk (ecall 9) hands out; set past .data on reset.
+  heapPointer: 0x24000,
+  // Set while a write comes from an edit in the Memory panel, which is not
+  // the program and so not racing the OLED's present.
+  panelEdit: false,
 };
 
 // Where each segment is. Settable in the Linker settings; the stack starts
@@ -40,9 +49,16 @@ export const layout = {
 // from. Data directives and pseudo-instructions add their own fields.
 export interface MachineLine {
   address: number;
-  bytes?: number[];
-  instruction?: number;
-  line: number;
+  bytes?: number[] | null;     // null for a line that failed to assemble
+  line: number;                // 1-based source line
+  text?: string;               // the source as written
+  asmLine?: string;
+  native?: string;             // the Native column: the instruction as encoded
+  immFrom?: number;            // where the immediate sits in `native`
+  immTo?: number;
+  imm?: unknown;               // the immediate's other readings (asm/assembler.ts ImmInfo)
+  isPseudo?: boolean;
+  error?: string;
   [key: string]: unknown;
 }
 
@@ -52,6 +68,8 @@ export const program = {
   labels: {} as Record<string, number>,
   symbolTable: {} as Record<string, number>,  // .equ constants
   assembled: false,
+  // Source line of each instruction address, for the highlight.
+  pcToLine: new Map<number, number>(),
   // Instruction words by which the last assembly overran the code segment,
   // so the final status can say so rather than being overwritten by it.
   codeOverflowWords: 0,
@@ -74,6 +92,15 @@ export const run = {
   maxInstructions: 100000000,
 };
 
+// One OLED write a step made, for Back: the whole page a present copied
+// over, or the four bytes of one pixel.
+export interface OledPixelLogEntry {
+  page: number;
+  full?: Uint8Array;
+  idx?: number;
+  old?: Uint8Array;
+}
+
 // Back-stepping. Each entry undoes one instruction: the processor state
 // before it and the memory and pixel writes it made.
 export const stepHistory = {
@@ -85,7 +112,7 @@ export const stepHistory = {
   // Peripheral writes never reach the byte journal. The scalars are
   // snapshotted whole once per step; the OLED pages are too big for that,
   // so the bytes a step touches are journalled here instead.
-  pixelLog: [] as any[],
+  pixelLog: [] as OledPixelLogEntry[],
 };
 
 // The board's LEDs, 7-segment display, switches and buttons.
@@ -171,4 +198,5 @@ export const ui = {
   settingsTab: 'compiler',
   disasmView: 'word' as 'word' | 'bytes',   // a 32-bit word per 4 bytes, or separate bytes
   regDecSigned: true,                        // the Registers panel's Dec column
+  engine: 'js' as 'js' | 'hdl',              // which engine runs the program
 };

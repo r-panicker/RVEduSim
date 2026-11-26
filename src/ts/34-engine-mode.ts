@@ -4,12 +4,12 @@
 
 function setSimEngineMode(mode) {
   const want = (mode === 'hdl') ? 'hdl' : 'js';
-  if (want === simEngineMode) return;
+  if (want === ui.engine) return;
 
   // An HDL run cannot be paused, so the switch waits rather than landing
   // the result in the wrong engine. The toggle is disabled while this
   // is true.
-  if (hdlRunning) {
+  if (hdlActivity.running) {
     setStatus('Wait for the HDL simulation to finish before switching engines', 'warn');
     return;
   }
@@ -23,16 +23,16 @@ function setSimEngineMode(mode) {
         (want === 'hdl' ? 'HDL' : 'JavaScript') + ' engine.', 'info');
   }
 
-  simEngineMode = want;
+  ui.engine = want;
   const jsBtn = document.getElementById('engBtnJs');
   const hdlBtn = document.getElementById('engBtnHdl');
-  if (jsBtn) jsBtn.classList.toggle('active', simEngineMode === 'js');
-  if (hdlBtn) hdlBtn.classList.toggle('active', simEngineMode === 'hdl');
-  document.body.classList.toggle('hdl-mode', simEngineMode === 'hdl');
-  if (simEngineMode === 'hdl') {
+  if (jsBtn) jsBtn.classList.toggle('active', ui.engine === 'js');
+  if (hdlBtn) hdlBtn.classList.toggle('active', ui.engine === 'hdl');
+  document.body.classList.toggle('hdl-mode', ui.engine === 'hdl');
+  if (ui.engine === 'hdl') {
     // Nothing can happen in HDL mode without the sources, so ask for them
     // straight away rather than waiting for Run to fail.
-    if (!hdlFiles.length) {
+    if (!hdlSources.files.length) {
       openSettingsModal('simulator');
       setStatus('HDL mode needs your Verilog sources - drop them here to begin', 'info');
     }
@@ -40,9 +40,9 @@ function setSimEngineMode(mode) {
     // coming back does not mean re-running the hardware from reset. Land
     // on whichever instruction the other engine reached, so the two hand
     // over at the same point in the program.
-    if (hdlTrace && hdlTrace.steps.length && program.machineCode && program.machineCode.length) {
-      hdlSeek(Math.max(0, Math.min(cpu.instructionCount - (hdlTrace.offset || 0), hdlTrace.steps.length)));
-      setStatus('HDL mode - resumed the recording at instruction ' + hdlIdx, 'info');
+    if (hdlRec.trace && hdlRec.trace.steps.length && program.machineCode && program.machineCode.length) {
+      hdlSeek(Math.max(0, Math.min(cpu.instructionCount - (hdlRec.trace.offset || 0), hdlRec.trace.steps.length)));
+      setStatus('HDL mode - resumed the recording at instruction ' + hdlRec.idx, 'info');
     } else {
       setStatus('HDL mode - Run and Step execute your Verilog through ' + hdlSimulatorName(), 'info');
     }
@@ -121,7 +121,7 @@ function initGlobalVerilogDrop() {
     e.preventDefault();
     e.stopPropagation();
     hdlAddFiles(files).then(() => {
-      if (simEngineMode !== 'hdl') setSimEngineMode('hdl');
+      if (ui.engine !== 'hdl') setSimEngineMode('hdl');
       setStatus('Loaded ' + files.length + ' Verilog file(s)', 'success');
     });
   });

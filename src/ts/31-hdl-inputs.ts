@@ -10,7 +10,7 @@
 // new recording reaches one Cycles past it rather than all the way back
 // to where the old one ended.
 async function hdlResimulate(keepIdx) {
-  const budget = Math.min(hdlTrace.budget, hdlCurrentCycle() + hdlCycleBudget);
+  const budget = Math.min(hdlRec.trace.budget, hdlCurrentCycle() + hdlConfig.cycleBudget);
   const t = await hdlBuildTrace(budget, { quiet: true });
   if (!t) return;
   hdlSeek(Math.min(keepIdx, t.steps.length));
@@ -19,16 +19,15 @@ async function hdlResimulate(keepIdx) {
 // A second input moved while the first is still re-simulating must not be
 // dropped, or the recording would stop matching the switches on screen.
 // The change goes onto the timeline either way; the replay is coalesced.
-let hdlPendingResim = false;
 
 function hdlQueueResim(what) {
-  if (hdlRunning) { hdlPendingResim = true; return; }
-  const at = hdlIdx;
+  if (hdlActivity.running) { hdlRec.pendingResim = true; return; }
+  const at = hdlRec.idx;
   hdlWithBusy(async () => {
     await hdlResimulate(at);
-    while (hdlPendingResim) {
-      hdlPendingResim = false;
-      await hdlResimulate(hdlIdx);
+    while (hdlRec.pendingResim) {
+      hdlRec.pendingResim = false;
+      await hdlResimulate(hdlRec.idx);
     }
     hdlStatus(what, 'ok');
     return null;
@@ -36,25 +35,25 @@ function hdlQueueResim(what) {
 }
 
 function hdlOnInputChanged(code, value) {
-  if (simEngineMode !== 'hdl') return;
-  if (hdlLive) {
+  if (ui.engine !== 'hdl') return;
+  if (hdlActivity.live) {
     hdlLiveSend('in ' + code + ' ' + (value >>> 0));
-    hdlStimmedInRun.add(code);
+    hdlRec.stimmedInRun.add(code);
     return;
   }
-  if (!hdlTrace) return;
+  if (!hdlRec.trace) return;
   const cyc = hdlCurrentCycle();
-  if (hdlRunning) hdlStimmedInRun.add(code);
+  if (hdlActivity.running) hdlRec.stimmedInRun.add(code);
   // One change per input per cycle; a later edit at the same point
   // replaces the earlier one rather than stacking up.
-  hdlStim = hdlStim.filter(e => !(e.cycle === cyc && e.code === code));
-  hdlStim.push({ cycle: cyc, code: code, value: value >>> 0 });
+  hdlRec.stim = hdlRec.stim.filter(e => !(e.cycle === cyc && e.code === code));
+  hdlRec.stim.push({ cycle: cyc, code: code, value: value >>> 0 });
   hdlQueueResim('re-simulated from cycle ' + cyc + ' with the new input');
 }
 
 // The bytes are already on the timeline by the time this runs; all that
 // is left is to replay the run so the hardware sees them.
 function hdlOnUartInput(count) {
-  if (simEngineMode !== 'hdl' || !hdlTrace || !count) return;
+  if (ui.engine !== 'hdl' || !hdlRec.trace || !count) return;
   hdlQueueResim('re-simulated with ' + count + ' more UART byte(s)');
 }

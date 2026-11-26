@@ -62,7 +62,7 @@ const HDL_VL_KEEP = 2000000;
 function hdlRestoreBase(b) {
   loadProgram(program.machineCode);
   cpu.regs.set(b.regs);
-  hdlRegKnown.set(b.regKnown);
+  hdlRec.regKnown.set(b.regKnown);
   for (let i = 0; i < b.mem.length; i++) setMemByte(layout.dataBase + i, b.mem[i]);
   hdlResetPeripheralState();
   restorePeriphState(b.periph);
@@ -74,9 +74,9 @@ function hdlRestoreBase(b) {
 }
 // The state the page holds now, as a starting point for seeks.
 function hdlCaptureBase(cyc, acks) {
-  const mem = new Uint8Array(hdlDmemBytes);
+  const mem = new Uint8Array(hdlBuild.dmemBytes);
   for (let i = 0; i < mem.length; i++) mem[i] = getMemByte(layout.dataBase + i);
-  return { cyc, regs: cpu.regs.slice(), regKnown: hdlRegKnown.slice(), mem,
+  return { cyc, regs: cpu.regs.slice(), regKnown: hdlRec.regKnown.slice(), mem,
            periph: capturePeriphState(), tx: uart.txBytes.slice(), txBuf: uart.txText,
            oled: oled.pages.map(p => p.slice()), acks };
 }
@@ -90,15 +90,15 @@ function hdlTrimTrace(t) {
   const want = last - HDL_VL_KEEP;
   let lo = 0, hi = steps.length;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (steps[mid].cyc < want) lo = mid + 1; else hi = mid; }
-  const cut = lo, was = hdlIdx;
+  const cut = lo, was = hdlRec.idx;
   hdlSeek(cut);
-  t.base = hdlCaptureBase(steps[cut].cyc, hdlSeekMark.acks);
+  t.base = hdlCaptureBase(steps[cut].cyc, hdlRec.seekMark.acks);
   t.offset = (t.offset || 0) + cut;
   t.steps = steps.slice(cut);
   t.pre = [];
   t.preAcks = 0;
-  hdlIdx = 0;
-  hdlSeekMark = { trace: t, idx: 0, acks: t.base.acks };
+  hdlRec.idx = 0;
+  hdlRec.seekMark = { trace: t, idx: 0, acks: t.base.acks };
   hdlSeek(Math.max(0, was - cut), true);
   return cut;
 }
@@ -120,7 +120,7 @@ function hdlCutTrace(t, c) {
   t.pre = before(t.pre, e => parseInt(e[1][0], 10));
   t.final = null;
   t.next = null;
-  hdlSeekMark = null;
+  hdlRec.seekMark = null;
   return t;
 }
 
@@ -128,29 +128,28 @@ function hdlCutTrace(t, c) {
 // image; MMIO writes at the same port are peripheral activity and arrive
 // as their own events.
 function hdlApplyMemWrite(addr, be, data) {
-  if (addr < layout.dataBase || addr >= layout.dataBase + hdlDmemBytes) return;
+  if (addr < layout.dataBase || addr >= layout.dataBase + hdlBuild.dmemBytes) return;
   const word = addr & ~3;
   for (let i = 0; i < 4; i++)
     if (be & (1 << i)) setMemByte(word + i, (data >>> (i * 8)) & 0xFF);
 }
 
 function hdlCurrentCycle() {
-  if (!hdlTrace) return 0;
-  const s = hdlTrace.steps;
-  if (hdlIdx < s.length) return s[hdlIdx].cyc;
-  if (hdlPaced && !s.length) return Math.floor(hdlPaced.cyc);
-  return hdlTrace.final ? hdlTrace.final.cyc : (s.length ? s[s.length - 1].cyc : 0);
+  if (!hdlRec.trace) return 0;
+  const s = hdlRec.trace.steps;
+  if (hdlRec.idx < s.length) return s[hdlRec.idx].cyc;
+  if (hdlActivity.paced && !s.length) return Math.floor(hdlActivity.paced.cyc);
+  return hdlRec.trace.final ? hdlRec.trace.final.cyc : (s.length ? s[s.length - 1].cyc : 0);
 }
 
-let hdlSeekMark = null;   // { trace, idx, acks } as the last seek left them
 // How many of the events of a recording without the trace are shown: all,
 // or, while a run is held to the paced clock, those the clock has reached.
 function hdlPreShown() {
-  const pre = hdlTrace.pre;
-  if (!hdlPaced || hdlTrace.steps.length) return pre.length;
+  const pre = hdlRec.trace.pre;
+  if (!hdlActivity.paced || hdlRec.trace.steps.length) return pre.length;
   let n = 0;
-  while (n < pre.length && parseInt(pre[n][1][0], 10) <= hdlPaced.cyc) n++;
-  return hdlPaced.applied = n;
+  while (n < pre.length && parseInt(pre[n][1][0], 10) <= hdlActivity.paced.cyc) n++;
+  return hdlActivity.paced.applied = n;
 }
 
 // Position `idx` means "idx instructions have completed"; the state
@@ -161,60 +160,60 @@ function hdlPreShown() {
 // light: only what a running simulation shows (peripherals, stats, the
 // waveform), not the line, registers and memory, which catch up when it stops.
 function hdlSeek(idx, forward, light) {
-  if (!hdlTrace) return;
-  const steps = hdlTrace.steps;
+  if (!hdlRec.trace) return;
+  const steps = hdlRec.trace.steps;
   idx = Math.max(0, Math.min(idx, steps.length));
 
   let k0 = 0, acks;
-  const mark = hdlSeekMark;
-  if (forward && mark && mark.trace === hdlTrace && mark.idx === hdlIdx && idx >= hdlIdx) {
-    k0 = hdlIdx;
+  const mark = hdlRec.seekMark;
+  if (forward && mark && mark.trace === hdlRec.trace && mark.idx === hdlRec.idx && idx >= hdlRec.idx) {
+    k0 = hdlRec.idx;
     acks = mark.acks;
     // The last step shown can have gained what the run joined on added
     // to it.
     const ls = mark.tail && steps[k0 - 1];
     if (ls) {
-      for (const w of ls.regw.slice(mark.tail[0])) { cpu.regs[w[0]] = w[1] | 0; hdlRegKnown[w[0]] = 1; }
+      for (const w of ls.regw.slice(mark.tail[0])) { cpu.regs[w[0]] = w[1] | 0; hdlRec.regKnown[w[0]] = 1; }
       for (const w of ls.memw.slice(mark.tail[1])) hdlApplyMemWrite(w[0], w[1], w[2]);
       for (const e of ls.per.slice(mark.tail[2])) hdlApplyPer(e[0], e[1]);
       acks += (ls.acks || 0) - mark.tail[3];
     }
-  } else if (hdlTrace.base) {
+  } else if (hdlRec.trace.base) {
     // Without the architectural trace, the events after the snapshot
     // are all in pre.
-    hdlRestoreBase(hdlTrace.base);
+    hdlRestoreBase(hdlRec.trace.base);
     const n = hdlPreShown();
-    for (let i = 0; i < n; i++) hdlApplyPer(hdlTrace.pre[i][0], hdlTrace.pre[i][1]);
-    acks = hdlTrace.base.acks + (hdlTrace.preAcks || 0);
+    for (let i = 0; i < n; i++) hdlApplyPer(hdlRec.trace.pre[i][0], hdlRec.trace.pre[i][1]);
+    acks = hdlRec.trace.base.acks + (hdlRec.trace.preAcks || 0);
   } else {
     loadProgram(program.machineCode);
-    hdlRegKnown.fill(0);
+    hdlRec.regKnown.fill(0);
     hdlResetPeripheralState();
     const n = hdlPreShown();
-    for (let i = 0; i < n; i++) hdlApplyPer(hdlTrace.pre[i][0], hdlTrace.pre[i][1]);
-    acks = hdlTrace.preAcks || 0;
+    for (let i = 0; i < n; i++) hdlApplyPer(hdlRec.trace.pre[i][0], hdlRec.trace.pre[i][1]);
+    acks = hdlRec.trace.preAcks || 0;
   }
 
   let changed = -1;
   for (let k = k0; k < idx; k++) {
     const s = steps[k];
-    for (const w of s.regw) { cpu.regs[w[0]] = w[1] | 0; hdlRegKnown[w[0]] = 1; }
+    for (const w of s.regw) { cpu.regs[w[0]] = w[1] | 0; hdlRec.regKnown[w[0]] = 1; }
     if (k === idx - 1 && s.regw.length) changed = s.regw[s.regw.length - 1][0];
     for (const w of s.memw) hdlApplyMemWrite(w[0], w[1], w[2]);
     for (const e of s.per) hdlApplyPer(e[0], e[1]);
     acks += s.acks || 0;
   }
 
-  hdlIdx = idx;
+  hdlRec.idx = idx;
   const ls = steps[idx - 1];
-  hdlSeekMark = { trace: hdlTrace, idx, acks,
+  hdlRec.seekMark = { trace: hdlRec.trace, idx, acks,
                   tail: ls ? [ls.regw.length, ls.memw.length, ls.per.length, ls.acks || 0] : null };
   cpu.lastChangedReg = changed;
   cpu.pc = idx < steps.length ? steps[idx].pc
-     : hdlPaced && !steps.length ? cpu.pc
-     : (hdlTrace.next !== null && hdlTrace.next !== undefined ? hdlTrace.next
+     : hdlActivity.paced && !steps.length ? cpu.pc
+     : (hdlRec.trace.next !== null && hdlRec.trace.next !== undefined ? hdlRec.trace.next
      : (steps.length ? steps[steps.length - 1].pc : layout.baseAddress));
-  cpu.instructionCount = (hdlTrace.offset || 0) + idx;
+  cpu.instructionCount = (hdlRec.trace.offset || 0) + idx;
   cpu.totalCycles = hdlCurrentCycle();
   run.currentLine = sourceLineForPc(cpu.pc);
 
@@ -224,7 +223,7 @@ function hdlSeek(idx, forward, light) {
   // one and the rest are still on the PC's side. This is what makes
   // RX_VALID fall back to 0 once a byte is read, and come back when you
   // step backwards over that read.
-  const arrived = hdlRx.filter(e => e.cycle <= cpu.totalCycles).slice(acks);
+  const arrived = hdlRec.rx.filter(e => e.cycle <= cpu.totalCycles).slice(acks);
   uart.rxFull = arrived.length > 0;
   uart.rxByte = uart.rxFull ? (arrived[0].byte & 0xFF) : 0;
   uart.pending = arrived.slice(1).map(e => e.byte & 0xFF);

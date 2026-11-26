@@ -100,16 +100,8 @@ function hdlSyncReferenceWrapperDepths() {
 // its hierarchical path has to be found rather than assumed. Only the
 // ARRAY is ever named - the trace detects writes by comparing against a
 // shadow copy, so renaming the register file's ports cannot break it.
-function hdlModuleBody(src, name) {
-  const re = new RegExp('\\bmodule\\s+' + name + '\\b', 'g');
-  const m = re.exec(src || '');
-  if (!m) return null;
-  const end = src.indexOf('endmodule', m.index);
-  return src.slice(m.index, end < 0 ? src.length : end);
-}
-
 function hdlAllSources() {
-  return hdlFiles.map(f => f.src).join('\n');
+  return hdlSources.files.map(f => f.src).join('\n');
 }
 
 // A 32-entry array of 32-bit regs is what every RISC-V register file

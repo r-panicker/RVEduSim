@@ -141,7 +141,7 @@ let clockLedTimer = null;
 let clockLedLit = true;
 function updateClockLed() {
   const led = document.getElementById('led8');
-  const busy = run.running || !!(hdlLive || hdlChunked || hdlPlay);
+  const busy = run.running || !!(hdlActivity.live || hdlActivity.chunked || hdlActivity.play);
   if (busy) {
     const hz = clock.pace === 'real' ? cpuHz() : Infinity;
     clockLedLit = hz <= 8 ? Math.floor(performance.now() / 1000 * hz * 2) % 2 === 0

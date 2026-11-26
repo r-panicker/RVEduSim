@@ -14,15 +14,10 @@ import {
 } from './memory-map';
 import { accel, board, cpu, oled, uart } from './state';
 
-// The UART and OLED models (06-simulator.ts) and the 7-segment display
-// (10-peripherals.ts).
-declare function uartNow(): number;
-declare function uartTransmit(byte: number): void;
-declare function oledTrigger(mode: number): void;
-declare function oledDataWrite(offset: number, value: number, size: number): void;
-declare function oledPresent(): void;
-declare function sevsegValue(): number;
-declare function isMMIOAddr(addr: number): boolean;
+import { isMMIOAddr } from './memory';
+import { oledDataWrite, oledPresent, oledTrigger } from './oled';
+import { sevsegValue } from './peripherals';
+import { uartNow, uartTransmit } from './uart';
 
 export type PanelSection = 'uart' | 'oled' | 'accel' | 'ledDip' | 'pb' | 'sevseg';
 

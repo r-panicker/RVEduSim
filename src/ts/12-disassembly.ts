@@ -128,8 +128,8 @@ function updateDisassembly() {
   // under it, and only the first instruction sits exactly on it.
   let blockLabels = '';
   const stageAt = new Map();
-  if (pipeMode && simEngineMode !== 'hdl' && pipe) {
-    ['W', 'M', 'E', 'D'].forEach(k => { if (pipe[k]) stageAt.set(pipe[k].pc >>> 0, k); });
+  if (pipeline.on && ui.engine !== 'hdl' && pipeline.regs) {
+    ['W', 'M', 'E', 'D'].forEach(k => { if (pipeline.regs[k]) stageAt.set(pipeline.regs[k].pc >>> 0, k); });
     if (!programFinished) stageAt.set(cpu.pc >>> 0, (stageAt.has(cpu.pc >>> 0) ? stageAt.get(cpu.pc >>> 0) + ' ' : '') + 'F');
   }
   for (const item of program.machineCode) {

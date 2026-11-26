@@ -1,7 +1,5 @@
-// @ts-nocheck
-// ================================================================
-// Testbench generation
-// ================================================================
+// The testbench the HDL engine wraps around the student's Wrapper.
+//
 // The generated testbench is program-independent: it contains no
 // assembled code, no switch settings and no input data. Everything is
 // supplied at RUN time through plusargs and through files in the
@@ -11,22 +9,44 @@
 // Emitted events are tagged `@@<kind>` so they can be told apart from
 // whatever the student's own $display statements print.
 
+import { ABI_NAMES } from '../isa/instructions';
+import type { TimedByte, TimedInput } from './state';
+import { hdlFindWrapper, hdlHex32, hdlModuleBody } from './verilog';
+
+// The register bank's path: the Settings override, or what discovery finds
+// (21-hdl-memory-images.ts).
+declare function hdlRegBankPath(): string | null;
+
+// One run's inputs, baked into a testbench that is downloaded to run on its
+// own.
+export interface TestbenchRun {
+  cycles: number;
+  base: { dip: number; pb: number; accel: number; adrdy: boolean };
+  stim: TimedInput[];
+  rx: TimedByte[];
+}
+
+export interface TestbenchOptions {
+  run?: TestbenchRun | null;
+  regBankPath?: string | null;
+  doubleBuffer?: boolean;
+}
+
 // Double buffering is optional: it needs two extra Wrapper ports, and a
 // Wrapper without them has to keep working. Both must be present -
 // half the pair is a mistake, not a configuration.
-function hdlHasDoubleBuffer(src) {
+export function hdlHasDoubleBuffer(src?: string): boolean {
   const w = (src === undefined) ? (hdlFindWrapper() || {}).src : src;
   if (!w) return false;
   const head = hdlModuleBody(w, 'Wrapper') || w;
   return /\bOLED_Swap\b/.test(head) && /\bOLED_SwapPending\b/.test(head);
 }
 
-function hdlBuildTestbench(opts) {
-  opts = opts || {};
+export function hdlBuildTestbench(opts: TestbenchOptions = {}): string {
   // opts.run bakes one run's inputs in as the defaults (the download);
   // without it every setting arrives as a plusarg (the page's own runs).
   const run = opts.run || null;
-  const h32 = v => "32'h" + hdlHex32(v);
+  const h32 = (v: number) => "32'h" + hdlHex32(v);
   const runInit = run
     ? '\n  // The inputs recorded for this run, at the cycle each took effect.\n  initial begin\n' +
       run.stim.map((e, i) => `    stim_mem[${3 * i}] = ${h32(e.cycle)}; stim_mem[${3 * i + 1}] = ${h32(e.code)}; ` +

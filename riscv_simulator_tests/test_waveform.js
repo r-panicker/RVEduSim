@@ -500,7 +500,7 @@ setTimeout(async () => {
       // Hand the page the VCD the run just produced, so the viewport maths
       // runs against a real end cycle rather than an invented one.
       win.__vcdUnderTest = vcd;
-      win.eval('hdlLastVcd = window.__vcdUnderTest; waveEnsureParsed();');
+      win.eval('hdlBuild.lastVcd = window.__vcdUnderTest; waveEnsureParsed();');
       const st = () => win.getWaveState();
       check('the page parsed the VCD it was handed', !!st().parsed);
 

@@ -95,18 +95,18 @@ function hdlPlusargs(budget, traceLvl) {
   const plus = [
     '+CYCLES=' + budget,
     '+TRACE=' + traceLvl,
-    '+DIP=' + (hdlBase.dip & 0xFFFF).toString(16),
-    '+PB=' + (hdlBase.pb & 0x7).toString(16),
-    '+ACCEL=' + hdlHex32(hdlBase.accel),
-    '+ADRDY=' + (hdlBase.adrdy ? '1' : '0'),
-    '+NSTIM=' + hdlStim.length,
-    '+NRX=' + hdlRx.length
+    '+DIP=' + (hdlRec.base.dip & 0xFFFF).toString(16),
+    '+PB=' + (hdlRec.base.pb & 0x7).toString(16),
+    '+ACCEL=' + hdlHex32(hdlRec.base.accel),
+    '+ADRDY=' + (hdlRec.base.adrdy ? '1' : '0'),
+    '+NSTIM=' + hdlRec.stim.length,
+    '+NRX=' + hdlRec.rx.length
   ];
-  if (hdlDumpVcd) plus.push('+VCD');
-  if (hdlDumpVcd && hdlWaveTop) plus.push('+VCDTOP');
-  if (traceLvl === 1 && hdlSimulator !== 'verilator' && clock.pace === 'real' && cpuHz() <= RT_FOLLOW_HZ)
+  if (hdlConfig.dumpVcd) plus.push('+VCD');
+  if (hdlConfig.dumpVcd && hdlConfig.waveTop) plus.push('+VCDTOP');
+  if (traceLvl === 1 && hdlConfig.simulator !== 'verilator' && clock.pace === 'real' && cpuHz() <= RT_FOLLOW_HZ)
     plus.push('+PCLOG');
-  if (hdlDumpVcd && hdlSimulator === 'verilator' && budget > HDL_VCD_WINDOW)
+  if (hdlConfig.dumpVcd && hdlConfig.simulator === 'verilator' && budget > HDL_VCD_WINDOW)
     plus.push('+VCDFROM=' + (budget - HDL_VCD_WINDOW));
   return plus;
 }
@@ -123,15 +123,15 @@ async function hdlRunVvp(budget, traceLvl, memFiles, from, extra) {
   // One more checkpoint near the end, where a Resume starts: the replay
   // has to reproduce HDL_CK_VERIFY cycles of the old recording, which
   // ends at budget - 1, before it is joined on.
-  if (hdlCk) plus.push('+CKEVERY=' + hdlCk.every, '+CKAT=' + (budget - HDL_CK_VERIFY - 1));
+  if (hdlCheckpoints.set) plus.push('+CKEVERY=' + hdlCheckpoints.set.every, '+CKAT=' + (budget - HDL_CK_VERIFY - 1));
   if (from) {
     plus.push('+CKLOAD=' + from.k);
     files['ck_load.txt'] = from.txt;
     from.mem.forEach((m, i) => { files['ck_load_m' + i + '.mem'] = m; });
   }
-  const s = hdlVvpCache.model
-    ? await hdlRunModel(hdlVvpCache.model, files, plus)
-    : await hdlSimulate(hdlVvpCache.vvp, files, plus);
+  const s = hdlBuild.vvpCache.model
+    ? await hdlRunModel(hdlBuild.vvpCache.model, files, plus)
+    : await hdlSimulate(hdlBuild.vvpCache.vvp, files, plus);
   // $writememb warns about every memory declared high-to-low, at every
   // checkpoint; saving and restoring read it the same way, so it is noise.
   s.out = s.out.split('\n').filter(l => !/\/cg3207_hdl_ck\.v:\d+:/.test(l) &&
@@ -160,14 +160,14 @@ async function hdlPrepareRun(opts) {
   hdlSyncReferenceWrapperDepths();
   const memKey = [program.machineCode, layout.baseAddress, layout.dataBase, wrapper.src];
   let mem;
-  if (hdlMemCache && hdlMemCache.key.every((v, i) => v === memKey[i])) {
-    mem = hdlMemCache.mem;
+  if (hdlBuild.memCache && hdlBuild.memCache.key.every((v, i) => v === memKey[i])) {
+    mem = hdlBuild.memCache.mem;
   } else {
     loadProgram(program.machineCode);
     mem = hdlMemFiles(wrapper.src);
-    hdlMemCache = { key: memKey, mem };
+    hdlBuild.memCache = { key: memKey, mem };
   }
-  hdlDmemBytes = Math.pow(2, mem.dmemBits);
+  hdlBuild.dmemBytes = Math.pow(2, mem.dmemBits);
   if (!opts.quiet) {
     hdlLog('Program image: ' + mem.codeWords + ' instruction words into an IROM of ' +
       mem.iromCapacity + ' (IROM_DEPTH_BITS=' + mem.iromBits +
@@ -212,48 +212,48 @@ function hdlRunSummary(t, cycles) {
 // produces, so a run, a step and an input change all funnel through it.
 async function hdlBuildTrace(budget, opts) {
   opts = opts || {};
-  const epoch = hdlEpoch;
+  const epoch = hdlRec.epoch;
   const prep = await hdlPrepareRun(opts);
   if (!prep) return null;
   const { mem, compiled } = prep;
-  const vl = hdlSimulator === 'verilator';
+  const vl = hdlConfig.simulator === 'verilator';
 
-  const lvl = hdlTraceEnabled ? 2 : 1;
-  const timeline = { stim: hdlStim.slice(), rx: hdlRx.slice() };
+  const lvl = hdlConfig.traceEnabled ? 2 : 1;
+  const timeline = { stim: hdlRec.stim.slice(), rx: hdlRec.rx.slice() };
   // A recording belongs to one compiled design, program, starting inputs
   // and trace level; another run of the same can be joined onto it.
-  const joinKey = hdlHash([compiled.key, lvl, JSON.stringify(hdlBase)].concat(Object.values(mem.files)).join('|'));
+  const joinKey = hdlHash([compiled.key, lvl, JSON.stringify(hdlRec.base)].concat(Object.values(mem.files)).join('|'));
   // Icarus's checkpoints belong to the same; anything else starts a new set.
-  const ckKey = !vl && compiled.ck && !(hdlCkOff && hdlCkOff.key === compiled.key) ? joinKey : null;
-  if (!ckKey) hdlCk = null;
-  else if (!hdlCk || hdlCk.key !== ckKey) hdlCk = { key: ckKey, every: HDL_CK_EVERY, at: new Map() };
+  const ckKey = !vl && compiled.ck && !(hdlCheckpoints.off && hdlCheckpoints.off.key === compiled.key) ? joinKey : null;
+  if (!ckKey) hdlCheckpoints.set = null;
+  else if (!hdlCheckpoints.set || hdlCheckpoints.set.key !== ckKey) hdlCheckpoints.set = { key: ckKey, every: HDL_CK_EVERY, at: new Map() };
 
   // A replay prints only from the first cycle its inputs differ from the
   // recording's (+TRACEFROM), and is joined on there, so only what is new
   // is parsed. Icarus's waveform is joined too, which needs the old one in
   // the same scope; Verilator's covers its own window.
-  const vcdScope = hdlDumpVcd ? (hdlWaveTop ? 'top' : 'all') : null;
+  const vcdScope = hdlConfig.dumpVcd ? (hdlConfig.waveTop ? 'top' : 'all') : null;
   let joinAt = 0;
-  if (!opts.fresh && hdlTrace && hdlTrace.joinKey === joinKey && hdlTrace.timeline &&
-      (vl || !hdlDumpVcd || (hdlLastVcd && hdlTrace.vcdScope === vcdScope))) {
-    const diff = hdlTimelineDiff(hdlTrace.timeline, timeline);
-    if (hdlCk) for (const k of [...hdlCk.at.keys()]) if (k >= diff) hdlCk.at.delete(k);
-    const c = Math.min(diff, hdlTrace.budget, budget);
-    if (c > (hdlTrace.base ? hdlTrace.base.cyc : 0)) joinAt = c;
+  if (!opts.fresh && hdlRec.trace && hdlRec.trace.joinKey === joinKey && hdlRec.trace.timeline &&
+      (vl || !hdlConfig.dumpVcd || (hdlBuild.lastVcd && hdlRec.trace.vcdScope === vcdScope))) {
+    const diff = hdlTimelineDiff(hdlRec.trace.timeline, timeline);
+    if (hdlCheckpoints.set) for (const k of [...hdlCheckpoints.set.at.keys()]) if (k >= diff) hdlCheckpoints.set.at.delete(k);
+    const c = Math.min(diff, hdlRec.trace.budget, budget);
+    if (c > (hdlRec.trace.base ? hdlRec.trace.base.cyc : 0)) joinAt = c;
   }
   // It starts from the newest checkpoint that leaves some of the recording
   // before the join to check the replay against, or from reset.
-  const vlCkOn = () => !!(vl && compiled.vlCk && hdlVlCkOff !== compiled.key);
+  const vlCkOn = () => !!(vl && compiled.vlCk && hdlCheckpoints.vlOff !== compiled.key);
   let ck = null;
   if (joinAt && vl && vlCkOn()) {
-    ck = hdlVlCkPick(hdlTrace, joinKey, Math.min(joinAt - HDL_CK_VERIFY,
-      hdlDumpVcd && budget > HDL_VCD_WINDOW ? budget - HDL_VCD_WINDOW : Infinity));
-  } else if (joinAt && hdlCk) {
+    ck = hdlVlCkPick(hdlRec.trace, joinKey, Math.min(joinAt - HDL_CK_VERIFY,
+      hdlConfig.dumpVcd && budget > HDL_VCD_WINDOW ? budget - HDL_VCD_WINDOW : Infinity));
+  } else if (joinAt && hdlCheckpoints.set) {
     let best = -1;
-    for (const k of hdlCk.at.keys()) if (k <= joinAt - HDL_CK_VERIFY && k < budget && k > best) best = k;
-    if (best > 0) ck = Object.assign({ k: best }, hdlCk.at.get(best));
+    for (const k of hdlCheckpoints.set.at.keys()) if (k <= joinAt - HDL_CK_VERIFY && k < budget && k > best) best = k;
+    if (best > 0) ck = Object.assign({ k: best }, hdlCheckpoints.set.at.get(best));
   }
-  const vlKept = joinAt && vlCkOn() && hdlTrace.vlCks ? hdlTrace.vlCks.filter(c => c.k <= joinAt - HDL_CK_VERIFY) : [];
+  const vlKept = joinAt && vlCkOn() && hdlRec.trace.vlCks ? hdlRec.trace.vlCks.filter(c => c.k <= joinAt - HDL_CK_VERIFY) : [];
   // A run from a checkpoint prints nothing before it anyway.
   const args = c => (joinAt && !c ? ['+TRACEFROM=' + joinAt] : [])
     .concat(vlCkOn() ? ['+CKEVERY=' + HDL_VL_CK_EVERY] : []);
@@ -262,18 +262,18 @@ async function hdlBuildTrace(budget, opts) {
     : 'simulating ' + budget + ' cycles...', 'busy');
   const t0 = performance.now();
   let s = await hdlRunVvp(budget, lvl, mem.files, ck, args(ck));
-  if (epoch !== hdlEpoch) return null;
+  if (epoch !== hdlRec.epoch) return null;
   if (ck) {
-    const lo = hdlCheckFrom(hdlTrace, ck.k), hi = joinAt - 2;
+    const lo = hdlCheckFrom(hdlRec.trace, ck.k), hi = joinAt - 2;
     const a = hdlJoinSplit(joinAt).feed(s.out + '\n');
-    if (hdlJoinCheck(hdlRecordList(hdlTrace, lo, hi), a.over, lo, hi)) {
+    if (hdlJoinCheck(hdlRecordList(hdlRec.trace, lo, hi), a.over, lo, hi)) {
       s.out = a.main;
-      s.vcd = !s.vcd ? null : vl ? hdlShiftVcd(s.vcd, ck.k) : hdlVcdJoin(hdlLastVcd, s.vcd, ck.k);
+      s.vcd = !s.vcd ? null : vl ? hdlShiftVcd(s.vcd, ck.k) : hdlVcdJoin(hdlBuild.lastVcd, s.vcd, ck.k);
     } else {
       if (vl) hdlVlCkFailed(ck.k, compiled.key);
       else {
-        hdlCkOff = { key: compiled.key };
-        hdlCk = null;
+        hdlCheckpoints.off = { key: compiled.key };
+        hdlCheckpoints.set = null;
         hdlLog('A replay from the checkpoint at cycle ' + ck.k + ' did not match the run it ' +
           'replaced, so this design holds state the checkpoints do not save. Checkpoints are off ' +
           'for these sources; this run, and every later one, starts from reset.', 'warn');
@@ -281,22 +281,22 @@ async function hdlBuildTrace(budget, opts) {
       hdlStatus('simulating ' + budget + ' cycles...', 'busy');
       ck = null;
       s = await hdlRunVvp(budget, lvl, mem.files, null, args(null));
-      if (epoch !== hdlEpoch) return null;
+      if (epoch !== hdlRec.epoch) return null;
     }
   }
-  if (hdlCk) hdlCkAdd(s.ck);
+  if (hdlCheckpoints.set) hdlCkAdd(s.ck);
   const out = s.out, vcd = s.vcd || null;
   const t1 = performance.now();
 
   // The post-synthesis check compares a whole run from reset.
-  hdlLastRtlOut = joinAt ? null : out;
+  hdlBuild.lastRtlOut = joinAt ? null : out;
   let t;
   if (joinAt) {
     // A run following its own end goes on from where the page last
     // showed it, when that is before the join.
-    const mark = hdlSeekMark && hdlSeekMark.trace === hdlTrace ? hdlSeekMark : null;
-    const pre = hdlTrace.pre.length;
-    const cut = hdlCutTrace(hdlTrace, joinAt);
+    const mark = hdlRec.seekMark && hdlRec.seekMark.trace === hdlRec.trace ? hdlRec.seekMark : null;
+    const pre = hdlRec.trace.pre.length;
+    const cut = hdlCutTrace(hdlRec.trace, joinAt);
     const ls = mark && cut.steps[mark.idx - 1];
     const keep = mark && cut.steps.length && mark.idx <= cut.steps.length && cut.pre.length === pre &&
       (!ls || !mark.tail || (ls.regw.length >= mark.tail[0] && ls.memw.length >= mark.tail[1] &&
@@ -304,7 +304,7 @@ async function hdlBuildTrace(budget, opts) {
     const p = hdlTraceParser(cut);
     p.feed(out);
     t = p.finish();
-    if (keep) hdlSeekMark = Object.assign({}, mark, { trace: t });
+    if (keep) hdlRec.seekMark = Object.assign({}, mark, { trace: t });
   } else {
     t = hdlParseTrace(out);
   }
@@ -314,12 +314,12 @@ async function hdlBuildTrace(budget, opts) {
   t.joinKey = joinKey;
   t.vlCks = vlCkOn() ? hdlVlCkMerge(vlKept, s.ck) : null;
   t.vcdScope = vcd ? vcdScope : null;
-  hdlTrace = t;
+  hdlRec.trace = t;
   if (vl) hdlTrimTrace(t);
-  hdlLastVcd = vl ? vcd : hdlVcdDoc(vcd);
+  hdlBuild.lastVcd = vl ? vcd : hdlVcdDoc(vcd);
   refreshDownloadMenu();
 
-  if (hdlSynthEnabled && !opts.quiet && hdlLastRtlOut) {
+  if (hdlConfig.synthEnabled && !opts.quiet && hdlBuild.lastRtlOut) {
     try {
       await hdlPostSynthCheck(out, budget, lvl, mem.files);
     } catch (e) {

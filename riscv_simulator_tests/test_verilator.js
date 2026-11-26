@@ -363,7 +363,7 @@ if (process.argv[2] === '--checkpoints') {
     // The replay is joined onto the recording in place; it is done once the
     // recording's input timeline holds the change and nothing runs.
     await until(() => { const t = win.getHdlTrace();
-      return !!t && !win.eval('hdlRunning') && !!t.timeline && t.timeline.stim.some(s => s.value === 0x72); }, 120000);
+      return !!t && !win.eval('hdlActivity.running') && !!t.timeline && t.timeline.stim.some(s => s.value === 0x72); }, 120000);
     await sleep(200);
     win.hdlSeek(win.getHdlTrace().steps.length);
     check('A switch change replays, and the LEDs follow (0x' + win.getLedState().toString(16) + ')', win.getLedState() === 0x72);
@@ -444,7 +444,7 @@ if (process.argv[2] === '--checkpoints') {
       const flat = win.runHdlSimulation();
       check('Followed live flat out, the waveform stops at 20 MB and says so', await until(said, 60000));
       await sleep(500);                 // the model closes it at its next edge
-      const id = win.eval('hdlLive && hdlLive.id');
+      const id = win.eval('hdlActivity.live && hdlActivity.live.id');
       const size = async () => { const b = id && await win.rvNative.vlLiveRead(id, 'dump.vcd', 1); return b ? b.size : -1; };
       const s1 = await size();
       await sleep(1500);

@@ -1,7 +1,6 @@
 [
   "01-cm6-loader.ts",
-  "05-assembler.ts",
-  "06-simulator.ts",
+  "02-machine-host.ts",
   "07-editor.ts",
   "08-panels.ts",
   "09-locals.ts",
@@ -17,7 +16,6 @@
   "19-hdl-sources.ts",
   "20-hdl-lint.ts",
   "21-hdl-memory-images.ts",
-  "22-hdl-testbench.ts",
   "23-hdl-checkpoints.ts",
   "24-hdl-compile.ts",
   "25-hdl-synthesis.ts",
@@ -31,6 +29,6 @@
   "33-waveform.ts",
   "34-engine-mode.ts",
   "35-hdl-hooks.ts",
-  "36-pipeline.ts",
+  "36-pipeline-controls.ts",
   "37-datapath.ts"
 ]

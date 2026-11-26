@@ -1,7 +1,29 @@
-// @ts-nocheck
 // The two-pass assembler, operand-count checks and the instruction
 // encoder, plus the helpers that render the Native instruction column.
-function resolveAddrRef(s, allowForward = false) {
+
+import { checkPseudoArity, INSTRUCTIONS, PSEUDO_INSTRUCTIONS, REG_NAMES } from '../isa/instructions';
+import type { InstrDef } from '../isa/instructions';
+import { layout, program, type MachineLine } from '../machine/state';
+import { badRegOperand, parseFReg, parseImm, parseMemOp, parseReg, sext } from './operands';
+
+// An immediate as the encoding holds it, for the Native column's popover.
+export interface ImmInfo {
+  kind: 'u20' | 'target' | 'sext' | 'shamt';
+  value: number;
+  offset?: number;
+  mnemonic: string;
+}
+
+export interface AssembleOptions {
+  // Compiled C is assembled too; a few notices only concern hand-written assembly.
+  language?: 'asm' | 'c';
+  // Where notices about the program go (the console).
+  report?: (text: string, level: 'info' | 'warn') => void;
+}
+
+interface MisalignedAccess { mnemonic: string; offset: number; width: number }
+
+export function resolveAddrRef(s: string, allowForward = false): number {
   if (program.labels[s] !== undefined) return program.labels[s];
   if (program.symbolTable[s] !== undefined) return program.symbolTable[s];
   const low = s.toLowerCase();
@@ -34,7 +56,7 @@ function resolveAddrRef(s, allowForward = false) {
   }
   throw new Error(`Unknown symbol '${s}'`);
 }
-function instructionSlots(mnemonic, args) {
+function instructionSlots(mnemonic: string, args: string[]): number {
   // A load or store that names a symbol, rather than offset(reg),
   // expands to auipc + the access.
   if (LOAD_MNEMONICS.includes(mnemonic) || STORE_MNEMONICS.includes(mnemonic)) {
@@ -51,18 +73,19 @@ function instructionSlots(mnemonic, args) {
     case 'li': {
       if (args.length < 2) return 1;   // arity is reported during emit
       // A symbol not defined yet is a label further down, so an address.
-      try { return PSEUDO_INSTRUCTIONS.li(args[0], args[1]).length; } catch (e) { return 2; }
+      try { return expandPseudoLines('li', args).length; } catch (e) { return 2; }
     }
   }
-  if (PSEUDO_INSTRUCTIONS[mnemonic]) {
-    if (typeof PSEUDO_INSTRUCTIONS[mnemonic] === 'function') {
-      try { return PSEUDO_INSTRUCTIONS[mnemonic](...args).length; } catch (e) { return 1; }
+  const p = PSEUDO_INSTRUCTIONS[mnemonic];
+  if (p) {
+    if (typeof p === 'function') {
+      try { return p(...args).length; } catch (e) { return 1; }
     }
-    return PSEUDO_INSTRUCTIONS[mnemonic].length;
+    return p.length;
   }
   return 0;
 }
-function expandPseudoLines(mnemonic, args) {
+function expandPseudoLines(mnemonic: string, args: string[]): string[] {
   const p = PSEUDO_INSTRUCTIONS[mnemonic];
   if (typeof p === 'function') return p(...args);
   return p.map(t => t.replace(/%\d+/g, (m) => { const idx = parseInt(m.substring(1), 10); return args[idx] || ''; }));
@@ -72,14 +95,14 @@ function expandPseudoLines(mnemonic, args) {
 // way the encoding does - x0 to x31. ABI names are a source-level
 // convenience and stay in the Original source column beside it, which is
 // also what makes the two columns worth reading against each other.
-function toHwRegName(tok) {
+function toHwRegName(tok: unknown): string | null {
   const t = String(tok == null ? '' : tok).trim().toLowerCase();
   if (/^x(\d|[12]\d|3[01])$/.test(t)) return t;
   if (REG_NAMES[t] !== undefined) return REG_NAMES[t];
   return null;
 }
 
-function hwRegOperand(a) {
+function hwRegOperand(a: unknown): string {
   const t = String(a == null ? '' : a).trim();
   const direct = toHwRegName(t);
   if (direct) return direct;
@@ -98,7 +121,7 @@ function hwRegOperand(a) {
 const SHIFT_IMM_OPS = new Set(['slli', 'srli', 'srai']);
 const IMM_TYPES = new Set(['I', 'S', 'B', 'U', 'J']);
 
-function buildNativeInstruction(mnemonic, args) {
+function buildNativeInstruction(mnemonic: string, args: string[]): { text: string; immFrom: number; immTo: number } {
   const ops = args.map(hwRegOperand);
   const text = mnemonic + (ops.length ? ' ' + ops.join(', ') : '');
   const none = { text, immFrom: -1, immTo: -1 };
@@ -123,10 +146,10 @@ function buildNativeInstruction(mnemonic, args) {
 // The immediate as the *encoding* holds it, which is not always what the
 // source said: a literal written in hex, the same value written in decimal
 // and one a pseudo-op computed all land in the same field.
-function nativeImmInfo(mnemonic, word, address) {
+function nativeImmInfo(mnemonic: string, word: number, address: number): ImmInfo | null {
   const instr = INSTRUCTIONS[mnemonic];
   if (!instr) return null;
-  const sext = (v, bits) => (v << (32 - bits)) >> (32 - bits);
+  const sext = (v: number, bits: number) => (v << (32 - bits)) >> (32 - bits);
   const w = word >>> 0;
   switch (instr.type) {
     case 'U':
@@ -159,12 +182,12 @@ function nativeImmInfo(mnemonic, word, address) {
 // the raw 12 bits read unsigned, and a genuinely unsigned field (a shift
 // amount, lui's 20 bits) has no signed reading at all. An empty list
 // means the operand as shown is already the whole story.
-function nativeImmReadings(info) {
+export function nativeImmReadings(info: ImmInfo | null): [string, string][] {
   if (!info) return [];
-  const hex = v => '0x' + (v >>> 0).toString(16);
-  const addr = v => '0x' + (v >>> 0).toString(16).padStart(8, '0');
+  const hex = (v: number) => '0x' + (v >>> 0).toString(16);
+  const addr = (v: number) => '0x' + (v >>> 0).toString(16).padStart(8, '0');
   if (info.kind === 'target') {
-    const off = info.offset;
+    const off = info.offset ?? 0;
     return [['target', addr(info.value)],
             ['offset', (off < 0 ? '−' : '+') + Math.abs(off) + ' bytes from this instruction']];
   }
@@ -201,13 +224,13 @@ const LOAD_MNEMONICS = ['lb', 'lh', 'lw', 'lbu', 'lhu', 'flw', 'fld'];
 const STORE_MNEMONICS = ['sb', 'sh', 'sw', 'fsw', 'fsd'];
 
 // Directives that switch to the data segment on their own, without .section.
-const DATA_SECTION_DIRECTIVES = new Set(['.data', '.rodata', '.bss', '.sdata', '.sbss', '.tdata', '.tbss']);
+export const DATA_SECTION_DIRECTIVES = new Set(['.data', '.rodata', '.bss', '.sdata', '.sbss', '.tdata', '.tbss']);
 
 // Width of each data directive. A line holding only values continues the
 // directive above it, so both passes size that line from this one table;
 // two lists that disagreed would put every later label at an address the
 // bytes are not at.
-const DATA_DIRECTIVE_WIDTH = {
+export const DATA_DIRECTIVE_WIDTH: Record<string, number> = {
   '.byte': 1,
   '.half': 2, '.2byte': 2, '.short': 2,
   '.word': 4, '.4byte': 4, '.int': 4, '.long': 4,
@@ -215,21 +238,23 @@ const DATA_DIRECTIVE_WIDTH = {
 };
 
 // Map a section name (possibly quoted / dot-prefixed) to 'text' or 'data'.
-function setSection(name) {
+export function setSection(name: unknown): 'text' | 'data' | null {
   const raw = String(name || '').split(',')[0].replace(/["']/g, '').replace(/^\./, '').trim().toLowerCase();
   if (raw.startsWith('text')) return 'text';
   if (/^(data|rodata|bss|sdata|sbss|tdata|tbss)/.test(raw)) return 'data';
   return null;
 }
 
-function assemble(source, startAddr) {
+export function assemble(source: string, startAddr?: number, options: AssembleOptions = {}): MachineLine[] {
   const base = (startAddr !== undefined) ? startAddr : layout.baseAddress;
+  const report = options.report ?? (() => {});
+  const fromC = options.language === 'c';
   const lines = source.split('\n');
-  const output = [];
+  const output: MachineLine[] = [];
   program.labels = {};
   program.symbolTable = {};
 
-  const splitLine = (line) => {
+  const splitLine = (line: string) => {
     let idx = line.indexOf('#');
     const idx2 = line.indexOf(';');
     if (idx < 0 || (idx2 >= 0 && idx2 < idx)) idx = idx2;
@@ -237,7 +262,7 @@ function assemble(source, startAddr) {
     if (idx < 0 || (idx3 >= 0 && idx3 < idx)) idx = idx3;
     return { main: (idx >= 0 ? line.substring(0, idx) : line).trim(), comment: idx >= 0 ? line.substring(idx) : '' };
   };
-  const parseArgs = (s) => {
+  const parseArgs = (s: string) => {
     const toks = s.trim().split(/\s+/);
     return toks.slice(1).join(' ').split(',').map(t => t.trim()).filter(t => t);
   };
@@ -253,21 +278,22 @@ function assemble(source, startAddr) {
   }
 
   // ---- Phase 1: assign addresses & collect labels ----
-  let textAddr = base, dataAddr = layout.dataBase, section = 'text';
-  let activeDataDirPass1 = null;
+  let textAddr = base, dataAddr = layout.dataBase;
+  let section = 'text' as 'text' | 'data' | 'ignore';
+  let activeDataDirPass1: string | null = null;
   const getAddr = () => section === 'text' ? textAddr : dataAddr;
-  const setAddr = (a) => { if (section === 'text') textAddr = a; else dataAddr = a; };
-  const bump = (n) => setAddr(getAddr() + n);
-  const alignedAddr = (n) => (getAddr() + (n - 1)) & ~(n - 1);
+  const setAddr = (a: number) => { if (section === 'text') textAddr = a; else dataAddr = a; };
+  const bump = (n: number) => setAddr(getAddr() + n);
+  const alignedAddr = (n: number) => (getAddr() + (n - 1)) & ~(n - 1);
   // .align and .p2align take a power of two, .balign a byte count.
-  const alignmentOf = (mn, arg) => {
-    const n = parseInt(arg, 10) || 0;
+  const alignmentOf = (mn: string, arg: string | undefined) => {
+    const n = parseInt(arg ?? '', 10) || 0;
     if (n <= 0) return 0;
     return mn === '.balign' ? n : (1 << n);
   };
   // Same reading in both passes, so a size written in hex or as a
   // constant reserves what it says rather than parseInt's 0.
-  const spaceCount = (arg) => {
+  const spaceCount = (arg: string | undefined) => {
     const n = parseImm(arg);
     return Number.isFinite(n) && n > 0 ? n : 0;
   };
@@ -275,8 +301,8 @@ function assemble(source, startAddr) {
   // Labels seen since the last real byte was placed. If the next
   // directive aligns forward (`var1: .word 1`), these move with it, so
   // `var1` names the aligned address rather than wherever the colon fell.
-  let pendingLabelNames = [];
-  const alignAddrForLabels = (newAddr) => {
+  let pendingLabelNames: string[] = [];
+  const alignAddrForLabels = (newAddr: number) => {
     const oldAddr = getAddr();
     if (newAddr === oldAddr) return;
     setAddr(newAddr);
@@ -285,7 +311,7 @@ function assemble(source, startAddr) {
     }
   };
 
-  const sizeLine = (main) => {
+  const sizeLine = (main: string) => {
     const toks = main.split(/\s+/);
     const mn = toks[0].toLowerCase();
     if (mn === '.text') { section = 'text'; activeDataDirPass1 = null; return; }
@@ -355,9 +381,9 @@ function assemble(source, startAddr) {
   };
 
   // Problems found while collecting labels, reported once `push` exists.
-  const labelDiagnostics = [];
+  const labelDiagnostics: { line: number; text: string; message: string }[] = [];
   // Word/half accesses whose offset is not a multiple of the access size.
-  const misalignedAccesses = [];
+  const misalignedAccesses: MisalignedAccess[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     let { main } = splitLine(lines[i]);
@@ -394,7 +420,7 @@ function assemble(source, startAddr) {
   // ---- Phase 2: emit encoded bytes ----
   textAddr = base; dataAddr = layout.dataBase; section = 'text';
 
-  const push = (item) => { output.push(item); };
+  const push = (item: MachineLine) => { output.push(item); };
   asmAlignmentSink = misalignedAccesses;
 
   for (const d of labelDiagnostics) {
@@ -402,7 +428,7 @@ function assemble(source, startAddr) {
            error: d.message, asmLine: d.text });
   }
 
-  const pushInstr = (mnMnemonic, args, address, lineNo, asmText, isPseudo = false) => {
+  const pushInstr = (mnMnemonic: string, args: string[], address: number, lineNo: number, asmText: string, isPseudo = false) => {
     const encoding = encodeInstruction(mnMnemonic, args, address);
     if (encoding === null) throw new Error('Encoding failed');
     const nat = buildNativeInstruction(mnMnemonic, args);
@@ -419,13 +445,13 @@ function assemble(source, startAddr) {
   // half when that offset comes out negative. `la` already expands this
   // way, so this is also what makes `lw rd, sym` and
   // `la rd, sym; lw rd, 0(rd)` build the same address.
-  const pcRelHiLo = (target, here) => {
+  const pcRelHiLo = (target: number, here: number) => {
     const d = target - here;
     const hi20 = Math.floor((d + 0x800) / 4096) & 0xFFFFF;
     return { hi20, lo: d - (hi20 << 12) };
   };
 
-  const emitPseudo = (mn, args, address, lineNo, asmText) => {
+  const emitPseudo = (mn: string, args: string[], address: number, lineNo: number, asmText: string) => {
     checkPseudoArity(mn, args);
     if (mn === 'la' || mn === 'lla' || mn === 'lga' || mn === 'call' || mn === 'tail') {
       // figure registers & second instruction depending on pseudo
@@ -466,11 +492,11 @@ function assemble(source, startAddr) {
     }
   };
 
-  function emitOne(main, lineNo, asmText) {
+  function emitOne(main: string, lineNo: number, asmText: string) {
     const toks = main.split(/\s+/);
     const mn = toks[0].toLowerCase();
     const args = parseArgs(main);
-    const padTo = (target) => {
+    const padTo = (target: number) => {
       const pad = target - getAddr();
       if (pad > 0) { push({ address: getAddr(), bytes: new Array(pad).fill(0), text: asmText, line: lineNo, asmLine: main }); bump(pad); }
     };
@@ -627,7 +653,7 @@ function assemble(source, startAddr) {
         }
       }
     } catch (e) {
-      push({ address: getAddr(), bytes: null, text: asmText, line: lineNo, error: e.message, asmLine: main });
+      push({ address: getAddr(), bytes: null, text: asmText, line: lineNo, error: (e as Error).message, asmLine: main });
       bump(4);
     }
   }
@@ -675,11 +701,11 @@ function assemble(source, startAddr) {
   // and there is no OS or ISR behind it. Say so once per
   // assemble, in assembly mode only - every compiled C program ends with
   // the CRT0 shim's exit ecall, which is ours, not the student's.
-  if (editorLanguageMode !== 'c') {
+  if (!fromC) {
     const ecalls = output.filter(o => o.bytes && /^\s*ecall\b/i.test(
       String(o.native || o.text || '').trim())).length;
     if (ecalls) {
-      log(`ℹ️ This program uses ecall (${ecalls} site${ecalls === 1 ? '' : 's'}). ` +
+      report(`ℹ️ This program uses ecall (${ecalls} site${ecalls === 1 ? '' : 's'}). ` +
           `The simulator implements the RARS syscall services, but a processor on ` +
           `the board does not: it needs trap support in your processor and an OS or ` +
           `ISR to service the trap, and the Wrapper provides neither. Programs meant ` +
@@ -695,7 +721,7 @@ function assemble(source, startAddr) {
     }
     const shown = Array.from(seen.keys()).slice(0, 6)
       .map(k => '`' + k.split(':')[0] + ' …, ' + k.split(':')[1] + '(rs1)`').join(', ');
-    log(`⚠️ WARNING: ${misalignedAccesses.length} memory access(es) use an offset that ` +
+    report(`⚠️ WARNING: ${misalignedAccesses.length} memory access(es) use an offset that ` +
         `is not a multiple of the access size — ${shown}` +
         (seen.size > 6 ? ', …' : '') + `. This only works if the base register makes up ` +
         `the difference. The Wrapper's data memory is word-addressed, so on hardware a ` +
@@ -706,7 +732,7 @@ function assemble(source, startAddr) {
   const totalCodeBytes = Math.max(0, textAddr - base);
   if (totalCodeBytes > layout.codeSize) {
     const overWords = Math.ceil((totalCodeBytes - layout.codeSize) / 4);
-    log(`⚠️ Code is ${totalCodeBytes} bytes, ${totalCodeBytes - layout.codeSize} over the ` +
+    report(`⚠️ Code is ${totalCodeBytes} bytes, ${totalCodeBytes - layout.codeSize} over the ` +
         `${layout.codeSize}-byte Code segment — ${overWords} instruction` +
         `${overWords === 1 ? '' : 's'} that will not be loaded. Raise ` +
         `"Code (.text) size" in Settings → Linker, and IROM_DEPTH_BITS in Wrapper ` +
@@ -715,8 +741,8 @@ function assemble(source, startAddr) {
   }
 
   const totalDataBytes = Math.max(0, dataAddr - layout.dataBase);
-  if (totalDataBytes > layout.dataSize && editorLanguageMode !== 'c') {
-    log(`⚠️ Data is ${totalDataBytes} bytes, ${totalDataBytes - layout.dataSize} over the ` +
+  if (totalDataBytes > layout.dataSize && !fromC) {
+    report(`⚠️ Data is ${totalDataBytes} bytes, ${totalDataBytes - layout.dataSize} over the ` +
         `${layout.dataSize}-byte Data segment. Raise "Data (.data) size" in Settings → Linker, ` +
         `and DMEM_DEPTH_BITS in Wrapper for HDL mode.`, 'warn');
   }
@@ -724,12 +750,12 @@ function assemble(source, startAddr) {
   return output;
 }
 
-function parseStringLiteral(s) {
+export function parseStringLiteral(s: string): number[] {
   s = s.trim();
   if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
     s = s.substring(1, s.length - 1);
   }
-  let result = [];
+  let result: number[] = [];
   for (let i = 0; i < s.length; i++) {
     if (s[i] === '\\' && i + 1 < s.length) {
       const octMatch = s.slice(i + 1).match(/^[0-7]{1,3}/);
@@ -774,7 +800,7 @@ function parseStringLiteral(s) {
 // `add t0, t1` assembling as `add t0, t1, x0` and `slli t0, t1` as a shift
 // by zero - and a surplus one dropped on the floor. Both produce a program
 // that runs and is wrong, with nothing on screen to say so.
-const INSTR_ARITY = {
+const INSTR_ARITY: Record<string, number[]> = {
   // rd, rs1  (one source operand only)
   'fmv.x.w': [2], 'fclass.s': [2], 'fclass.d': [2],
   'fcvt.w.s': [2], 'fcvt.wu.s': [2], 'fcvt.w.d': [2], 'fcvt.wu.d': [2],
@@ -793,7 +819,7 @@ const INSTR_ARITY = {
 // Loads and stores accept `rd, offset(rs1)` or `rd, symbol, rt`.
 const MEMORY_ARITY = [2, 3];
 
-function allowedArity(mnemonic, instr) {
+function allowedArity(mnemonic: string, instr: InstrDef): number[] | null {
   if (INSTR_ARITY[mnemonic]) return INSTR_ARITY[mnemonic];
   if (LOAD_MNEMONICS.includes(mnemonic) || STORE_MNEMONICS.includes(mnemonic)) return MEMORY_ARITY;
   switch (instr.type) {
@@ -808,7 +834,7 @@ function allowedArity(mnemonic, instr) {
   }
 }
 
-function checkArity(mnemonic, args, instr) {
+function checkArity(mnemonic: string, args: string[], instr: InstrDef): void {
   const want = allowedArity(mnemonic, instr);
   if (!want) return;
   const got = args.length;
@@ -825,7 +851,7 @@ function checkArity(mnemonic, args, instr) {
 
 // The canonical written form, for the message above. Only the shapes a
 // student actually types; anything missing simply omits the hint.
-const INSTRUCTION_SHAPES = {
+const INSTRUCTION_SHAPES: Record<string, string> = {
   add: 'add rd, rs1, rs2', sub: 'sub rd, rs1, rs2', and: 'and rd, rs1, rs2',
   or: 'or rd, rs1, rs2', xor: 'xor rd, rs1, rs2', sll: 'sll rd, rs1, rs2',
   srl: 'srl rd, rs1, rs2', sra: 'sra rd, rs1, rs2', slt: 'slt rd, rs1, rs2',
@@ -849,11 +875,11 @@ const INSTRUCTION_SHAPES = {
 // The rm field. dyn reads frm, which is never written here and so stays
 // rne; that is also the only mode the arithmetic uses (the conversions to
 // integer honour all of them).
-const FP_ROUNDING_MODES = { rne: 0, rtz: 1, rdn: 2, rup: 3, rmm: 4, dyn: 7 };
+const FP_ROUNDING_MODES: Record<string, number> = { rne: 0, rtz: 1, rdn: 2, rup: 3, rmm: 4, dyn: 7 };
 
 // Which instructions carry rm, and what GNU as encodes when the source
 // gives none: dyn, except for the conversions that are always exact.
-const FP_RM_DEFAULT = {};
+const FP_RM_DEFAULT: Record<string, number> = {};
 ['fadd', 'fsub', 'fmul', 'fdiv', 'fsqrt', 'fmadd', 'fmsub', 'fnmsub', 'fnmadd'].forEach(op => {
   FP_RM_DEFAULT[op + '.s'] = 7;
   FP_RM_DEFAULT[op + '.d'] = 7;
@@ -864,19 +890,19 @@ const FP_RM_DEFAULT = {};
 
 // Set by assemble() so encodeInstruction can report a misaligned offset
 // without threading a collector through every call site.
-let asmAlignmentSink = null;
+let asmAlignmentSink: MisalignedAccess[] | null = null;
 
 // The Wrapper's data memory is word-addressed, so an access whose offset is
 // not a multiple of its size reads or writes a different word on hardware
 // than it does here. The base register's value is unknown at assembly time,
 // so this is a warning, not an error.
-const ACCESS_WIDTH = {
+const ACCESS_WIDTH: Record<string, number> = {
   lw: 4, sw: 4, flw: 4, fsw: 4,
   lh: 2, lhu: 2, sh: 2,
   fld: 8, fsd: 8,
 };
 
-function noteAlignment(mnemonic, args) {
+function noteAlignment(mnemonic: string, args: string[]): void {
   const width = ACCESS_WIDTH[mnemonic];
   if (!width || !asmAlignmentSink || args.length < 2) return;
   const operand = String(args[1] || '');
@@ -887,7 +913,7 @@ function noteAlignment(mnemonic, args) {
   asmAlignmentSink.push({ mnemonic, offset: mem.offset, width });
 }
 
-function encodeInstruction(mnemonic, args, address) {
+function encodeInstruction(mnemonic: string, args: string[], address: number): number[] | null {
   const instr = INSTRUCTIONS[mnemonic];
   if (!instr) return null;
 
@@ -956,7 +982,7 @@ function encodeInstruction(mnemonic, args, address) {
 
       if (rd < 0 || rs1 < 0 || rs2 < 0) throw new Error(badRegOperand(mnemonic, args) || `Invalid register in ${mnemonic}`);
 
-      encoding = (instr.funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (rm << 12) | (rd << 7) | instr.opcode;
+      encoding = ((instr.funct7 ?? 0) << 25) | (rs2 << 20) | (rs1 << 15) | ((rm ?? 0) << 12) | (rd << 7) | instr.opcode;
       break;
     }
 
@@ -968,7 +994,7 @@ function encodeInstruction(mnemonic, args, address) {
 
       if (rd < 0 || rs1 < 0 || rs2 < 0 || rs3 < 0) throw new Error(badRegOperand(mnemonic, args) || `Invalid register in ${mnemonic}`);
 
-      encoding = (rs3 << 27) | (instr.funct2 << 25) | (rs2 << 20) | (rs1 << 15) | (fpRm << 12) | (rd << 7) | instr.opcode;
+      encoding = (rs3 << 27) | ((instr.funct2 ?? 0) << 25) | (rs2 << 20) | (rs1 << 15) | ((fpRm ?? 0) << 12) | (rd << 7) | instr.opcode;
       break;
     }
 
@@ -1035,7 +1061,7 @@ function encodeInstruction(mnemonic, args, address) {
       } else if (mnemonic === 'fence') {
         // fence pred, succ: sets drawn from i, o, r, w. A bare fence
         // orders everything, as GNU as encodes it.
-        const set = (t) => {
+        const set = (t: unknown) => {
           const str = String(t == null ? 'iorw' : t).trim().toLowerCase();
           if (!/^[iorw]+$/.test(str)) throw new Error(`'${t}' is not a fence set - write letters from iorw`);
           return (str.includes('i') ? 8 : 0) | (str.includes('o') ? 4 : 0) |
@@ -1056,9 +1082,9 @@ function encodeInstruction(mnemonic, args, address) {
       if (['slli', 'srli', 'srai', 'slliw', 'srliw', 'sraiw'].includes(mnemonic)) {
         const funct7 = instr.funct7 || 0;
         const shamt = imm & 0x1F;
-        encoding = (funct7 << 25) | (shamt << 20) | (rs1 << 15) | (instr.funct3 << 12) | (rd << 7) | instr.opcode;
+        encoding = (funct7 << 25) | (shamt << 20) | (rs1 << 15) | ((instr.funct3 ?? 0) << 12) | (rd << 7) | instr.opcode;
       } else {
-        encoding = (imm12 << 20) | (rs1 << 15) | (instr.funct3 << 12) | (rd << 7) | instr.opcode;
+        encoding = (imm12 << 20) | (rs1 << 15) | ((instr.funct3 ?? 0) << 12) | (rd << 7) | instr.opcode;
       }
       break;
     }
@@ -1085,7 +1111,7 @@ function encodeInstruction(mnemonic, args, address) {
 
       const imm11_5 = (imm >> 5) & 0x7F;
       const imm4_0 = imm & 0x1F;
-      encoding = (imm11_5 << 25) | (rs2 << 20) | (rs1 << 15) | (instr.funct3 << 12) | (imm4_0 << 7) | instr.opcode;
+      encoding = (imm11_5 << 25) | (rs2 << 20) | (rs1 << 15) | ((instr.funct3 ?? 0) << 12) | (imm4_0 << 7) | instr.opcode;
       break;
     }
 
@@ -1122,7 +1148,7 @@ function encodeInstruction(mnemonic, args, address) {
       const bit4_1 = (imm >> 1) & 0xF;
       const bit11 = (imm >> 11) & 1;
 
-      encoding = (bit12 << 31) | (bit10_5 << 25) | (rs2 << 20) | (rs1 << 15) | (instr.funct3 << 12) |
+      encoding = (bit12 << 31) | (bit10_5 << 25) | (rs2 << 20) | (rs1 << 15) | ((instr.funct3 ?? 0) << 12) |
         (bit4_1 << 8) | (bit11 << 7) | instr.opcode;
       break;
     }

@@ -14,29 +14,6 @@
 // and the strip that holds them follow, and the file ends with the
 // page's boot and the functions it puts on window.
 
-// Slide 24 of the lecture, which RV/Decoder.v implements row for row.
-// Values are strings so a don't-care bit can be shown as x.
-const DP_CONTROL = {
-  0x33: { row: 'DP Reg', PCS: '00', MemtoReg: '0', RegWrite: '1', MemWrite: '0', ALUSrcA: 'x0', ALUSrcB: 'x0', ImmSrc: 'xxx' },
-  0x13: { row: 'DP Imm', PCS: '00', MemtoReg: '0', RegWrite: '1', MemWrite: '0', ALUSrcA: 'x0', ALUSrcB: '11', ImmSrc: '011' },
-  0x03: { row: 'load',   PCS: '00', MemtoReg: '1', RegWrite: '1', MemWrite: '0', ALUSrcA: 'x0', ALUSrcB: '11', ImmSrc: '011' },
-  0x23: { row: 'store',  PCS: '00', MemtoReg: 'x', RegWrite: '0', MemWrite: '1', ALUSrcA: 'x0', ALUSrcB: '11', ImmSrc: '110' },
-  0x63: { row: 'branch', PCS: '01', MemtoReg: 'x', RegWrite: '0', MemWrite: '0', ALUSrcA: 'x0', ALUSrcB: 'x0', ImmSrc: '111' },
-  0x6F: { row: 'jal',    PCS: '10', MemtoReg: '0', RegWrite: '1', MemWrite: '0', ALUSrcA: '11', ALUSrcB: '01', ImmSrc: '010' },
-  0x17: { row: 'auipc',  PCS: '00', MemtoReg: '0', RegWrite: '1', MemWrite: '0', ALUSrcA: '11', ALUSrcB: '11', ImmSrc: '000' },
-  0x37: { row: 'lui',    PCS: '00', MemtoReg: '0', RegWrite: '1', MemWrite: '0', ALUSrcA: '01', ALUSrcB: '11', ImmSrc: '000' },
-  0x67: { row: 'jalr',   PCS: '11', MemtoReg: '0', RegWrite: '1', MemWrite: '0', ALUSrcA: '11', ALUSrcB: '01', ImmSrc: '011' },
-};
-
-const DP_ALU_OPS = {
-  0b0000: 'add', 0b0001: 'sub', 0b0010: 'sll', 0b0100: 'slt', 0b0110: 'sltu',
-  0b1000: 'xor', 0b1010: 'srl', 0b1011: 'sra', 0b1100: 'or', 0b1110: 'and',
-};
-
-const DP_IMM_NAMES = { '000': 'U', '010': 'J', '011': 'I', '110': 'S', '111': 'B' };
-
-// Bit n of a control value written MSB first, as the tables write it.
-function dpBit(v, n) { return v[v.length - 1 - n]; }
 
 function dpHex(v) { return '0x' + (v >>> 0).toString(16).padStart(8, '0'); }
 
@@ -44,7 +21,7 @@ function dpHex(v) { return '0x' + (v >>> 0).toString(16).padStart(8, '0'); }
 // The datapath is the lecture's: word loads and stores only, no MCycle.
 function dpUnsupported(instr, op, f3, f7) {
   if (instr === 0) return 'This word is 0, which is not an instruction. The simulator steps over it.';
-  if (!DP_CONTROL[op]) {
+  if (!DECODER_TABLE[op]) {
     return 'Opcode 0x' + op.toString(16).padStart(2, '0') + ' has no row in the decoder ' +
       'table, so this datapath does not implement it.';
   }
@@ -58,58 +35,6 @@ function dpUnsupported(instr, op, f3, f7) {
   }
   if (op === 0x63 && (f3 === 0b010 || f3 === 0b011)) return 'This funct3 is not a branch.';
   return null;
-}
-
-// Extend.v
-function dpExtend(instr, immSrc) {
-  const i = instr | 0;
-  switch (immSrc) {
-    case '000': return (i & 0xFFFFF000) >>> 0;
-    case '010': return (((i >> 31) << 20) | (((i >>> 12) & 0xFF) << 12) |
-                        (((i >>> 20) & 1) << 11) | (((i >>> 21) & 0x3FF) << 1)) >>> 0;
-    case '011': return (i >> 20) >>> 0;
-    case '110': return (((i >> 25) << 5) | ((i >>> 7) & 0x1F)) >>> 0;
-    case '111': return (((i >> 31) << 12) | (((i >>> 7) & 1) << 11) |
-                        (((i >>> 25) & 0x3F) << 5) | (((i >>> 8) & 0xF) << 1)) >>> 0;
-    default: return null;   // xxx: the hardware's output is undefined
-  }
-}
-
-// ALU.v, flags included: they come from the adder whatever the op, and
-// only a subtraction makes them mean anything.
-function dpAlu(a, b, ctl) {
-  const subLike = ctl === 0b0001 || ctl === 0b0100 || ctl === 0b0110;
-  const sum = a + (subLike ? (~b >>> 0) : b) + (subLike ? 1 : 0);
-  const s = sum >>> 0;
-  const C = sum > 0xFFFFFFFF ? 1 : 0;
-  const N = s >>> 31;
-  const V = ((a >>> 31) !== (b >>> 31)) && ((b >>> 31) === N) ? 1 : 0;
-  const flags = { eq: s === 0 ? 1 : 0, lt: N ^ V, ltu: C ? 0 : 1 };
-  const sh = b & 31;
-  let r;
-  switch (ctl) {
-    case 0b0000: case 0b0001: r = s; break;
-    case 0b1000: r = a ^ b; break;
-    case 0b1100: r = a | b; break;
-    case 0b1110: r = a & b; break;
-    case 0b0010: r = a << sh; break;
-    case 0b1010: r = a >>> sh; break;
-    case 0b1011: r = (a | 0) >> sh; break;
-    case 0b0100: r = N ^ V; break;
-    case 0b0110: r = C ? 0 : 1; break;
-    default: r = null;
-  }
-  return { result: r === null ? null : r >>> 0, flags };
-}
-
-// PC_Logic.v
-function dpPcSrc(pcs, f3, flags) {
-  if (pcs === '00') return '00';
-  if (pcs === '10') return '01';
-  if (pcs === '11') return '11';
-  const cond = { 0b000: flags.eq, 0b001: 1 - flags.eq, 0b100: flags.lt,
-                 0b101: 1 - flags.lt, 0b110: flags.ltu, 0b111: 1 - flags.ltu }[f3];
-  return '0' + (cond ? '1' : '0');
 }
 
 // Every value on every wire for the instruction at the PC, from the
@@ -126,7 +51,7 @@ function dpEvaluate() {
     unsupported: dpUnsupported(instr, op, f3, f7),
   };
   if (m.unsupported) return m;
-  const c = Object.assign({}, DP_CONTROL[op]);
+  const c = Object.assign({}, DECODER_TABLE[op]);
   if (op === 0x33) c.ALUControl = (f3 << 1) | ((f7 >>> 5) & 1);
   else if (op === 0x13) c.ALUControl = (f3 << 1) | (f3 === 5 ? (instr >>> 30) & 1 : 0);
   else if (op === 0x63) c.ALUControl = 0b0001;
@@ -134,19 +59,19 @@ function dpEvaluate() {
   m.ctrl = c;
   m.rd1 = cpu.regs[rs1] >>> 0;
   m.rd2 = cpu.regs[rs2] >>> 0;
-  m.extImm = dpExtend(instr, c.ImmSrc);
-  const selA = dpBit(c.ALUSrcA, 0) === '1' ? (dpBit(c.ALUSrcA, 1) === '1' ? pcv : 0) : m.rd1;
-  const selB = dpBit(c.ALUSrcB, 0) === '1' ? (dpBit(c.ALUSrcB, 1) === '1' ? m.extImm : 4) : m.rd2;
+  m.extImm = extendImm(instr, c.ImmSrc);
+  const selA = ctlBit(c.ALUSrcA, 0) === '1' ? (ctlBit(c.ALUSrcA, 1) === '1' ? pcv : 0) : m.rd1;
+  const selB = ctlBit(c.ALUSrcB, 0) === '1' ? (ctlBit(c.ALUSrcB, 1) === '1' ? m.extImm : 4) : m.rd2;
   m.srcA = selA >>> 0;
   m.srcB = selB === null ? null : selB >>> 0;
-  const alu = dpAlu(m.srcA, m.srcB === null ? 0 : m.srcB, c.ALUControl);
+  const alu = aluCompute(m.srcA, m.srcB === null ? 0 : m.srcB, c.ALUControl);
   m.aluResult = alu.result;
   m.flags = alu.flags;
   m.readData = readMem(m.aluResult === null ? 0 : m.aluResult, 4, true) >>> 0;
   m.result = c.MemtoReg === '1' ? m.readData : m.aluResult;
-  m.pcSrc = dpPcSrc(c.PCS, f3, m.flags);
-  const base = dpBit(m.pcSrc, 1) === '1' ? m.rd1 : pcv;
-  const offset = dpBit(m.pcSrc, 0) === '1' ? (m.extImm === null ? 0 : m.extImm) : 4;
+  m.pcSrc = pcLogic(c.PCS, f3, m.flags);
+  const base = ctlBit(m.pcSrc, 1) === '1' ? m.rd1 : pcv;
+  const offset = ctlBit(m.pcSrc, 0) === '1' ? (m.extImm === null ? 0 : m.extImm) : 4;
   m.base = base >>> 0;
   m.offset = offset >>> 0;
   m.pcIn = (base + offset) >>> 0;
@@ -237,7 +162,7 @@ const DP_REG_NAME = i => 'x' + i + (i ? ' (' + ABI_NAMES[i] + ')' : '');
 
 function dpSelBit(m, name, bit) {
   const v = name === 'pcSrc' ? m.pcSrc : m.ctrl[name];
-  return dpBit(v, bit);
+  return ctlBit(v, bit);
 }
 
 // The phases of one instruction. Each lights routes (with a kind:
@@ -271,8 +196,8 @@ function dpPhases(m) {
   // branch is a don't-care or not on its own account.
   const ctlBus = (name) => [
     [name, /^x+$/.test(c[name]) ? 'x' : 'ctrl', c[name]],
-    [name + '0', dpBit(c[name], 0) === 'x' ? 'x' : 'ctrl', '', 'nochip'],
-    [name + '1', dpBit(c[name], 1) === 'x' ? 'x' : 'ctrl', '', 'nochip'],
+    [name + '0', ctlBit(c[name], 0) === 'x' ? 'x' : 'ctrl', '', 'nochip'],
+    [name + '1', ctlBit(c[name], 1) === 'x' ? 'x' : 'ctrl', '', 'nochip'],
   ];
   phases.push({
     stage: 'D', title: 'Decoder',
@@ -289,18 +214,18 @@ function dpPhases(m) {
       ctl('PCS'), ctl('MemtoReg'), ctl('MemWrite'),
       ['ALUControl', 'ctrl', bin(c.ALUControl, 4)],
       ...ctlBus('ALUSrcA'), ...ctlBus('ALUSrcB'),
-      ctl('ImmSrc', c.ImmSrc + (DP_IMM_NAMES[c.ImmSrc] ? ' ' + DP_IMM_NAMES[c.ImmSrc] : '')),
+      ctl('ImmSrc', c.ImmSrc + (IMM_SRC_NAMES[c.ImmSrc] ? ' ' + IMM_SRC_NAMES[c.ImmSrc] : '')),
       ctl('RegWrite'),
     ],
     caption: `A ${fmt}-type instruction: its fields fan out to the Decoder, the register file and Extend` +
       (fmt === 'R' ? '.' : ', and fields this format does not have are ignored (dashed).') +
       ` Opcode <code>0x${m.op.toString(16).padStart(2, '0')}</code> is the <b>${c.row}</b> row; ` +
-      `ALUControl <code>${bin(c.ALUControl, 4)}</code> is <b>${DP_ALU_OPS[c.ALUControl] || '?'}</b>. ` +
+      `ALUControl <code>${bin(c.ALUControl, 4)}</code> is <b>${ALU_OP_NAMES[c.ALUControl] || '?'}</b>. ` +
       'An x is a don\'t-care.'
   });
-  const aSel0 = dpBit(c.ALUSrcA, 0), aSel1 = dpBit(c.ALUSrcA, 1);
-  const bSel0 = dpBit(c.ALUSrcB, 0), bSel1 = dpBit(c.ALUSrcB, 1);
-  const p0 = dpBit(m.pcSrc, 0), p1 = dpBit(m.pcSrc, 1);
+  const aSel0 = ctlBit(c.ALUSrcA, 0), aSel1 = ctlBit(c.ALUSrcA, 1);
+  const bSel0 = ctlBit(c.ALUSrcB, 0), bSel1 = ctlBit(c.ALUSrcB, 1);
+  const p0 = ctlBit(m.pcSrc, 0), p1 = ctlBit(m.pcSrc, 1);
   const used = (on) => on ? 'data' : 'unused';
   const ext = m.extImm === null ? 'x' : hx(m.extImm);
   phases.push({
@@ -329,9 +254,9 @@ function dpPhases(m) {
     ],
     caption: 'Extend builds ' +
       (m.extImm === null ? 'nothing meaningful: ImmSrc is a don\'t-care for this row.'
-        : `the ${DP_IMM_NAMES[c.ImmSrc]}-type immediate <code>${ext}</code> (${m.extImm | 0}).`)
+        : `the ${IMM_SRC_NAMES[c.ImmSrc]}-type immediate <code>${ext}</code> (${m.extImm | 0}).`)
   });
-  const aluName = DP_ALU_OPS[c.ALUControl];
+  const aluName = ALU_OP_NAMES[c.ALUControl];
   const pcsName = { '00': 'not a control instruction', '01': 'a branch', '10': 'jal', '11': 'jalr' }[c.PCS];
   phases.push({
     stage: 'E', title: 'ALU and PC Logic',
@@ -423,13 +348,13 @@ const DP_H_DEFAULT = 420;
 const DP_KIND_COLOUR = { data: '#e64553', field: '#8839ef', ctrl: '#1e66f5', unused: '#9ca0b0', x: '#9ca0b0' };
 
 function dpSvg() {
-  return document.getElementById(!pipeMode ? 'dpSvg' : pipeBP.on ? 'dpPipeBpSvg' : 'dpPipeSvg');
+  return document.getElementById(!pipeline.on ? 'dpSvg' : pipeline.predictor.on ? 'dpPipeBpSvg' : 'dpPipeSvg');
 }
 function dpOverlayEl() { const svg = dpSvg(); return svg && svg.querySelector('.dp-overlay'); }
 function dpEl(i) { const svg = dpSvg(); return svg && svg.querySelector(`[data-e="${i}"]`); }
 
 function dpActive() {
-  return !!dpSvg() && simEngineMode !== 'hdl' &&
+  return !!dpSvg() && ui.engine !== 'hdl' &&
     (document.body.classList.contains('dp-open') || document.body.classList.contains('dp-in-panel'));
 }
 
@@ -437,7 +362,7 @@ function dpActive() {
 // reset or a reassemble.
 function dpCurrentStamp() {
   return [cpu.pc >>> 0, cpu.instructionCount, stepHistory.entries.length, program.assembled ? 1 : 0,
-          program.machineCode.length, pipeMode ? cpu.totalCycles + JSON.stringify(pipeHaz) + JSON.stringify(pipeBP) : ''].join(':');
+          program.machineCode.length, pipeline.on ? cpu.totalCycles + JSON.stringify(pipeline.hazards) + JSON.stringify(pipeline.predictor) : ''].join(':');
 }
 
 // What changes the values without changing the instruction: an edit in
@@ -461,8 +386,8 @@ function dpSync(force) {
   dpValueStamp = values;
   if (!force && stamp === dpStamp && dpModel) {
     if (dpBusy) return;
-    dpModel = pipeMode ? pdpEvaluate() : dpEvaluate();
-    dpPhaseList = pipeMode ? [] : dpPhases(dpModel);
+    dpModel = pipeline.on ? pdpEvaluate() : dpEvaluate();
+    dpPhaseList = pipeline.on ? [] : dpPhases(dpModel);
     dpPhase = Math.min(dpPhase, dpPhaseList.length);
     dpRender(false);
     return;
@@ -470,7 +395,7 @@ function dpSync(force) {
   dpStamp = stamp;
   dpAnimToken++;
   dpBusy = false;
-  dpModel = !program.assembled ? null : pipeMode ? (programFinished ? null : pdpEvaluate()) : dpEvaluate();
+  dpModel = !program.assembled ? null : pipeline.on ? (programFinished ? null : pdpEvaluate()) : dpEvaluate();
   dpPhaseList = !dpModel || dpModel.pipe ? [] : dpPhases(dpModel);
   dpPhase = 0;
   dpRender(false);
@@ -682,7 +607,7 @@ function dpFormatOf(op, f3) {
 // only a slice of the immediate, which the last row gathers.
 function dpFieldMeaning(m, fmt, name) {
   if (name === 'opcode') {
-    const row = DP_CONTROL[m.op];
+    const row = DECODER_TABLE[m.op];
     return '0x' + m.op.toString(16).padStart(2, '0') + ' · ' + (row ? row.row : 'no decoder row');
   }
   if (name === 'rd') return DP_REG_NAME(m.rd);
@@ -691,7 +616,7 @@ function dpFieldMeaning(m, fmt, name) {
   if (name === 'shamt') return 'shift by ' + m.rs2;
   if (name === 'funct3') {
     if (m.op === 0x63) return DP_BRANCH_NAMES[m.f3] || 'not a branch';
-    if (m.ctrl && (m.op === 0x33 || m.op === 0x13)) return 'ALU ' + (DP_ALU_OPS[m.ctrl.ALUControl] || '?');
+    if (m.ctrl && (m.op === 0x33 || m.op === 0x13)) return 'ALU ' + (ALU_OP_NAMES[m.ctrl.ALUControl] || '?');
     if (m.op === 0x03 || m.op === 0x23) return m.f3 === 2 ? 'word' : 'byte/half';
     return '';
   }
@@ -710,13 +635,13 @@ function dpControlTable(m) {
   const cur = m.ctrl && m.ctrl.row;
   let rows = '';
   for (const op of DP_CONTROL_ORDER) {
-    const c = DP_CONTROL[op];
+    const c = DECODER_TABLE[op];
     const on = c.row === cur;
     let alu = DP_ALUCTL_TEXT[c.row] || '0000 (add)';
     if (on && (c.row === 'DP Reg' || c.row === 'DP Imm')) {
-      alu += `<br>= ${m.ctrl.ALUControl.toString(2).padStart(4, '0')} (${DP_ALU_OPS[m.ctrl.ALUControl] || '?'})`;
+      alu += `<br>= ${m.ctrl.ALUControl.toString(2).padStart(4, '0')} (${ALU_OP_NAMES[m.ctrl.ALUControl] || '?'})`;
     }
-    const imm = c.ImmSrc + ' (' + (DP_IMM_NAMES[c.ImmSrc] || 'R') + ')';
+    const imm = c.ImmSrc + ' (' + (IMM_SRC_NAMES[c.ImmSrc] || 'R') + ')';
     rows += `<tr${on ? ' class="dp-ctl-on"' : ''}><td>${op.toString(16).toUpperCase().padStart(2, '0')}</td>` +
       `<td class="dp-ctl-name">${c.row}</td><td>${c.PCS}</td><td>${c.MemtoReg}</td><td>${c.RegWrite}</td>` +
       `<td>${c.MemWrite}</td><td>${c.ALUSrcA}</td><td>${c.ALUSrcB}</td><td>${imm}</td><td>${alu}</td></tr>`;
@@ -748,7 +673,7 @@ function dpDrawEncoding(m) {
       `<td class="dp-enc-${kind}">${escapeHtml(name)}</td><td>${escapeHtml(dpFieldMeaning(m, fmt, name))}</td></tr>`;
   }
   const immSrc = fmt === 'Ish' ? null : DP_FORMAT_IMMSRC[fmt];
-  const imm = immSrc ? dpExtend(m.instr, immSrc) : null;
+  const imm = immSrc ? extendImm(m.instr, immSrc) : null;
   el.innerHTML =
     `<div class="dp-enc-title"><b>${fmt ? (fmt === 'Ish' ? 'I' : fmt) + '-type' : 'Encoding'}</b> ` +
     `<code>${escapeHtml(m.text || dpHex(m.instr))}</code></div>` +
@@ -817,7 +742,7 @@ function dpRender(animate) {
   const phaseEl = document.getElementById('dpPhase');
   const capEl = document.getElementById('dpCaption');
   const total = dpPhaseList.length;
-  if (pipeMode) {
+  if (pipeline.on) {
     pdpRenderTimeline();
     pdpDrawEncodings(dpModel);
   } else {
@@ -869,17 +794,17 @@ function dpUpdateOwnButtons() {
   const play = document.getElementById('dpPlayBtn');
   if (play) play.textContent = pdpPlaying ? '⏸' : '▶▶';
   const tip = (id, t) => { const b = document.getElementById(id); if (b) b.title = t; };
-  tip('dpPrevBtn', pipeMode ? 'Back one clock cycle' : 'Previous phase');
-  tip('dpNextBtn', pipeMode ? 'Next clock cycle' : 'Next phase; at the clock edge, execute the instruction');
-  tip('dpPlayBtn', pipeMode ? 'Clock one cycle after another; press again to pause' : 'Play every phase of this instruction, then execute it');
-  if (pipeMode) {
-    const ok = program.assembled && !run.running && simEngineMode !== 'hdl';
+  tip('dpPrevBtn', pipeline.on ? 'Back one clock cycle' : 'Previous phase');
+  tip('dpNextBtn', pipeline.on ? 'Next clock cycle' : 'Next phase; at the clock edge, execute the instruction');
+  tip('dpPlayBtn', pipeline.on ? 'Clock one cycle after another; press again to pause' : 'Play every phase of this instruction, then execute it');
+  if (pipeline.on) {
+    const ok = program.assembled && !run.running && ui.engine !== 'hdl';
     set('dpPrevBtn', ok && !pdpPlaying && stepHistory.entries.length > 0);
     set('dpNextBtn', ok && !programFinished);
     set('dpPlayBtn', ok && (pdpPlaying || !programFinished));
     return;
   }
-  const ok = !!dpModel && !run.running && simEngineMode !== 'hdl';
+  const ok = !!dpModel && !run.running && ui.engine !== 'hdl';
   set('dpPrevBtn', ok && (dpPhase > 0 || stepHistory.entries.length > 0));
   set('dpNextBtn', ok && !programFinished);
   set('dpPlayBtn', ok && !programFinished);
@@ -947,8 +872,8 @@ function dpCommit() {
 }
 
 function dpNext() {
-  if (pipeMode) { pdpPlaying = false; if (!run.running && !programFinished && program.assembled) dpCommit(); return; }
-  if (!dpModel || run.running || simEngineMode === 'hdl') return;
+  if (pipeline.on) { pdpPlaying = false; if (!run.running && !programFinished && program.assembled) dpCommit(); return; }
+  if (!dpModel || run.running || ui.engine === 'hdl') return;
   if (dpBusy) { dpAnimToken++; dpBusy = false; dpDrawStatic(dpPhase); dpUpdateButtons(); return; }
   if (dpPhase >= dpPhaseList.length) { dpCommit(); return; }
   dpPhase++;
@@ -956,7 +881,7 @@ function dpNext() {
 }
 
 function dpPrev() {
-  if (pipeMode) { pdpPlaying = false; if (!run.running && stepHistory.entries.length) { stepBack(); dpSync(true); } return; }
+  if (pipeline.on) { pdpPlaying = false; if (!run.running && stepHistory.entries.length) { stepBack(); dpSync(true); } return; }
   if (!dpModel || run.running) return;
   dpAnimToken++;
   dpBusy = false;
@@ -975,8 +900,8 @@ function dpPrev() {
 
 // Plays the rest of this instruction's phases, then lets the edge happen.
 async function dpPlay() {
-  if (pipeMode) { pdpPlay(); return; }
-  if (!dpModel || run.running || simEngineMode === 'hdl') return;
+  if (pipeline.on) { pdpPlay(); return; }
+  if (!dpModel || run.running || ui.engine === 'hdl') return;
   const stamp = dpStamp;
   while (dpPhase < dpPhaseList.length) {
     dpPhase++;
@@ -1006,7 +931,7 @@ const PDP_COLOUR = { F: '#209fb5', D: '#40a02b', E: '#fe640b', M: '#8839ef', W: 
 const PDP_STAGE_NAMES = { F: 'Fetch', D: 'Decode', E: 'Execute', M: 'Memory', W: 'Writeback' };
 const PDP_FWD_FROM = { '00': 'E', '01': 'W', '10': 'M' };
 
-function pdpTable() { return PDP_DRAW[pipeBP.on ? 'bp' : 'full']; }
+function pdpTable() { return PDP_DRAW[pipeline.predictor.on ? 'bp' : 'full']; }
 
 function pdpText(addr) {
   const item = program.machineCode.find(it => it.address === (addr >>> 0) && it.bytes);
@@ -1017,7 +942,7 @@ function pdpEvaluate() {
   const s = pipeEvaluate();
   return {
     pipe: true, s, cycle: cpu.totalCycles,
-    st: { F: s.instrF ? { pc: s.pcF, instr: s.instrF } : null, D: pipe.D, E: pipe.E, M: pipe.M, W: pipe.W },
+    st: { F: s.instrF ? { pc: s.pcF, instr: s.instrF } : null, D: pipeline.regs.D, E: pipeline.regs.E, M: pipeline.regs.M, W: pipeline.regs.W },
   };
 }
 
@@ -1031,7 +956,7 @@ function pdpRoutes(m) {
   on('f_pc', 'F', hex(s.pcF));
   on('f_pcf_d', 'F');
   if (st.F) on('f_instr', 'F', hex(s.instrF));
-  if (pipeBP.on) {
+  if (pipeline.predictor.on) {
     // The adder only ever works out PCNextE, for the instruction in E.
     on('bp_pcf', 'F');
     if (st.E) {
@@ -1081,8 +1006,8 @@ function pdpRoutes(m) {
       if (d.MemtoReg) on('d_memtoreg', 'D');
       if (d.MemWrite) on('d_memwrite', 'D');
       on('d_aluctl', 'D');
-      if (dpBit(d.ALUSrcB, 0) === '1') on('d_alusrcb', 'D');
-      if (dpBit(d.ALUSrcA, 0) === '1') on('d_alusrca', 'D');
+      if (ctlBit(d.ALUSrcB, 0) === '1') on('d_alusrcb', 'D');
+      if (ctlBit(d.ALUSrcA, 0) === '1') on('d_alusrca', 'D');
     }
   }
 
@@ -1091,13 +1016,13 @@ function pdpRoutes(m) {
     const fromA = PDP_FWD_FROM[s.forwardAE], fromB = PDP_FWD_FROM[s.forwardBE];
     if (s.forwardAE === '00') on('e_rd1', 'E'); else off('e_rd1');
     if (s.forwardBE === '00') on('e_rd2', 'E'); else off('e_rd2');
-    const aRD1 = dpBit(e.ALUSrcA, 0) !== '1';
+    const aRD1 = ctlBit(e.ALUSrcA, 0) !== '1';
     if (aRD1 || s.pcSrc === '11') on('e_srca', fromA, aRD1 ? hex(s.srcAfwd) : null); else off('e_srca');
     on('e_srca_alu', 'E', hex(s.srcA));
     if (e.ALUSrcA === '01') on('e_zero', 'E'); else off('e_zero');
     if (e.ALUSrcA === '11') on('e_pce_a', 'E'); else off('e_pce_a');
     if (!aRD1) on('e_alusrca', 'E');
-    const bRD2 = dpBit(e.ALUSrcB, 0) !== '1';
+    const bRD2 = ctlBit(e.ALUSrcB, 0) !== '1';
     if (bRD2) on('e_fwdb', fromB); else off('e_fwdb');
     if (e.MemWrite) on('e_wd', fromB, hex(s.writeDataE)); else off('e_wd');
     if (e.ALUSrcB === '11') on('e_ext', 'E', hex(e.extImm)); else off('e_ext');
@@ -1154,7 +1079,7 @@ function pdpRoutes(m) {
 // Which input each mux passes, and whose value it is.
 function pdpMuxes(m) {
   const s = m.s, st = m.st, out = [];
-  if (pipeBP.on) {
+  if (pipeline.predictor.on) {
     if (st.E) {
       out.push(['pcTop', s.pcSrcE ? '1' : '0', 'E']);
       out.push(['pcLow', s.pcSrc === '11' ? '1' : '0', s.pcSrc === '11' ? PDP_FWD_FROM[s.forwardAE] : 'E']);
@@ -1172,8 +1097,8 @@ function pdpMuxes(m) {
     const e = st.E;
     out.push(['fwdAE', s.forwardAE, PDP_FWD_FROM[s.forwardAE]]);
     out.push(['fwdBE', s.forwardBE, PDP_FWD_FROM[s.forwardBE]]);
-    out.push(['aluSrcA', dpBit(e.ALUSrcA, 0) === '1' ? e.ALUSrcA : 'x0', dpBit(e.ALUSrcA, 0) === '1' ? 'E' : PDP_FWD_FROM[s.forwardAE]]);
-    out.push(['aluSrcB', dpBit(e.ALUSrcB, 0) === '1' ? e.ALUSrcB : 'x0', dpBit(e.ALUSrcB, 0) === '1' ? 'E' : PDP_FWD_FROM[s.forwardBE]]);
+    out.push(['aluSrcA', ctlBit(e.ALUSrcA, 0) === '1' ? e.ALUSrcA : 'x0', ctlBit(e.ALUSrcA, 0) === '1' ? 'E' : PDP_FWD_FROM[s.forwardAE]]);
+    out.push(['aluSrcB', ctlBit(e.ALUSrcB, 0) === '1' ? e.ALUSrcB : 'x0', ctlBit(e.ALUSrcB, 0) === '1' ? 'E' : PDP_FWD_FROM[s.forwardBE]]);
   }
   if (st.M && st.M.MemWrite) out.push(['fwdM', s.forwardM ? '1' : '0', s.forwardM ? 'W' : 'M']);
   if (st.W) out.push(['result', st.W.MemtoReg ? '1' : '0', 'W']);
@@ -1181,7 +1106,7 @@ function pdpMuxes(m) {
 }
 
 function pdpHazardNotes(m) {
-  const s = m.s, st = m.st, H = pipeHaz, notes = [];
+  const s = m.s, st = m.st, H = pipeline.hazards, notes = [];
   const reg = i => 'x' + i;
   if (s.forwardAE !== '00') notes.push(`ForwardAE = ${s.forwardAE}: rs1E (${reg(st.E.rs1)}) is ${s.forwardAE === '10' ? 'rdM' : 'rdW'}, so SrcA takes ${s.forwardAE === '10' ? 'ALUResultM' : 'ResultW'}`);
   if (s.forwardBE !== '00') notes.push(`ForwardBE = ${s.forwardBE}: rs2E (${reg(st.E.rs2)}) is ${s.forwardBE === '10' ? 'rdM' : 'rdW'}, so it takes ${s.forwardBE === '10' ? 'ALUResultM' : 'ResultW'}`);
@@ -1191,7 +1116,7 @@ function pdpHazardNotes(m) {
   if (s.lwStall) notes.push(`lwStall: the load in E writes ${reg(st.E.rd)}, which Decode reads. StallF and StallD hold F and D, FlushE puts a bubble in E`);
   if (s.drain) notes.push('the instruction in Decode is not a datapath instruction: F and D hold until E, M and W are empty');
   if (s.serialExec) notes.push('the pipeline behind it is empty, so the functional model executes it now, in Decode');
-  if (pipeBP.on) {
+  if (pipeline.predictor.on) {
     const hx = v => '<code>' + dpHex(v) + '</code>';
     if (s.mispredict) {
       const why = s.brMiss
@@ -1360,7 +1285,7 @@ function pdpDrawEncodings(m) {
     }
     html += '</div>';
   }
-  if (pipeBP.on) html += pdpBhtTable(m);
+  if (pipeline.predictor.on) html += pdpBhtTable(m);
   el.innerHTML = html;
   dpPlaceEncoding();
 }
@@ -1368,17 +1293,17 @@ function pdpDrawEncodings(m) {
 // The BHT's entries: every one when the table is small, otherwise those
 // in use. The entries Fetch and Execute read this cycle are marked.
 function pdpBhtTable(m) {
-  const s = m.s, n = pipeBP.entries, bht = pipe.bht;
+  const s = m.s, n = pipeline.predictor.entries, bht = pipeline.regs.bht;
   const iF = pipeBhtIndex(s.pcF), iE = m.st.E ? pipeBhtIndex(m.st.E.pc) : -1;
   const rows = [];
   for (let i = 0; i < n; i++) {
     if (n > 16 && i !== iF && i !== iE && !bht.pr[i] && !bht.bta[i]) continue;
     const marks = (i === iF ? `<b style="color:${PDP_COLOUR.F}">F</b>` : '') + (i === iE ? `<b style="color:${PDP_COLOUR.E}">E</b>` : '');
-    const pr = pipeBP.bits === 2 ? bht.pr[i].toString(2).padStart(2, '0') : String(bht.pr[i]);
+    const pr = pipeline.predictor.bits === 2 ? bht.pr[i].toString(2).padStart(2, '0') : String(bht.pr[i]);
     rows.push(`<tr${i === iF || i === iE ? ' class="dp-ctl-on"' : ''}><td>${marks}</td><td>${i}</td><td>${pr}</td><td>${dpHex(bht.bta[i])}</td></tr>`);
   }
   const k = Math.log2(n) + 1;
-  return `<div class="pdp-enc-row pdp-bht"><div class="pdp-enc-head"><b>BHT</b> ${n} × ${pipeBP.bits}-bit, index PC[${k}:2]` +
+  return `<div class="pdp-enc-row pdp-bht"><div class="pdp-enc-head"><b>BHT</b> ${n} × ${pipeline.predictor.bits}-bit, index PC[${k}:2]` +
     (n > 16 ? ', entries in use' : '') + '</div>' +
     '<table class="dp-ctl-table"><thead><tr><th></th><th>Index</th><th>PrTaken</th><th>PrBTA</th></tr></thead>' +
     `<tbody>${rows.join('')}</tbody></table>` +
@@ -1391,7 +1316,7 @@ async function pdpPlay() {
   if (pdpPlaying) { pdpPlaying = false; dpUpdateButtons(); return; }
   pdpPlaying = true;
   dpUpdateButtons();
-  while (pdpPlaying && pipeMode && program.assembled && !programFinished && !run.running && simEngineMode !== 'hdl') {
+  while (pdpPlaying && pipeline.on && program.assembled && !programFinished && !run.running && ui.engine !== 'hdl') {
     dpCommit();
     await new Promise(r => setTimeout(r, 900 / dpSpeed));
   }
@@ -1407,7 +1332,7 @@ const PDP_TL_COLS = 18;
 let dpView = 'diagram';
 
 function dpSetView(v) {
-  dpView = v === 'timeline' && pipeMode ? 'timeline' : 'diagram';
+  dpView = v === 'timeline' && pipeline.on ? 'timeline' : 'diagram';
   document.body.classList.toggle('dp-view-timeline', dpView === 'timeline');
   const d = document.getElementById('dpViewDiagram'), t = document.getElementById('dpViewTimeline');
   if (d) d.classList.toggle('active', dpView === 'diagram');
@@ -1421,17 +1346,17 @@ function dpToggleView() { dpSetView(dpView === 'timeline' ? 'diagram' : 'timelin
 function pdpRenderTimeline() {
   const host = document.getElementById('dpTimeline');
   if (!host || dpView !== 'timeline') return;
-  if (!program.assembled || !pipe) { host.innerHTML = '<p class="pdp-tl-empty">Assemble a program to chart it.</p>'; return; }
+  if (!program.assembled || !pipeline.regs) { host.innerHTML = '<p class="pdp-tl-empty">Assemble a program to chart it.</p>'; return; }
   // A few columns before the window, so bubbles already in flight at its
   // left edge are known.
   const all = [];
-  for (let t = pipe.trace; t && all.length < PDP_TL_COLS + 3; t = t.prev) all.unshift(t);
+  for (let t = pipeline.regs.trace; t && all.length < PDP_TL_COLS + 3; t = t.prev) all.unshift(t);
   if (!programFinished) {
     const s = pipeEvaluate();
     const rec = r => r ? { seq: r.seq, pc: r.pc } : null;
     all.push({
       cyc: cpu.totalCycles, live: true,
-      st: [s.instrF ? { seq: pipe.seqF, pc: s.pcF } : null, rec(pipe.D), rec(pipe.E), rec(pipe.M), rec(pipe.W)],
+      st: [s.instrF ? { seq: pipeline.regs.seqF, pc: s.pcF } : null, rec(pipeline.regs.D), rec(pipeline.regs.E), rec(pipeline.regs.M), rec(pipeline.regs.W)],
       stall: s.stallD, flushD: s.flushD, flushE: s.flushE && !s.stallD, miss: !!s.mispredict,
       serial: !!s.serialExec,
     });
@@ -1589,7 +1514,7 @@ function toggleDpDock() {
 let dpBlockKey = null, dpBlockVal = null;
 const DP_MULTI_BLOCK = { msg: 'The datapath is not available in Multi-cycle mode.' };
 function dpBlocker() {
-  if (jsArch === 'multi') return DP_MULTI_BLOCK;
+  if (pipeline.arch === 'multi') return DP_MULTI_BLOCK;
   const key = program.assembled + ':' + program.machineCode.length + ':' + (lastAssembledCode || '').length + ':' + editorLanguageMode;
   if (key === dpBlockKey) return dpBlockVal;
   dpBlockKey = key;
@@ -1614,7 +1539,7 @@ function dpBlocker() {
 // One toolbar button for the engine's visualisation: the datapath in JS
 // mode, the waveform in HDL mode. On a phone each is a panel tab.
 function vizShown() {
-  const hdl = simEngineMode === 'hdl';
+  const hdl = ui.engine === 'hdl';
   if (mobileMode()) {
     const pd = panelDock && panelDock[hdl ? 'waveform' : 'datapath'];
     return !!(pd && pd.visible);
@@ -1623,7 +1548,7 @@ function vizShown() {
 }
 
 function toggleVisualisation() {
-  const hdl = simEngineMode === 'hdl';
+  const hdl = ui.engine === 'hdl';
   if (!hdl && dpBlocker()) return;
   if (mobileMode()) {
     const name = hdl ? 'waveform' : 'datapath';
@@ -1646,13 +1571,13 @@ function toggleVisualisation() {
 // waveform), or the strip's in pipelined mode, where those step cycles.
 let floatStepsWanted = false;
 function floatOnDpTab() {
-  return simEngineMode !== 'hdl' && document.body.classList.contains('dp-in-panel') &&
+  return ui.engine !== 'hdl' && document.body.classList.contains('dp-in-panel') &&
     !!(panelDock && panelDock.datapath && panelDock.datapath.visible) &&
     typeof mobileTab !== 'undefined' && mobileTab === 'datapath';
 }
 function floatStepsMode() {
-  if (simEngineMode === 'hdl') return 'tb';
-  return pipeMode || floatOnDpTab() ? 'dp' : 'tb';
+  if (ui.engine === 'hdl') return 'tb';
+  return pipeline.on || floatOnDpTab() ? 'dp' : 'tb';
 }
 function updateFloatSteps() {
   const bar = document.getElementById('floatSteps');
@@ -1702,7 +1627,7 @@ function initFloatSteps() {
 function updateVizButton() {
   const b = document.getElementById('btnViz');
   if (!b) return;
-  const hdl = simEngineMode === 'hdl';
+  const hdl = ui.engine === 'hdl';
   const block = hdl ? null : dpBlocker();
   b.innerHTML = hdl ? '<span class="btn-ico">∿</span><span class="btn-text">Waveform</span>'
                     : '<span class="btn-ico">⧉</span><span class="btn-text">Datapath</span>';
@@ -1811,11 +1736,11 @@ let dpWasBlocked = false;
 // The microarchitecture, the drawing or a hazard switch changed.
 function dpOnModeChange() {
   const b = document.body.classList;
-  b.toggle('dp-pipe', pipeMode);
-  b.toggle('dp-bp', pipeBP.on);
+  b.toggle('dp-pipe', pipeline.on);
+  b.toggle('dp-bp', pipeline.predictor.on);
   const arch = document.getElementById('dpArch');
-  if (arch) arch.value = pipeMode ? 'pipe' : 'single';
-  dpSetView(pipeMode ? dpView : 'diagram');
+  if (arch) arch.value = pipeline.on ? 'pipe' : 'single';
+  dpSetView(pipeline.on ? dpView : 'diagram');
   pdpPlaying = false;
   dpClear();
   dpSync(true);

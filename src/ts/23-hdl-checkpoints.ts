@@ -17,9 +17,6 @@
 const HDL_CK_EVERY = 1024;    // cycles between checkpoints, to start with
 const HDL_CK_KEEP = 40;       // past this many the spacing doubles
 const HDL_CK_VERIFY = 16;     // fewest cycles of the old recording a replay must reproduce
-let hdlCk = null;             // { key, every, at: Map<cycle, { txt, mem }> } for the current recording
-let hdlCkOff = null;          // { key, why } - sources whose checkpoints are off
-let hdlEpoch = 0;             // bumped whenever the recording is discarded
 
 // Verilator runs fast enough to need checkpoints only far apart, and only
 // near the end of the recording: Resume starts there, an input change
@@ -29,7 +26,6 @@ let hdlEpoch = 0;             // bumped whenever the recording is discarded
 // recording as an Icarus replay is, and one that does not reproduce it
 // turns Verilator's checkpoints off for those sources.
 const HDL_VL_CK_EVERY = 200000;
-let hdlVlCkOff = null;        // the compiled design whose checkpoints are off
 
 // The testbench's own state, beside the design's.
 function hdlCkTbState(rb, dbuf) {
@@ -48,7 +44,7 @@ function hdlVlCkPick(t, key, limit) {
   return t.vlCks.find(c => c.k > 0 && c.k <= limit) || null;
 }
 function hdlVlCkFailed(k, key) {
-  hdlVlCkOff = key;
+  hdlCheckpoints.vlOff = key;
   hdlLog('A replay from the checkpoint at cycle ' + k + ' did not match the recording, so this ' +
     'design holds state the checkpoints do not save, or an initial block in it assigns with <= ' +
     '(which Verilator reports as MULTIDRIVEN), which lands after the checkpoint is restored. Checkpoints ' +
@@ -139,7 +135,7 @@ function hdlShiftVcd(text, k) {
 
 function hdlCkModules() {
   const mods = new Map();
-  for (const f of hdlFiles) {
+  for (const f of hdlSources.files) {
     // Attributes go too, minding that `@(*)` is not one.
     const src = hdlStripNoise(f.src).replace(/\(\*(?!\s*\))[\s\S]*?\*\)/g, ' ');
     const re = /\bmodule\s+([A-Za-z_]\w*)/g;
@@ -602,10 +598,10 @@ function hdlStitchVcd(a, b, k) { return hdlVcdText(hdlVcdJoin(a, b, k)); }
 // Keep the newest checkpoints at an even spacing that doubles as the
 // recording grows, plus the last one, which is where an extension starts.
 function hdlCkAdd(found) {
-  for (const k in found) if (found[k].txt) hdlCk.at.set(+k, found[k]);
-  while (hdlCk.at.size > HDL_CK_KEEP) {
-    hdlCk.every *= 2;
-    const last = Math.max(...hdlCk.at.keys());
-    for (const k of [...hdlCk.at.keys()]) if (k % hdlCk.every && k !== last) hdlCk.at.delete(k);
+  for (const k in found) if (found[k].txt) hdlCheckpoints.set.at.set(+k, found[k]);
+  while (hdlCheckpoints.set.at.size > HDL_CK_KEEP) {
+    hdlCheckpoints.set.every *= 2;
+    const last = Math.max(...hdlCheckpoints.set.at.keys());
+    for (const k of [...hdlCheckpoints.set.at.keys()]) if (k % hdlCheckpoints.set.every && k !== last) hdlCheckpoints.set.at.delete(k);
   }
 }

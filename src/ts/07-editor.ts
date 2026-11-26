@@ -17,7 +17,6 @@ let currentFileName = 'basic.asm';
 // discard its own result instead of overwriting the editor.
 let exampleLoadToken = 0;
 let lastAssembledCode = null;
-let heapPointer = 0x24000;
 
 // EXAMPLE_FILENAMES and EXAMPLE_MENU are declared and loaded in
 // 13-tabs-examples-language.ts, next to updateExampleSelectorOptions().

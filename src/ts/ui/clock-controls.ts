@@ -4,8 +4,8 @@
 
 import { clock, uart } from '../machine/state';
 import { cpuHz, fmtHz, uartCharCycles } from '../machine/clock';
+import { setUartSendMode } from '../machine/uart';
 
-declare function setUartSendMode(mode: string): void;
 declare function updateStats(): void;
 
 const listeners: Array<() => void> = [];

@@ -3,9 +3,7 @@
 
 import { INSTRUCTIONS, REG_NAMES } from '../isa/instructions';
 import { program } from '../machine/state';
-
-// The label resolver (05-assembler.ts).
-declare function resolveAddrRef(s: string, allowForward?: boolean): number;
+import { resolveAddrRef } from './assembler';
 
 // Registers are named `x0`-`x31` or by their ABI name. A bare number is
 // NOT a register: accepting it turns the typo `add t0, t0, 1` into a

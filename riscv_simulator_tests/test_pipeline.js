@@ -61,8 +61,8 @@ function assembleSrc(src) {
 }
 
 function setPipe(on, haz, bp) {
-  ev(`jsArch = '${on ? 'pipe' : 'single'}'; pipeMode = ${!!on}; pipeHaz = Object.assign({}, PIPE_HAZ_DEFAULT, ${JSON.stringify(haz || {})});
-      pipeBP = Object.assign({}, PIPE_BP_DEFAULT, ${JSON.stringify(bp || {})})`);
+  ev(`pipeline.arch = '${on ? 'pipe' : 'single'}'; pipeline.on = ${!!on}; pipeline.hazards = Object.assign({}, PIPE_HAZ_DEFAULT, ${JSON.stringify(haz || {})});
+      pipeline.predictor = Object.assign({}, PIPE_BP_DEFAULT, ${JSON.stringify(bp || {})})`);
 }
 
 // Run the pipeline from reset until it finishes; returns the cycle count.
@@ -161,7 +161,7 @@ setTimeout(async () => {
     archSel.value = 'multi';
     archSel.dispatchEvent(new win.Event('change'));
     check('Settings\' pipeline and microarchitecture controls work before Settings is ever opened',
-      ev('pipeBP.on') === true && ev('jsArch') === 'multi');
+      ev('pipeline.predictor.on') === true && ev('pipeline.arch') === 'multi');
     bpBox.checked = false;
     bpBox.dispatchEvent(new win.Event('change'));
     archSel.value = 'single';
@@ -195,7 +195,7 @@ setTimeout(async () => {
         if (n < fTrace.length && r !== fTrace[n] && !bad) bad = `after instruction ${n}, cycle ${c}`;
       }
       check(`[${stall} stall] every retirement leaves the registers the functional model has`, !bad, bad);
-      check(`[${stall} stall] the program exits through its ecall`, ev('pipe.exited') === true);
+      check(`[${stall} stall] the program exits through its ecall`, ev('pipeline.regs.exited') === true);
       check(`[${stall} stall] final registers match`, JSON.stringify(Array.from(ev('cpu.regs'))) === JSON.stringify(fRegs));
       check(`[${stall} stall] data memory matches`,
         JSON.stringify(ev('Array.from({length: 12}, (_, i) => readMem(program.labels.buf + 4 * i, 4, true))')) === JSON.stringify(fMem));
@@ -326,7 +326,7 @@ setTimeout(async () => {
         const n = ev('cpu.instructionCount');
         if (n < tr.length && JSON.stringify(Array.from(ev('cpu.regs'))) !== tr[n] && !bad) bad = `instruction ${n}, cycle ${c}`;
       }
-      check(`${JSON.stringify(bp)}: every retirement matches the functional model`, !bad && ev('pipe.exited'), bad);
+      check(`${JSON.stringify(bp)}: every retirement matches the functional model`, !bad && ev('pipeline.regs.exited'), bad);
     }
     for (const f of ['HelloWorld.asm', 'DIP_to_LED.asm', 'Circle_delay_accel.asm']) {
       setPipe(false);
@@ -348,26 +348,26 @@ setTimeout(async () => {
     setPipe(true);
     check('no prediction: nine taken branches cost two cycles each (24 + 4 + 18)', runPipe() === 46, ev('cpu.totalCycles'));
     setPipe(true, {}, { on: true });
-    check('1-bit: the first taken and the exit mispredict (24 + 4 + 4)', runPipe() === 32 && ev('pipe.mispredicts') === 2,
-      ev('cpu.totalCycles') + ' cycles, ' + ev('pipe.mispredicts') + ' mispredicts');
+    check('1-bit: the first taken and the exit mispredict (24 + 4 + 4)', runPipe() === 32 && ev('pipeline.regs.mispredicts') === 2,
+      ev('cpu.totalCycles') + ' cycles, ' + ev('pipeline.regs.mispredicts') + ' mispredicts');
     check('and the loop gives the right answer', ev('cpu.regs[5]') === 0 && ev('cpu.regs[10]') === 1);
     setPipe(true, {}, { on: true, bits: 2 });
-    check('2-bit from 00: two to warm up, one at the exit (24 + 4 + 6)', runPipe() === 34 && ev('pipe.mispredicts') === 3,
-      ev('cpu.totalCycles') + ' cycles, ' + ev('pipe.mispredicts') + ' mispredicts');
+    check('2-bit from 00: two to warm up, one at the exit (24 + 4 + 6)', runPipe() === 34 && ev('pipeline.regs.mispredicts') === 3,
+      ev('cpu.totalCycles') + ' cycles, ' + ev('pipeline.regs.mispredicts') + ' mispredicts');
 
     // An inner loop entered twice: 1-bit pays at every exit and re-entry, 2-bit only at exits.
     const NEST = DATA + '    li s1, 2\nouter: li t0, 4\ninner: addi t0, t0, -1\n    bnez t0, inner\n    addi s1, s1, -1\n    bnez s1, outer\n';
     assembleSrc(NEST);
     setPipe(true, {}, { on: true }); runPipe();
-    const m1 = ev('pipe.mispredicts');
+    const m1 = ev('pipeline.regs.mispredicts');
     setPipe(true, {}, { on: true, bits: 2 }); runPipe();
-    const m2 = ev('pipe.mispredicts');
+    const m2 = ev('pipeline.regs.mispredicts');
     check('a nested loop: 1-bit mispredicts 6 times, 2-bit 5, saving the inner re-entry', m1 === 6 && m2 === 5, m1 + ' vs ' + m2);
 
     assembleSrc(DATA + '    li t0, 3\nl:  addi t0, t0, -1\n    beqz t0, e\n    j l\ne:  addi a0, x0, 1\n');
     setPipe(true, {}, { on: true }); runPipe();
-    check('a j backwards is learnt: it mispredicts once, then is free', ev('cpu.regs[10]') === 1 && ev('pipe.mispredicts') === 2,
-      ev('pipe.mispredicts'));
+    check('a j backwards is learnt: it mispredicts once, then is free', ev('cpu.regs[10]') === 1 && ev('pipeline.regs.mispredicts') === 2,
+      ev('pipeline.regs.mispredicts'));
 
     assembleSrc(DATA + '    jal ra, f\n    jal ra, f\n    j e\nf:  ret\ne:  addi a0, x0, 1\n');
     setPipe(true, {}, { on: true }); runPipe();
@@ -381,9 +381,9 @@ setTimeout(async () => {
     const ALIAS = DATA + '    li t0, 5\nl:  addi t0, t0, -1\n    nop\n    nop\n    nop\n    bnez t0, l\n    addi a0, x0, 1\n';
     assembleSrc(ALIAS);
     setPipe(true, {}, { on: true, entries: 16 }); runPipe();
-    const m16 = ev('pipe.mispredicts');
+    const m16 = ev('pipeline.regs.mispredicts');
     setPipe(true, {}, { on: true, entries: 4 }); runPipe();
-    const m4 = ev('pipe.mispredicts');
+    const m4 = ev('pipeline.regs.mispredicts');
     check('16 entries: the loop mispredicts only on entry and exit', m16 === 2, m16);
     check('4 entries, untagged: the branch and the addi sharing its entry ping-pong, twice an iteration',
       m4 > 2 * 3 && ev('cpu.regs[10]') === 1 && ev('cpu.regs[5]') === 0, m4);
@@ -392,11 +392,11 @@ setTimeout(async () => {
     setPipe(true, {}, { on: true });
     ev('resetAll()');
     for (let i = 0; i < 12; i++) win.stepOnce();
-    const bht12 = ev('JSON.stringify([Array.from(pipe.bht.pr), Array.from(pipe.bht.bta), pipe.mispredicts])');
+    const bht12 = ev('JSON.stringify([Array.from(pipeline.regs.bht.pr), Array.from(pipeline.regs.bht.bta), pipeline.regs.mispredicts])');
     for (let i = 0; i < 8; i++) win.stepOnce();
     for (let i = 0; i < 8; i++) win.stepBack();
     check('Back restores the BHT and the mispredict count',
-      ev('JSON.stringify([Array.from(pipe.bht.pr), Array.from(pipe.bht.bta), pipe.mispredicts])') === bht12);
+      ev('JSON.stringify([Array.from(pipeline.regs.bht.pr), Array.from(pipeline.regs.bht.bta), pipeline.regs.mispredicts])') === bht12);
     check('the stats bar counts mispredicts', /Mispredicts: \d+/.test(doc.getElementById('statsBar').textContent));
     if (!doc.body.classList.contains('dp-open')) win.toggleDpDock();
     ev('dpOnModeChange()');
@@ -427,7 +427,7 @@ setTimeout(async () => {
     const states = [];
     for (let i = 0; i < 40; i++) {
       win.stepOnce();
-      states.push(ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount, m: readMem(program.labels.buf + 12, 4, true), D: pipe.D && pipe.D.seq, W: pipe.W && pipe.W.seq})'));
+      states.push(ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount, m: readMem(program.labels.buf + 12, 4, true), D: pipeline.regs.D && pipeline.regs.D.seq, W: pipeline.regs.W && pipeline.regs.W.seq})'));
     }
     check('each Step is one cycle', ev('cpu.totalCycles') === 40);
     check('Statement Stepping does not change that', (() => {
@@ -436,10 +436,10 @@ setTimeout(async () => {
     })());
     for (let i = 0; i < 20; i++) win.stepBack();
     check('Back 20 returns to exactly the state 20 cycles in',
-      ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount, m: readMem(program.labels.buf + 12, 4, true), D: pipe.D && pipe.D.seq, W: pipe.W && pipe.W.seq})') === states[19]);
+      ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount, m: readMem(program.labels.buf + 12, 4, true), D: pipeline.regs.D && pipeline.regs.D.seq, W: pipeline.regs.W && pipeline.regs.W.seq})') === states[19]);
     for (let i = 0; i < 20; i++) win.stepOnce();
     check('and stepping forward again repeats the same 20 cycles',
-      ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount, m: readMem(program.labels.buf + 12, 4, true), D: pipe.D && pipe.D.seq, W: pipe.W && pipe.W.seq})') === states[39]);
+      ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount, m: readMem(program.labels.buf + 12, 4, true), D: pipeline.regs.D && pipeline.regs.D.seq, W: pipeline.regs.W && pipeline.regs.W.seq})') === states[39]);
     for (let i = 0; i < 40; i++) win.stepBack();
     check('Back to the start restores reset state',
       ev('JSON.stringify({r: Array.from(cpu.regs), pc: cpu.pc, c: cpu.totalCycles, i: cpu.instructionCount})') === fresh);
@@ -458,12 +458,12 @@ setTimeout(async () => {
     win.runProgram();
     for (let i = 0; i < 100 && ev('run.running'); i++) await sleep(20);
     check('a breakpoint stops the run with its instruction in Execute',
-      !ev('programFinished') && ev('sourceLineForPc(pipe.E.pc)') === overLine, ev('pipe.E && sourceLineForPc(pipe.E.pc)'));
+      !ev('programFinished') && ev('sourceLineForPc(pipeline.regs.E.pc)') === overLine, ev('pipeline.regs.E && sourceLineForPc(pipeline.regs.E.pc)'));
     ev('run.breakpoints = new Set()');
 
     ev('resetAll()');
     while (!ev('programFinished') && ev('cpu.totalCycles') < 5000) win.stepOnce();
-    check('stepping to the end marks the program finished', ev('programFinished') === true && ev('pipe.exited') === true);
+    check('stepping to the end marks the program finished', ev('programFinished') === true && ev('pipeline.regs.exited') === true);
     check('Step is then disabled', doc.getElementById('btnStep').disabled === true);
     win.stepBack();
     check('Back from the end un-finishes it', ev('programFinished') === false && !doc.getElementById('btnStep').disabled);
@@ -627,7 +627,7 @@ setTimeout(async () => {
     ev('floatStepsWanted = true; updateFloatSteps()');
     check('single-cycle, same: the toolbar\'s Back and Step, with no ▶▶',
       !bar.hidden && bar.dataset.mode === 'tb' && barBtns()[1].textContent === '⏭' && barBtns()[2].hidden,
-      `hidden=${bar.hidden} mode=${bar.dataset.mode} tab=${ev('mobileTab')} arch=${ev('jsArch')} dpVis=${ev('panelDock.datapath.visible')}`);
+      `hidden=${bar.hidden} mode=${bar.dataset.mode} tab=${ev('mobileTab')} arch=${ev('pipeline.arch')} dpVis=${ev('panelDock.datapath.visible')}`);
     const pc0 = ev('cpu.pc');
     barBtns()[1].click();
     check('and ⏭ steps an instruction', ev('cpu.pc') !== pc0 && ev('cpu.totalCycles') === 1);

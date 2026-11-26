@@ -14,13 +14,14 @@ function hdlAddFiles(fileList) {
   if (!pending.length) return Promise.resolve();
   return Promise.all(pending).then(loaded => {
     for (const f of loaded) {
-      const existing = hdlFiles.findIndex(x => x.name === f.name);
-      if (existing >= 0) hdlFiles[existing] = f; else hdlFiles.push(f);
+      const existing = hdlSources.files.findIndex(x => x.name === f.name);
+      if (existing >= 0) hdlSources.files[existing] = f; else hdlSources.files.push(f);
     }
     renderHdlFileList();
     hdlLog('Loaded ' + loaded.length + ' file(s): ' + loaded.map(f => f.name).join(', '), 'sys');
   });
 }
+
 
 // The way in for someone whose own processor does not run yet: a
 // pre-synthesised core plus the fixed Wrapper, replacing whatever is
@@ -40,7 +41,7 @@ async function hdlLoadPrebuiltProcessor() {
     }));
     for (const f of loaded) if (/^\s*module\s+Wrapper\b/m.test(f.src)) f.isPrebuilt = true;
     hdlForgetFolder();
-    hdlFiles = loaded;
+    hdlSources.files = loaded;
     renderHdlFileList();
     hdlSyncReferenceWrapperDepths();
     hdlLog('Loaded the prebuilt processor: ' + loaded.map(f => f.name).join(', ') +
@@ -58,15 +59,15 @@ async function hdlLoadPrebuiltProcessor() {
 }
 
 function hdlRemoveFile(name) {
-  const gone = hdlFiles.find(f => f.name === name);
-  if (gone && gone.folderPath && hdlFolder) hdlFolder.excluded.add(gone.folderPath);
-  hdlFiles = hdlFiles.filter(f => f.name !== name);
+  const gone = hdlSources.files.find(f => f.name === name);
+  if (gone && gone.folderPath && hdlSources.folder) hdlSources.folder.excluded.add(gone.folderPath);
+  hdlSources.files = hdlSources.files.filter(f => f.name !== name);
   renderHdlFileList();
 }
 
 function hdlClearFiles() {
   hdlForgetFolder();
-  hdlFiles = [];
+  hdlSources.files = [];
   renderHdlFileList();
   hdlLog('Cleared all Verilog sources.', 'sys');
 }
@@ -80,7 +81,6 @@ function hdlClearFiles() {
 // System Access API in Chromium (remembered, though a later visit may
 // need the permission granted again), and elsewhere a one-off
 // <input webkitdirectory> snapshot that is never re-read.
-let hdlFolder = null;  // { kind: 'native'|'handle'|'snapshot', name, path, handle, pending, excluded }
 
 // Vivado's output folders hold generated copies of the sources.
 const HDL_FOLDER_SKIP = /^\.|\.(cache|runs|sim|hw|ip_user_files|gen)$|^(node_modules|xsim\.dir)$/;
@@ -170,15 +170,15 @@ function hdlFolderName(list) {
 // keeping any file dropped in by hand, which also wins over a folder
 // file of the same name. Returns whether anything changed.
 function hdlApplyFolderFiles(list, first) {
-  const f = hdlFolder;
+  const f = hdlSources.folder;
   const sel = hdlFolderSelect(list.filter(x => !f.excluded.has(x.path)));
-  const own = first ? [] : hdlFiles.filter(x => !x.folderPath);
+  const own = first ? [] : hdlSources.files.filter(x => !x.folderPath);
   const incoming = hdlFolderName(sel.files).filter(x => !own.some(o => o.name === x.name));
-  const before = hdlFiles.filter(x => x.folderPath);
+  const before = hdlSources.files.filter(x => x.folderPath);
   const same = before.length === incoming.length &&
     before.every((x, i) => x.name === incoming[i].name && x.src === incoming[i].src);
   if (same && !first) return false;
-  hdlFiles = own.concat(incoming);
+  hdlSources.files = own.concat(incoming);
   renderHdlFileList();
   if (first) {
     hdlLog('Loaded ' + incoming.length + ' file(s) from the folder ' + f.name + ': ' +
@@ -208,12 +208,11 @@ function hdlApplyFolderFiles(list, first) {
 
 // Reads the folder again if there is one. A folder that has gone, or can
 // no longer be read, leaves the loaded files as they were.
-let hdlFolderReading = null;
 function hdlReadFolder(first) {
-  if (!hdlFolder || hdlFolder.pending || hdlFolder.kind === 'snapshot') return Promise.resolve(false);
-  if (hdlFolderReading) return hdlFolderReading;
-  const f = hdlFolder;
-  hdlFolderReading = (async () => {
+  if (!hdlSources.folder || hdlSources.folder.pending || hdlSources.folder.kind === 'snapshot') return Promise.resolve(false);
+  if (hdlSources.folderReading) return hdlSources.folderReading;
+  const f = hdlSources.folder;
+  hdlSources.folderReading = (async () => {
     try {
       let list;
       if (f.kind === 'native') {
@@ -226,17 +225,17 @@ function hdlReadFolder(first) {
         }
         list = await hdlWalkHandle(f.handle, '', []);
       }
-      if (f !== hdlFolder) return false;
+      if (f !== hdlSources.folder) return false;
       return hdlApplyFolderFiles(list, first);
     } catch (e) {
       hdlLog('Could not read the folder ' + f.name + ' (' + (e && e.message || e) +
         '); the files loaded from it are unchanged.', 'warn');
       return false;
     } finally {
-      hdlFolderReading = null;
+      hdlSources.folderReading = null;
     }
   })();
-  return hdlFolderReading;
+  return hdlSources.folderReading;
 }
 
 async function hdlPickFolder() {
@@ -244,21 +243,21 @@ async function hdlPickFolder() {
     if (window.rvNative) {
       const dir = await window.rvNative.pickFolder();
       if (!dir) return;
-      hdlFolder = hdlFolderMakeState('native', dir.split(/[\\/]/).filter(Boolean).pop() || dir, { path: dir });
+      hdlSources.folder = hdlFolderMakeState('native', dir.split(/[\\/]/).filter(Boolean).pop() || dir, { path: dir });
     } else if (window.showDirectoryPicker) {
-      if (hdlFolder && hdlFolder.pending) {
-        if ((await hdlFolder.handle.requestPermission({ mode: 'read' })) !== 'granted') return;
-        hdlFolder.pending = false;
+      if (hdlSources.folder && hdlSources.folder.pending) {
+        if ((await hdlSources.folder.handle.requestPermission({ mode: 'read' })) !== 'granted') return;
+        hdlSources.folder.pending = false;
       } else {
         const handle = await window.showDirectoryPicker({ id: 'hdl-sources', mode: 'read' });
-        hdlFolder = hdlFolderMakeState('handle', handle.name, { handle });
+        hdlSources.folder = hdlFolderMakeState('handle', handle.name, { handle });
         hdlFolderStore('put', handle).catch(() => {});
       }
     } else {
       document.getElementById('hdlFolderInput').click();
       return;
     }
-    if (await hdlReadFolder(true) && simEngineMode !== 'hdl') setSimEngineMode('hdl');
+    if (await hdlReadFolder(true) && ui.engine !== 'hdl') setSimEngineMode('hdl');
   } catch (e) {
     if (e && e.name === 'AbortError') return;
     hdlLog('Could not open the folder (' + (e && e.message || e) + ').', 'err');
@@ -266,11 +265,11 @@ async function hdlPickFolder() {
 }
 
 function hdlForgetFolder() {
-  if (!hdlFolder) return;
-  hdlFolder = null;
+  if (!hdlSources.folder) return;
+  hdlSources.folder = null;
   if (window.rvNative) window.rvNative.forgetFolder();
   else hdlFolderStore('delete').catch(() => {});
-  for (const f of hdlFiles) delete f.folderPath;
+  for (const f of hdlSources.files) delete f.folderPath;
 }
 
 function hdlRenderFolderButton() {
@@ -279,9 +278,9 @@ function hdlRenderFolderButton() {
   const input = document.getElementById('hdlFolderInput');
   const can = window.rvNative || window.showDirectoryPicker || (input && 'webkitdirectory' in input);
   btn.style.display = can ? '' : 'none';
-  if (hdlFolder && hdlFolder.pending) {
-    btn.textContent = '↻ ' + hdlFolder.name;
-    btn.title = 'Read the folder ' + hdlFolder.name + ' again. The browser asks for permission first.';
+  if (hdlSources.folder && hdlSources.folder.pending) {
+    btn.textContent = '↻ ' + hdlSources.folder.name;
+    btn.title = 'Read the folder ' + hdlSources.folder.name + ' again. The browser asks for permission first.';
   } else {
     btn.textContent = 'folder…';
     btn.title = (window.rvNative || window.showDirectoryPicker)
@@ -323,44 +322,38 @@ function hdlInitFolder() {
       .map(f => f.text().then(src => ({ path: (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name, src }))))
       .then(list => {
         hdlForgetFolder();
-        hdlFolder = hdlFolderMakeState('snapshot', root);
+        hdlSources.folder = hdlFolderMakeState('snapshot', root);
         hdlApplyFolderFiles(list, true);
-        if (simEngineMode !== 'hdl') setSimEngineMode('hdl');
+        if (ui.engine !== 'hdl') setSimEngineMode('hdl');
       });
   });
   window.addEventListener('focus', () => {
-    if (hdlFolder && !hdlRunning) hdlReadFolder();
+    if (hdlSources.folder && !hdlActivity.running) hdlReadFolder();
   });
   hdlRenderFolderButton();
   if (window.rvNative) {
     if (window.rvNative.rememberedFolder) {
       const dir = window.rvNative.rememberedFolder;
-      hdlFolder = hdlFolderMakeState('native', dir.split(/[\\/]/).filter(Boolean).pop() || dir, { path: dir });
+      hdlSources.folder = hdlFolderMakeState('native', dir.split(/[\\/]/).filter(Boolean).pop() || dir, { path: dir });
       hdlReadFolder(true);
     }
   } else if (window.showDirectoryPicker) {
     hdlFolderStore('get').then(handle => {
-      if (!handle || hdlFolder || hdlFiles.length) return;
-      hdlFolder = hdlFolderMakeState('handle', handle.name, { handle });
+      if (!handle || hdlSources.folder || hdlSources.files.length) return;
+      hdlSources.folder = hdlFolderMakeState('handle', handle.name, { handle });
       hdlReadFolder(true);
     }).catch(() => {});
   }
 }
 
-// Which uploaded file declares `module Wrapper`? Everything hinges on
-// it being present, since the generated testbench instantiates it.
-function hdlFindWrapper() {
-  return hdlFiles.find(f => /^\s*module\s+Wrapper\b/m.test(f.src)) || null;
-}
-
 function renderHdlFileList() {
   const el = document.getElementById('hdlFileList');
   if (!el) return;
-  if (!hdlFiles.length) {
+  if (!hdlSources.files.length) {
     el.innerHTML = '<div class="hdl-empty">No files loaded yet.</div>';
   } else {
     const wrapper = hdlFindWrapper();
-    el.innerHTML = hdlFiles.map(f => {
+    el.innerHTML = hdlSources.files.map(f => {
       const isWrap = wrapper && f.name === wrapper.name;
       const kb = (f.src.length / 1024).toFixed(1);
       return '<div class="hdl-file' + (isWrap ? ' hdl-file-wrapper' : '') + '">' +
@@ -384,37 +377,37 @@ function renderHdlFileList() {
 function updateHdlReadiness() {
   const wrapper = hdlFindWrapper();
   const warn = document.getElementById('hdlWrapperWarn');
-  if (warn) warn.style.display = (hdlFiles.length && !wrapper) ? 'block' : 'none';
+  if (warn) warn.style.display = (hdlSources.files.length && !wrapper) ? 'block' : 'none';
 
   // No panel shows the file list all the time, so this chip is the standing
   // answer to "is my Verilog loaded?". Clicking it opens the tab that does.
   const chip = document.getElementById('hdlFilesChip');
   if (chip) {
-    chip.style.display = (simEngineMode === 'hdl') ? '' : 'none';
+    chip.style.display = (ui.engine === 'hdl') ? '' : 'none';
     // Two labels: the narrow row cannot hold the long one beside six other
     // controls, and CSS picks which is shown.
     const label = (long, short) =>
       '<span class="chip-long">' + long + '</span>' +
       '<span class="chip-short">' + short + '</span>';
-    if (!hdlFiles.length) {
+    if (!hdlSources.files.length) {
       chip.innerHTML = label('⚠ no Verilog', '⚠ no .v');
       chip.className = 'hdl-chip hdl-chip-warn';
       chip.title = 'HDL mode needs your processor sources - click to load them';
     } else if (!wrapper) {
       chip.innerHTML = label('⚠ no Wrapper', '⚠ no top');
       chip.className = 'hdl-chip hdl-chip-warn';
-      chip.title = 'None of the ' + hdlFiles.length +
+      chip.title = 'None of the ' + hdlSources.files.length +
         ' loaded files declares `module Wrapper` - click to fix';
     } else {
-      chip.innerHTML = label(hdlFiles.length + ' files', hdlFiles.length + ' files');
+      chip.innerHTML = label(hdlSources.files.length + ' files', hdlSources.files.length + ' files');
       chip.className = 'hdl-chip';
-      chip.title = 'Loaded: ' + hdlFiles.map(f => f.name).join(', ') +
+      chip.title = 'Loaded: ' + hdlSources.files.map(f => f.name).join(', ') +
         ' - click to manage them';
     }
   }
   const note = document.getElementById('hdlSourcesNote');
-  if (note) note.textContent = hdlFiles.length
-    ? hdlFiles.length + ' loaded' + (hdlFolder && !hdlFolder.pending ? ' from ' + hdlFolder.name : '') +
+  if (note) note.textContent = hdlSources.files.length
+    ? hdlSources.files.length + ' loaded' + (hdlSources.folder && !hdlSources.folder.pending ? ' from ' + hdlSources.folder.name : '') +
       (wrapper ? ', Wrapper found' : ', no Wrapper')
     : 'none loaded';
   hdlRenderFolderButton();

@@ -11,24 +11,24 @@
 // every correct pipelined core. Registers start at 0 on both sides, as
 // the hardware's do, so a first write of 0 is no change on either.
 async function hdlCompareWithJs() {
-  if (!hdlTrace || !hdlTrace.steps.length) return;
-  if (hdlTrace.offset) {
+  if (!hdlRec.trace || !hdlRec.trace.steps.length) return;
+  if (hdlRec.trace.offset) {
     hdlLog('Cross-check: the JS model runs from reset, and this recording now starts at instruction ' +
-      hdlTrace.offset + ', so the two cannot be compared. Reset and run a shorter stretch to cross-check.', 'warn');
+      hdlRec.trace.offset + ', so the two cannot be compared. Reset and run a shorter stretch to cross-check.', 'warn');
     return;
   }
-  if (!hdlTrace.regBank)
+  if (!hdlRec.trace.regBank)
     hdlLog('Cross-check: no register-file path, so only data memory writes are compared.', 'warn');
-  const at = hdlIdx;
+  const at = hdlRec.idx;
   const dmem0 = layout.dataBase >>> 0;
-  const inDmem = a => a >= dmem0 && a < dmem0 + hdlDmemBytes;
+  const inDmem = a => a >= dmem0 && a < dmem0 + hdlBuild.dmemBytes;
   // An input changed part-way through arrives on a clock the model does
   // not have, so the comparison ends there.
-  const stop = hdlStim.length ? Math.min(...hdlStim.map(e => e.cycle)) : Infinity;
+  const stop = hdlRec.stim.length ? Math.min(...hdlRec.stim.map(e => e.cycle)) : Infinity;
 
   const hwReg = [], hwMem = [];
   const hwShadow = new Int32Array(32);
-  for (const s of hdlTrace.steps) {
+  for (const s of hdlRec.trace.steps) {
     for (const w of s.regw) {
       const cyc = w.length > 2 ? w[2] : s.cyc;
       if (cyc >= stop || (hwShadow[w[0]] | 0) === (w[1] | 0)) continue;
@@ -43,14 +43,14 @@ async function hdlCompareWithJs() {
         if ((w[1] >> i) & 1 && inDmem(word + i)) hwMem.push({ a: word + i, v: (w[2] >>> (i * 8)) & 0xFF, cyc });
     }
   }
-  const lastCyc = Math.min(stop, hdlTrace.final ? hdlTrace.final.cyc : hdlTrace.steps[hdlTrace.steps.length - 1].cyc);
+  const lastCyc = Math.min(stop, hdlRec.trace.final ? hdlRec.trace.final.cyc : hdlRec.trace.steps[hdlRec.trace.steps.length - 1].cyc);
 
   // The model, from reset, with the inputs the run started with.
   const saved = [board.dip, board.buttons, accel.x, accel.y, accel.z, accel.temp, accel.dready];
   const s8 = v => ((v & 0xFF) << 24) >> 24;
-  board.dip = hdlBase.dip; board.buttons = hdlBase.pb; accel.dready = hdlBase.adrdy ? 1 : 0;
-  accel.temp = s8(hdlBase.accel >>> 24); accel.x = s8(hdlBase.accel >>> 16);
-  accel.y = s8(hdlBase.accel >>> 8); accel.z = s8(hdlBase.accel);
+  board.dip = hdlRec.base.dip; board.buttons = hdlRec.base.pb; accel.dready = hdlRec.base.adrdy ? 1 : 0;
+  accel.temp = s8(hdlRec.base.accel >>> 24); accel.x = s8(hdlRec.base.accel >>> 16);
+  accel.y = s8(hdlRec.base.accel >>> 8); accel.z = s8(hdlRec.base.accel);
   const wasJournal = stepHistory.journalEnabled;
   stepHistory.journalEnabled = false;
   loadProgram(program.machineCode);
@@ -58,13 +58,11 @@ async function hdlCompareWithJs() {
   const jsReg = [], jsMem = [];
   const jsShadow = new Int32Array(32);
   let curPc = 0, fault = null;
-  const baseWriteMem = writeMem;
-  writeMem = function (addr, val, size) {
+  observeWrites((addr, val, size) => {
     const u = addr >>> 0;
     for (let i = 0; i < size; i++)
       if (inDmem(u + i)) jsMem.push({ a: (u + i) >>> 0, v: (val >>> (i * 8)) & 0xFF, pc: curPc });
-    return baseWriteMem(addr, val, size);
-  };
+  });
   try {
     // No core retires more than one instruction a cycle.
     for (let n = 0; n <= lastCyc && !programFinished &&
@@ -81,7 +79,7 @@ async function hdlCompareWithJs() {
   } catch (e) {
     fault = e;
   } finally {
-    writeMem = baseWriteMem;
+    observeWrites(null);
     stepHistory.journalEnabled = wasJournal;
     [board.dip, board.buttons, accel.x, accel.y, accel.z, accel.temp, accel.dready] = saved;
   }
@@ -91,7 +89,7 @@ async function hdlCompareWithJs() {
       if (i >= js.length || !same(hw[i], js[i])) return { hw: hw[i], js: js[i] || null };
     return null;
   };
-  const dr = hdlTrace.regBank ? firstDiff(hwReg, jsReg, (a, b) => a.r === b.r && a.v === b.v) : null;
+  const dr = hdlRec.trace.regBank ? firstDiff(hwReg, jsReg, (a, b) => a.r === b.r && a.v === b.v) : null;
   const dm = firstDiff(hwMem, jsMem, (a, b) => a.a === b.a && a.v === b.v);
   const by = d => d && d.js ? ' by the instruction at 0x' + d.js.pc.toString(16) + ' (line ' + sourceLineForPc(d.js.pc) + ')' : '';
   let msg = null;

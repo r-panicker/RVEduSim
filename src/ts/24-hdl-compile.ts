@@ -8,8 +8,6 @@
 // Input codes shared with the testbench's stim.mem decoder.
 const HDL_STIM_DIP = 1, HDL_STIM_PB = 2, HDL_STIM_ACCEL = 3, HDL_STIM_ADRDY = 4;
 
-function hdlHex32(v) { return (v >>> 0).toString(16).padStart(8, '0'); }
-
 function hdlAccelWord() {
   return ((accel.temp & 0xFF) << 24 | (accel.x & 0xFF) << 16 |
           (accel.y & 0xFF) << 8 | (accel.z & 0xFF)) >>> 0;
@@ -17,7 +15,7 @@ function hdlAccelWord() {
 
 // stim.mem: <cycle> <code> <value> triples, in cycle order.
 function hdlStimFile() {
-  const ev = hdlStim.slice().sort((a, b) => a.cycle - b.cycle);
+  const ev = hdlRec.stim.slice().sort((a, b) => a.cycle - b.cycle);
   return ev.map(e => hdlHex32(e.cycle) + '\n' + hdlHex32(e.code) + '\n' +
                      hdlHex32(e.value)).join('\n') + (ev.length ? '\n' : '');
 }
@@ -25,8 +23,8 @@ function hdlStimFile() {
 // uart_rx.mem: <cycle> <byte> pairs. A byte typed while paused carries
 // the cycle it was typed at, so it arrives at that point in the run.
 function hdlRxFile() {
-  return hdlRx.map(e => hdlHex32(e.cycle) + '\n' + hdlHex32(e.byte & 0xFF)).join('\n') +
-         (hdlRx.length ? '\n' : '');
+  return hdlRec.rx.map(e => hdlHex32(e.cycle) + '\n' + hdlHex32(e.byte & 0xFF)).join('\n') +
+         (hdlRec.rx.length ? '\n' : '');
 }
 
 // Anything waiting when a run starts is put on the timeline the testbench
@@ -37,17 +35,11 @@ function hdlRxFile() {
 // which is why this, not the live state, is the master record.
 function hdlSyncRx() {
   const gap = uartGapInstr();
-  hdlRx = [];
-  if (uart.rxFull) hdlRx.push({ cycle: 0, byte: uart.rxByte & 0xFF });
+  hdlRec.rx = [];
+  if (uart.rxFull) hdlRec.rx.push({ cycle: 0, byte: uart.rxByte & 0xFF });
   uart.pending.forEach((b, i) => {
-    hdlRx.push({ cycle: (i + (uart.rxFull ? 1 : 0)) * gap, byte: b & 0xFF });
+    hdlRec.rx.push({ cycle: (i + (uart.rxFull ? 1 : 0)) * gap, byte: b & 0xFF });
   });
-}
-
-function hdlHash(s) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
-  return (h >>> 0).toString(16);
 }
 
 // ================================================================
@@ -59,18 +51,18 @@ async function hdlEnsureCompiled(quiet) {
   const gen = (document.getElementById('hdlGeneration') || {}).value || '2005';
   let rb = hdlRegBankPath();
   const dbuf = hdlHasDoubleBuffer();
-  const state = hdlCkState(hdlSimulator === 'verilator');
-  const vl = hdlSimulator === 'verilator';
+  const state = hdlCkState(hdlConfig.simulator === 'verilator');
+  const vl = hdlConfig.simulator === 'verilator';
   let ck = state.off ? null : state;
   const build = () => ({
     tb: hdlBuildTestbench({ regBankPath: rb }),
     ck: ck ? hdlBuildCkModule(ck, rb, dbuf, vl) : ''
   });
   let src = build();
-  const key = hdlHash(hdlSimulator + (vl && hdlWaveTop ? ' top ' : ' ') + gen + ' ' + hdlAllSources() + ' ' + src.tb + ' ' + src.ck);
-  if (hdlVvpCache && hdlVvpCache.key === key) {
+  const key = hdlHash(hdlConfig.simulator + (vl && hdlConfig.waveTop ? ' top ' : ' ') + gen + ' ' + hdlAllSources() + ' ' + src.tb + ' ' + src.ck);
+  if (hdlBuild.vvpCache && hdlBuild.vvpCache.key === key) {
     if (!quiet) hdlLog('Reusing the compiled design (sources unchanged).', 'sys');
-    return hdlVvpCache;
+    return hdlBuild.vvpCache;
   }
   if (state.off) hdlLog('Checkpoints are off for these sources (' + state.off +
     '), so an input change replays the run from reset.', 'sys');
@@ -80,8 +72,8 @@ async function hdlEnsureCompiled(quiet) {
       const c = await hdlVerilate(src.tb, gen, src.ck);
       if (c.ok) {
         hdlReportVerilator(c.log);
-        hdlVvpCache = { key: key, vvp: null, model: c.model, regBank: rb, ck: false, vlCk: !!src.ck };
-        return hdlVvpCache;
+        hdlBuild.vvpCache = { key: key, vvp: null, model: c.model, regBank: rb, ck: false, vlCk: !!src.ck };
+        return hdlBuild.vvpCache;
       }
       if (ck && /cg3207_hdl_ck\.v/.test(c.log)) {
         hdlLog('Checkpoints could not be compiled for these sources, so an input change ' +
@@ -111,7 +103,7 @@ async function hdlEnsureCompiled(quiet) {
   for (;;) {
     hdlStatus('preprocessing...', 'busy');
     const t0 = performance.now();
-    const files = hdlFiles.concat([{ name: 'cg3207_hdl_tb.v', src: src.tb }]);
+    const files = hdlSources.files.concat([{ name: 'cg3207_hdl_tb.v', src: src.tb }]);
     if (src.ck) files.push({ name: 'cg3207_hdl_ck.v', src: src.ck });
     const pp = await hdlPreprocess(files);
     if (pp.err && pp.err.trim()) hdlLog(pp.err, 'warn');
@@ -122,8 +114,8 @@ async function hdlEnsureCompiled(quiet) {
     if (c.vvp) {
       if (c.err && c.err.trim()) hdlLog(c.err, 'warn');
       hdlLog('preprocess ' + (t1 - t0).toFixed(0) + ' ms, compile ' + (t2 - t1).toFixed(0) + ' ms', 'sys');
-      hdlVvpCache = { key: key, vvp: c.vvp, regBank: rb, ck: !!src.ck };
-      return hdlVvpCache;
+      hdlBuild.vvpCache = { key: key, vvp: c.vvp, regBank: rb, ck: !!src.ck };
+      return hdlBuild.vvpCache;
     }
     // The checkpoint module and the register-file path both name things
     // inside code we do not control. If either is what failed, drop it

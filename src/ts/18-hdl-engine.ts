@@ -46,15 +46,6 @@ const hdlNativeJobs = new Set();
 let hdlEngine = null;         // { ivlpp, ivl, vvp } module factories
 let hdlEngineBase = null;     // the base URL that actually loaded
 let hdlEngineLoading = null;  // in-flight promise (de-dupes concurrent loads)
-let hdlFiles = [];            // [{ name, src }] uploaded Verilog sources
-let hdlMemCache = null;       // { key, mem }: the memory images hdlPrepareRun last built
-let hdlLastVcd = null;        // the waveform: VCD text (Verilator) or an hdlVcdDoc (Icarus)
-let hdlRunning = false;
-// Cycles a run records, per simulator: long enough to use the inputs
-// while it runs (about 11 s natively with Icarus).
-// A post-synthesis run is recorded in one go, and the netlist simulates
-// several times slower, so it has a shorter one.
-const HDL_CYCLES_DEFAULT = { icarus: 200000, synth: 50000, verilator: 20000000 };
 const HDL_MAX_CYCLES = 2000000;      // Icarus: the whole recording is kept
 const HDL_VL_MAX_RUN = 1000000000;   // Verilator: one run; the recording is trimmed (HDL_VL_KEEP)
 // A waveform of a long run is the last this many cycles of it (Icarus
@@ -67,22 +58,6 @@ const HDL_LIVE_VCD_MAX = 20e6;
 // events into a snapshot once it holds this many.
 const HDL_LIVE_PRE_KEEP = 100000;
 const hdlCyclesFor = Object.assign({}, HDL_CYCLES_DEFAULT);
-let hdlCycleBudget = HDL_CYCLES_DEFAULT.icarus;
-let hdlDumpVcd = true;
-let hdlWaveTop = false;       // dump only the testbench's and the Wrapper's own signals
-let hdlTraceEnabled = true;   // record the architectural trace (needed to step)
-let hdlCompareEnabled = false;// cross-check against the JS functional model
-let hdlSynthEnabled = false;  // synthesise with Yosys and check the netlist
-let hdlLastRtlOut = null;     // stdout of the most recent behavioural run
-let hdlVvpCache = null;       // { key, vvp, regBank } - compiled once per source set
-let hdlTrace = null;          // the recorded run: { steps, pre, final, next, ... }
-let hdlIdx = 0;               // position in the recording (instructions completed)
-let hdlStim = [];             // [{cycle, code, value}] timed input changes
-let hdlRx = [];               // [{cycle, byte}] timed UART input
-let hdlBase = { dip: 0, pb: 0, accel: 0, adrdy: true };  // inputs at cycle 0
-let hdlRegKnown = new Uint8Array(32);  // has the hardware written this register yet?
-let hdlDmemBytes = 1 << 14;   // DMEM window size, read back from the Wrapper
-let simEngineMode = 'js';     // 'js' (functional) | 'hdl' (Verilog)
 
 // The engine's output goes to the console under the editor, next to the
 // assembler's - one place to look when something fails, and room to grow
@@ -173,7 +148,6 @@ let hdlWorker = null;
 let hdlWorkerUrl = null;
 let hdlWorkerFailed = false;  // the stages run on the page from then on
 const hdlWorkerJobs = new Map();
-let hdlWorkerSeq = 0;
 
 function hdlWorkerGet() {
   if (hdlWorker) return hdlWorker;
@@ -212,7 +186,7 @@ function hdlStopWorker(err) {
 async function hdlTool(tool, files, args, opts) {
   opts = opts || {};
   if (hdlNative) {
-    const id = ++hdlWorkerSeq;
+    const id = ++hdlActivity.jobSeq;
     hdlNativeJobs.add(id);
     try {
       const r = await hdlNative.hdlRun(id, tool, files, args,
@@ -227,7 +201,7 @@ async function hdlTool(tool, files, args, opts) {
   if (!hdlWorkerFailed) {
     try {
       return await new Promise((resolve, reject) => {
-        const id = ++hdlWorkerSeq;
+        const id = ++hdlActivity.jobSeq;
         hdlWorkerJobs.set(id, { resolve, reject });
         try {
           hdlWorkerGet().postMessage({
@@ -296,7 +270,7 @@ async function hdlSimulate(vvpBytes, memFiles, plusargs) {
 
 // A Verilator model takes the same plusargs and files as vvp does.
 async function hdlRunModel(model, files, plusargs) {
-  const id = ++hdlWorkerSeq;
+  const id = ++hdlActivity.jobSeq;
   hdlNativeJobs.add(id);
   let r;
   try {
@@ -346,7 +320,7 @@ if (window.rvNative && window.rvNative.onVlProgress) window.rvNative.onVlProgres
 async function hdlVerilate(tb, gen, ck) {
   const language = { '1995': '1364-1995', '2001': '1364-2001', '2005-sv': '1800-2017' }[gen] || '1364-2005';
   const files = {}, headers = {};
-  for (const f of hdlFiles) (/\.(vh|svh)$/i.test(f.name) ? headers : files)[f.name] = f.src;
+  for (const f of hdlSources.files) (/\.(vh|svh)$/i.test(f.name) ? headers : files)[f.name] = f.src;
   if (ck) {
     files['cg3207_hdl_ck.v'] = ck;
     tb = tb.replace(/endmodule\s*$/, '  cg3207_hdl_ck cg3207_ck();\n\nendmodule\n');
@@ -358,11 +332,11 @@ async function hdlVerilate(tb, gen, ck) {
       'that has never been written, is 0 here.', 'sys');
   }
   hdlStatus('building with Verilator...', 'busy');
-  const id = ++hdlWorkerSeq;
+  const id = ++hdlActivity.jobSeq;
   hdlNativeJobs.add(id);
   let r;
   try {
-    r = await window.rvNative.vlBuild(id, files, { language, headers, waveTop: hdlWaveTop });
+    r = await window.rvNative.vlBuild(id, files, { language, headers, waveTop: hdlConfig.waveTop });
   } finally {
     hdlNativeJobs.delete(id);
   }

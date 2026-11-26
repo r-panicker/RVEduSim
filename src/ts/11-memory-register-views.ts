@@ -336,8 +336,8 @@ function handleMemByteEditKey(event, el) {
 }
 
 function writeMemFromPanel(addr, val, size) {
-  memoryPanelEdit = true;
-  try { writeMem(addr, val, size); } finally { memoryPanelEdit = false; }
+  memory.panelEdit = true;
+  try { writeMem(addr, val, size); } finally { memory.panelEdit = false; }
 }
 
 function commitMemByteEdit(el) {

@@ -42,6 +42,24 @@ and `ui`. Code reads and writes these objects (`cpu.pc`, `uart.rxFull`), never c
 fields. `machine/memory-map.ts` holds the MMIO addresses and `machine/mmio.ts` the table of what
 each register does.
 
+HDL mode's state is in `hdl/state.ts`: `hdlConfig` (the settings), `hdlSources` (the loaded files
+and folder), `hdlRec` (the recording, the position in it, the input timeline, the inputs at
+cycle 0), `hdlBuild` (compiled design, memory images, the waveform), `hdlCheckpoints` and
+`hdlActivity` (what is running: a live run, a run in chunks, Real-time playback). Which engine runs
+the program is `ui.engine`. `hdl/testbench.ts` generates the testbench and `hdl/verilog.ts` holds the
+helpers that read Verilog source as text.
+
+The machine (`machine/`) is the functional model with no page around it: `memory.ts` (RAM pages and
+the MMIO window, with the step journal and `observeWrites` for the HDL cross-check), `execute.ts`
+(fetch, decode and execute, FP, atomics, the RARS syscalls), `reset.ts` (reset and loading a
+program), `oled.ts`, `uart.ts`, `peripherals.ts` (the snapshots Back restores), `control.ts` (the
+single-cycle decoder table, extender, ALU and PC logic as the course's RTL computes them, shared
+by the pipeline and the datapath drawing) and `pipeline.ts` (the 5-stage model, its state in one
+`pipeline` object: `arch`, `on`, `hazards`, `predictor`, the stage registers `regs`). It tells the page
+what it needs through `machine/host.ts`, one interface (log a line, the peripherals or OLED changed,
+UART output, a register was touched, read a syscall's input) that `02-machine-host.ts` connects to
+the console and panels at load; with no host installed it runs silently.
+
 `npm run typecheck` runs `tsc` over all of `src/ts`. The styles are joined in the order of
 `src/styles/order.json`. `dist/index.html` names `app.js` and `app.css` with a hash of their
 content (`app.js?v=…`), so a browser never runs a cached copy of an older build.

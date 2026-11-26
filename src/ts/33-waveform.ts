@@ -3,8 +3,8 @@
 // simulation settings.
 
 function hdlDownloadVcd() {
-  if (!hdlLastVcd) return;
-  downloadTextFile('cg3207_hdl.vcd', hdlVcdText(hdlLastVcd));
+  if (!hdlBuild.lastVcd) return;
+  downloadTextFile('cg3207_hdl.vcd', hdlVcdText(hdlBuild.lastVcd));
 }
 
 // ---- Waveforms -------------------------------------------------------
@@ -155,14 +155,14 @@ function waveTicksPerCycle(p) {
 }
 
 function waveEnsureParsed() {
-  if (!hdlLastVcd) { waveParsed = null; waveParsedFrom = null; return null; }
-  if (waveParsed && waveParsedFrom === hdlLastVcd) return waveParsed;
+  if (!hdlBuild.lastVcd) { waveParsed = null; waveParsedFrom = null; return null; }
+  if (waveParsed && waveParsedFrom === hdlBuild.lastVcd) return waveParsed;
   // A run recorded in stretches changes the waveform after each one;
   // parsing all of it every time would take most of the run's time.
-  if (waveParsed && hdlChunked && performance.now() - waveParsedAt < 10 * waveParseMs) return waveParsed;
+  if (waveParsed && hdlActivity.chunked && performance.now() - waveParsedAt < 10 * waveParseMs) return waveParsed;
   const t0 = performance.now();
-  waveParsed = parseVcd(hdlVcdText(hdlLastVcd));
-  waveParsedFrom = hdlLastVcd;
+  waveParsed = parseVcd(hdlVcdText(hdlBuild.lastVcd));
+  waveParsedFrom = hdlBuild.lastVcd;
   waveParsedAt = performance.now();
   waveParseMs = waveParsedAt - t0;
   waveApplySignalChoice(waveParsed);
@@ -336,7 +336,7 @@ function initWaveResizer() {
 
 function applyWaveOpen() {
   // Only ever open in HDL mode: there are no waveforms to show otherwise.
-  const on = waveOpen && simEngineMode === 'hdl';
+  const on = waveOpen && ui.engine === 'hdl';
   document.body.classList.toggle('wave-open', on);
   const fold = document.getElementById('waveFoldBtn');
   if (fold) fold.title = 'Hide the waveform';
@@ -392,7 +392,7 @@ function waveEnableVcdAndRerun() {
   setHdlDumpVcd(true);
   const cb = document.getElementById('hdlVcd');
   if (cb) cb.checked = true;
-  if (hdlTrace) hdlQueueResim('re-simulated with the VCD dump on');
+  if (hdlRec.trace) hdlQueueResim('re-simulated with the VCD dump on');
 }
 
 function updateWaveView() {
@@ -410,7 +410,7 @@ function updateWaveView() {
     if (box) box.value = '';
   };
 
-  if (!hdlDumpVcd) {
+  if (!hdlConfig.dumpVcd) {
     say('Waveforms come from the VCD dump, which is off. ' +
       '<button type="button" onclick="waveEnableVcdAndRerun()">Turn it on and re-run</button>');
     return;
@@ -540,7 +540,7 @@ function waveActiveEndCycle() {
   const p = waveParsed;
   if (!p) return 0;
   const recorded = Math.floor(p.endTime / waveTicksPerCycle(p));
-  const t = hdlTrace;
+  const t = hdlRec.trace;
   if (!t || !t.steps.length) return recorded;
   // +1 so the last instruction's own cycle is fully drawn.
   const lastStep = t.steps[t.steps.length - 1].cyc + 1;
@@ -622,7 +622,7 @@ function waveFirstCycle(p) {
 function waveGotoCycle(text) {
   const c = parseInt(String(text).replace(/[\s,_]/g, ''), 10);
   if (!waveParsed || !Number.isFinite(c)) { updateWaveHeaderAndDraw(); return false; }
-  const end = Math.max(waveActiveEndCycle(), hdlTrace ? hdlTrace.budget : 0);
+  const end = Math.max(waveActiveEndCycle(), hdlRec.trace ? hdlRec.trace.budget : 0);
   const cyc = Math.max(0, Math.min(c, end));
   waveSeekToCycle(cyc);
   waveStart = Math.max(0, cyc - Math.floor(waveSpan / 2));
@@ -642,7 +642,7 @@ function waveCycleAtX(clientX) {
 // instruction that had started by then, which is the one the waveform is
 // showing there.
 function waveSeekToCycle(cycle) {
-  const t = hdlTrace;
+  const t = hdlRec.trace;
   if (!t || !t.steps.length) return;
   let idx = 0;
   for (let i = 0; i < t.steps.length; i++) {
@@ -933,10 +933,10 @@ function drawWaveforms() {
 // run, or in JS mode, it starts from the inputs as they are now.
 function hdlDownloadTestbench() {
   let run;
-  if (simEngineMode === 'hdl' && hdlTrace) {
-    run = { cycles: hdlCycleBudget, base: hdlBase, stim: hdlStim.slice().sort((a, b) => a.cycle - b.cycle), rx: hdlRx };
+  if (ui.engine === 'hdl' && hdlRec.trace) {
+    run = { cycles: hdlConfig.cycleBudget, base: hdlRec.base, stim: hdlRec.stim.slice().sort((a, b) => a.cycle - b.cycle), rx: hdlRec.rx };
   } else {
-    run = { cycles: hdlCycleBudget, base: hdlCurrentInputs(), stim: [], rx: [] };
+    run = { cycles: hdlConfig.cycleBudget, base: hdlCurrentInputs(), stim: [], rx: [] };
   }
   downloadTextFile('cg3207_hdl_tb.v', hdlBuildTestbench({ run }));
   setStatus('Saved the testbench for this run to cg3207_hdl_tb.v; it needs AA_IROM.mem and AA_DMEM.mem beside it', 'success');
@@ -944,32 +944,31 @@ function hdlDownloadTestbench() {
 
 // Cycles per Run is remembered for Verilator, Icarus, and Icarus with
 // post-synthesis simulation.
-function hdlCyclesKey() { return hdlSimulator === 'icarus' && hdlSynthEnabled ? 'synth' : hdlSimulator; }
+function hdlCyclesKey() { return hdlConfig.simulator === 'icarus' && hdlConfig.synthEnabled ? 'synth' : hdlConfig.simulator; }
 function hdlShowCycles() {
-  hdlCycleBudget = hdlCyclesFor[hdlCyclesKey()];
+  hdlConfig.cycleBudget = hdlCyclesFor[hdlCyclesKey()];
   const cyc = document.getElementById('hdlCycles');
   if (cyc) {
-    cyc.max = String(hdlSimulator === 'verilator' ? HDL_VL_MAX_RUN : HDL_MAX_CYCLES);
-    cyc.value = hdlCycleBudget;
+    cyc.max = String(hdlConfig.simulator === 'verilator' ? HDL_VL_MAX_RUN : HDL_MAX_CYCLES);
+    cyc.value = hdlConfig.cycleBudget;
   }
 }
 function setHdlCycles(v) {
   const n = parseInt(v, 10);
   if (!Number.isFinite(n) || n <= 0) return;
-  hdlCycleBudget = Math.min(n, hdlSimulator === 'verilator' ? HDL_VL_MAX_RUN : HDL_MAX_CYCLES);
-  hdlCyclesFor[hdlCyclesKey()] = hdlCycleBudget;
+  hdlConfig.cycleBudget = Math.min(n, hdlConfig.simulator === 'verilator' ? HDL_VL_MAX_RUN : HDL_MAX_CYCLES);
+  hdlCyclesFor[hdlCyclesKey()] = hdlConfig.cycleBudget;
   // Keep the field honest when the budget is set from anywhere else,
   // including the automatic extension when stepping off the end.
   const el = document.getElementById('hdlCycles');
-  if (el && parseInt(el.value, 10) !== hdlCycleBudget) el.value = hdlCycleBudget;
+  if (el && parseInt(el.value, 10) !== hdlConfig.cycleBudget) el.value = hdlConfig.cycleBudget;
 }
 function setHdlDumpVcd(on) {
-  hdlDumpVcd = !!on;
+  hdlConfig.dumpVcd = !!on;
   updateWaveView();
 }
-function setHdlWaveTop(on) { hdlWaveTop = !!on; }
-let hdlLiveWave = 'live';     // 'pause' | 'live': when a live run's waveform is built
-function setHdlLiveWave(v) { hdlLiveWave = v === 'live' ? 'live' : 'pause'; }
+function setHdlWaveTop(on) { hdlConfig.waveTop = !!on; }
+function setHdlLiveWave(v) { hdlConfig.liveWave = v === 'live' ? 'live' : 'pause'; }
 // ---- Detail presets -------------------------------------------------
 // Each sets the options that cost run time. They stay visible and can be
 // changed one by one, after which the preset reads Custom; with no
@@ -980,8 +979,8 @@ const HDL_DETAIL = {
   fastest:  { trace: false, vcd: false, top: true,  live: 'pause', compare: false, synth: false }
 };
 function hdlDetailNow() {
-  return { trace: hdlTraceEnabled, vcd: hdlDumpVcd, top: hdlWaveTop, live: hdlLiveWave,
-           compare: hdlCompareEnabled, synth: hdlSynthEnabled };
+  return { trace: hdlConfig.traceEnabled, vcd: hdlConfig.dumpVcd, top: hdlConfig.waveTop, live: hdlConfig.liveWave,
+           compare: hdlConfig.compareEnabled, synth: hdlConfig.synthEnabled };
 }
 function hdlDetailMatch() {
   const now = hdlDetailNow();
@@ -996,16 +995,16 @@ function hdlDetailMatch() {
 function hdlRefreshDetail() {
   const byId = id => document.getElementById(id);
   const set = (id, prop, v) => { const el = byId(id); if (el && el[prop] !== v) el[prop] = v; };
-  set('hdlTrace', 'checked', hdlTraceEnabled);
-  set('hdlVcd', 'checked', hdlDumpVcd);
-  set('hdlWaveTop', 'value', hdlWaveTop ? 'top' : 'all');
-  set('hdlLiveWave', 'value', hdlLiveWave);
-  set('hdlCompare', 'checked', hdlCompareEnabled);
-  set('hdlSynth', 'checked', hdlSynthEnabled);
+  set('hdlTrace', 'checked', hdlConfig.traceEnabled);
+  set('hdlVcd', 'checked', hdlConfig.dumpVcd);
+  set('hdlWaveTop', 'value', hdlConfig.waveTop ? 'top' : 'all');
+  set('hdlLiveWave', 'value', hdlConfig.liveWave);
+  set('hdlCompare', 'checked', hdlConfig.compareEnabled);
+  set('hdlSynth', 'checked', hdlConfig.synthEnabled);
   const scope = byId('hdlWaveScopeRow');
-  if (scope) scope.style.display = hdlDumpVcd ? 'flex' : 'none';
+  if (scope) scope.style.display = hdlConfig.dumpVcd ? 'flex' : 'none';
   const lw = byId('hdlLiveWaveRow');
-  if (lw) lw.style.display = hdlDumpVcd && hdlSimulator === 'verilator' ? 'flex' : 'none';
+  if (lw) lw.style.display = hdlConfig.dumpVcd && hdlConfig.simulator === 'verilator' ? 'flex' : 'none';
   const sel = byId('hdlDetail');
   if (sel) {
     const m = hdlDetailMatch();
@@ -1045,7 +1044,6 @@ for (const n of ['setHdlTrace', 'setHdlDumpVcd', 'setHdlWaveTop', 'setHdlLiveWav
 // app; the page shows the same choice in a browser, disabled, so that the
 // two look alike.
 const hdlVerilatorAvail = !!(window.rvNative && window.rvNative.verilator);
-let hdlSimulator = 'icarus';
 const HDL_SIMULATOR_KEY = 'rvsim.hdlSimulator';
 
 function hdlInitSimulator() {
@@ -1067,8 +1065,8 @@ function hdlInitSimulator() {
 
 function setHdlSimulator(v, restoring) {
   if (v !== 'verilator' || !hdlVerilatorAvail) v = 'icarus';
-  const changed = v !== hdlSimulator;
-  hdlSimulator = v;
+  const changed = v !== hdlConfig.simulator;
+  hdlConfig.simulator = v;
   hdlShowCycles();
   hdlRefreshDetail();
   const sel = document.getElementById('hdlSimulator');
@@ -1076,7 +1074,7 @@ function setHdlSimulator(v, restoring) {
   if (!restoring) { try { localStorage.setItem(HDL_SIMULATOR_KEY, v); } catch (e) { /* private mode */ } }
   const synth = document.getElementById('hdlSynthCard');
   if (synth) synth.style.display = v === 'verilator' ? 'none' : '';
-  if (v === 'verilator' && hdlSynthEnabled) {
+  if (v === 'verilator' && hdlConfig.synthEnabled) {
     setHdlSynth(false);
     const cb = document.getElementById('hdlSynth');
     if (cb) cb.checked = false;
@@ -1085,24 +1083,24 @@ function setHdlSimulator(v, restoring) {
 }
 
 function hdlSimulatorName() {
-  return hdlSimulator === 'verilator' ? 'Verilator' : hdlNative ? 'Icarus Verilog' : 'Icarus/WASM';
+  return hdlConfig.simulator === 'verilator' ? 'Verilator' : hdlNative ? 'Icarus Verilog' : 'Icarus/WASM';
 }
 function setHdlTrace(on) {
-  hdlTraceEnabled = !!on;
+  hdlConfig.traceEnabled = !!on;
   hdlDiscardTrace();
   updateToolbarButtonStates();
 }
-function setHdlCompare(on) { hdlCompareEnabled = !!on; }
+function setHdlCompare(on) { hdlConfig.compareEnabled = !!on; }
 // Ticking this is what triggers the one-off Yosys download. If a run has
 // already been recorded, synthesise and check it now instead of waiting
 // for the next Run.
 function setHdlSynth(on) {
-  const was = hdlSynthEnabled;
-  hdlSynthEnabled = !!on;
+  const was = hdlConfig.synthEnabled;
+  hdlConfig.synthEnabled = !!on;
   hdlShowCycles();
   updateToolbarButtonStates();
-  if (!hdlSynthEnabled || was) return;
-  if (!hdlTrace || !hdlLastRtlOut) {
+  if (!hdlConfig.synthEnabled || was) return;
+  if (!hdlRec.trace || !hdlBuild.lastRtlOut) {
     loadYosysEngine().catch(e => {
       hdlLog(String(e && e.message ? e.message : e), 'err');
       hdlStatus('the synthesiser failed to load', 'err');
@@ -1114,9 +1112,9 @@ function setHdlSynth(on) {
       const wrapper = hdlFindWrapper();
       loadProgram(program.machineCode);
       const mem = hdlMemFiles(wrapper.src);
-      await hdlPostSynthCheck(hdlLastRtlOut, hdlTrace.budget,
-                              hdlTraceEnabled ? 2 : 1, mem.files);
-      hdlSeek(hdlIdx);
+      await hdlPostSynthCheck(hdlBuild.lastRtlOut, hdlRec.trace.budget,
+                              hdlConfig.traceEnabled ? 2 : 1, mem.files);
+      hdlSeek(hdlRec.idx);
     } catch (e) {
       hdlLog(String(e && e.message ? e.message : e), 'err');
       setStatus('Post-synthesis check failed - see the console', 'error');
@@ -1126,7 +1124,7 @@ function setHdlSynth(on) {
 }
 // The register path is compiled into the testbench as a hierarchical
 // reference, so changing it invalidates the cached binary.
-function setHdlRegPath() { hdlVvpCache = null; hdlDiscardTrace(); }
+function setHdlRegPath() { hdlBuild.vvpCache = null; hdlDiscardTrace(); }
 
 function hdlRefreshRegPathHint() {
   const el = document.getElementById('hdlRegPath');
@@ -1137,7 +1135,7 @@ function hdlRefreshRegPathHint() {
   if (hint) {
     hint.textContent = found
       ? 'detected automatically: ' + found
-      : (hdlFiles.length ? 'no 32-entry register array found - name the path to see registers'
+      : (hdlSources.files.length ? 'no 32-entry register array found - name the path to see registers'
                          : 'load your sources to detect the register file');
   }
 }

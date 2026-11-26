@@ -6,19 +6,19 @@
 // functional engine's own path stays untouched.
 const hdlBaseStepOnce = stepOnce;
 stepOnce = function () {
-  if (simEngineMode === 'hdl') { hdlStepOnce(); return; }
+  if (ui.engine === 'hdl') { hdlStepOnce(); return; }
   hdlBaseStepOnce();
 };
 
 const hdlBaseStepBack = stepBack;
 stepBack = function () {
-  if (simEngineMode === 'hdl') { hdlStepBack(); return; }
+  if (ui.engine === 'hdl') { hdlStepBack(); return; }
   hdlBaseStepBack();
 };
 
 const hdlBaseResetAll = resetAll;
 resetAll = function () {
-  if (simEngineMode === 'hdl') hdlDiscardTrace();
+  if (ui.engine === 'hdl') hdlDiscardTrace();
   hdlBaseResetAll();
 };
 
@@ -34,7 +34,7 @@ updateRegisters = function () {
   // fixed Wrapper and are unaffected.
   const notice = document.getElementById('hdlRegNotice');
   if (notice) {
-    const missing = (simEngineMode === 'hdl' && hdlTrace && !hdlTrace.regBank);
+    const missing = (ui.engine === 'hdl' && hdlRec.trace && !hdlRec.trace.regBank);
     notice.style.display = missing ? '' : 'none';
     if (missing && !notice.dataset.filled) {
       notice.innerHTML = '<b>Register values are not available for this design.</b> ' +
@@ -48,10 +48,10 @@ updateRegisters = function () {
       notice.dataset.filled = '1';
     }
   }
-  if (simEngineMode !== 'hdl' || !hdlTrace || !hdlRegKnown || !regBody) return;
+  if (ui.engine !== 'hdl' || !hdlRec.trace || !hdlRec.regKnown || !regBody) return;
   const rows = regBody.querySelectorAll('tr');
   for (let i = 1; i < 32 && i < rows.length; i++) {
-    if (hdlRegKnown[i]) continue;
+    if (hdlRec.regKnown[i]) continue;
     const cells = rows[i].querySelectorAll('td.col-val');
     if (cells[0]) { cells[0].textContent = 'xxxxxxxx'; cells[0].classList.add('reg-unknown'); }
     if (cells[1]) { cells[1].textContent = '?'; cells[1].classList.add('reg-unknown'); }
@@ -65,10 +65,10 @@ updateStats = function () {
   hdlBaseUpdateStats();
   const el = document.getElementById('statsBar');
   if (!el) return;
-  const hdl = simEngineMode === 'hdl';
-  const piped = !hdl && pipeMode;
-  const multi = !hdl && jsArch === 'multi';
-  const pacing = clock.pace === 'real' && (hdl ? !!(hdlPlay || hdlLive || hdlChunked) : run.running);
+  const hdl = ui.engine === 'hdl';
+  const piped = !hdl && pipeline.on;
+  const multi = !hdl && pipeline.arch === 'multi';
+  const pacing = clock.pace === 'real' && (hdl ? !!(hdlActivity.play || hdlActivity.live || hdlActivity.chunked) : run.running);
   const SEP = '&nbsp;|&nbsp; ';
   const lead = [fmtSimTime(cpu.totalCycles) +
     (pacing && clock.rtRatio < 0.95 ? ' <span class="stat-lag" title="The browser cannot keep up with this clock">×' +
@@ -77,7 +77,7 @@ updateStats = function () {
     ' <span class="stat-tag">' + (hdl ? 'hw' : piped ? 'pipe' : multi ? 'multi' : 'single') + '</span>'];
   const tail = ['Instr: ' + cpu.instructionCount];
   if ((piped || multi) && cpu.instructionCount) tail.push('CPI: ' + (cpu.totalCycles / cpu.instructionCount).toFixed(2));
-  if (piped && pipeBP.on && pipe) tail.push('Mispredicts: ' + pipe.mispredicts);
+  if (piped && pipeline.predictor.on && pipeline.regs) tail.push('Mispredicts: ' + pipeline.regs.mispredicts);
   tail.push('PC: <span class="stat-pc">' + formatPC() + '</span>');
   // Two halves of about equal width, which a phone stacks rather than
   // squeeze the status message beside them.
@@ -104,11 +104,11 @@ updateToolbarButtonStates = function () {
   ['engBtnJs', 'engBtnHdl'].forEach(id => {
     const b = document.getElementById(id);
     if (!b) return;
-    b.disabled = hdlRunning;
-    b.classList.toggle('inactive', hdlRunning);
+    b.disabled = hdlActivity.running;
+    b.classList.toggle('inactive', hdlActivity.running);
   });
-  if (simEngineMode !== 'hdl') return;
-  const ready = !!(program.assembled && hdlFindWrapper() && !hdlRunning);
+  if (ui.engine !== 'hdl') return;
+  const ready = !!(program.assembled && hdlFindWrapper() && !hdlActivity.running);
   const set = (id, on, title) => {
     const b = document.getElementById(id);
     if (!b) return;
@@ -116,26 +116,26 @@ updateToolbarButtonStates = function () {
     b.classList.toggle('inactive', !on);
     if (title) b.title = title;
   };
-  const resuming = !!(hdlTrace && hdlTraceEnabled);
-  set('runPauseBtn', ready || !!hdlLive || !!hdlChunked, hdlRunning && hdlSynthEnabled && !hdlLive && !hdlChunked
+  const resuming = !!(hdlRec.trace && hdlConfig.traceEnabled);
+  set('runPauseBtn', ready || !!hdlActivity.live || !!hdlActivity.chunked, hdlActivity.running && hdlConfig.synthEnabled && !hdlActivity.live && !hdlActivity.chunked
     ? 'A run with post-synthesis simulation on is simulated in one go and cannot be paused; Reset stops it'
     : resuming
     ? 'Continue the hardware run to the next breakpoint, recording another ' +
-      hdlCycleBudget + ' cycles if it reaches the end (Reset to start over)'
+      hdlConfig.cycleBudget + ' cycles if it reaches the end (Reset to start over)'
     : 'Simulate your Verilog, stopping at the first breakpoint or after ' +
-      hdlCycleBudget + ' cycles');
+      hdlConfig.cycleBudget + ' cycles');
   const runBtn = document.getElementById('runPauseBtn');
   if (runBtn) {
-    runBtn.innerHTML = (hdlPlay || hdlLive || hdlChunked) ? '\u23F8 Pause' : (resuming && hdlIdx > 0) ? '\u25B6 Resume' : '\u25B6 Run HDL';
-    runBtn.style.opacity = (ready || hdlLive || hdlChunked) ? '1' : '0.45';
-    runBtn.style.cursor = (ready || hdlLive || hdlChunked) ? 'pointer' : 'not-allowed';
+    runBtn.innerHTML = (hdlActivity.play || hdlActivity.live || hdlActivity.chunked) ? '\u23F8 Pause' : (resuming && hdlRec.idx > 0) ? '\u25B6 Resume' : '\u25B6 Run HDL';
+    runBtn.style.opacity = (ready || hdlActivity.live || hdlActivity.chunked) ? '1' : '0.45';
+    runBtn.style.cursor = (ready || hdlActivity.live || hdlActivity.chunked) ? 'pointer' : 'not-allowed';
   }
-  set('btnStep', ready && hdlTraceEnabled,
-    hdlTraceEnabled ? 'Advance one instruction through the recorded hardware trace'
+  set('btnStep', ready && hdlConfig.traceEnabled,
+    hdlConfig.traceEnabled ? 'Advance one instruction through the recorded hardware trace'
                     : 'Stepping needs the Trace option under Settings > Simulation');
-  set('btnBack', ready && hdlTraceEnabled && !!hdlTrace && hdlIdx > 0,
+  set('btnBack', ready && hdlConfig.traceEnabled && !!hdlRec.trace && hdlRec.idx > 0,
     'Step back - possible because the run is a recording, not a live simulation');
-  if (hdlRunning) set('btnReset', true, 'Stop this simulation and discard the recording');
+  if (hdlActivity.running) set('btnReset', true, 'Stop this simulation and discard the recording');
   updateFloatSteps();
 };
 
@@ -192,7 +192,7 @@ updatePeripherals = function () {
 // once, one character time apart, and the testbench does the rest.
 const hdlBaseSendUartInput = sendUartInput;
 sendUartInput = function () {
-  if (simEngineMode !== 'hdl' || !hdlTrace) { hdlBaseSendUartInput(); return; }
+  if (ui.engine !== 'hdl' || !hdlRec.trace) { hdlBaseSendUartInput(); return; }
   const before = uart.pending.length;
   hdlBaseSendUartInput();
   // Take everything the base handler queued, plus anything it managed to
@@ -205,12 +205,12 @@ sendUartInput = function () {
   if (btn) { btn.innerText = 'Send'; btn.style.background = ''; }
   if (!added.length) { hdlOnUartInput(); return; }
   const gap = uartGapInstr();
-  if (hdlLive) {
+  if (hdlActivity.live) {
     for (const b of added) hdlLiveSend('in 5 ' + (((b & 0xFF) | (gap << 8)) >>> 0));
     return;
   }
   const at = hdlCurrentCycle();
-  added.forEach((b, i) => hdlRx.push({ cycle: at + i * gap, byte: b & 0xFF }));
+  added.forEach((b, i) => hdlRec.rx.push({ cycle: at + i * gap, byte: b & 0xFF }));
   const st = document.getElementById('uartAutoSendStatus');
   if (st) st.innerText = added.length > 1
     ? 'Queued ' + added.length + ' bytes, ' + gap + ' cycles apart' : '';
@@ -266,7 +266,7 @@ window.waveCycleAtX = waveCycleAtX;
 window.waveTicksPerCycle = waveTicksPerCycle;
 window.waveValueAt = waveValueAt;
 window.waveFormatValue = waveFormatValue;
-window.getHdlLastVcd = () => hdlVcdText(hdlLastVcd);
+window.getHdlLastVcd = () => hdlVcdText(hdlBuild.lastVcd);
 window.getWaveState = () => ({
   parsed: waveParsed,
   signals: waveSignals.slice(),
@@ -290,7 +290,7 @@ window.hdlFirstDifference = hdlFirstDifference;
 window.hdlCoreFiles = hdlCoreFiles;
 window.setHdlRegPath = setHdlRegPath;
 window.setSimEngineMode = setSimEngineMode;
-window.getHdlFiles = () => hdlFiles;
+window.getHdlFiles = () => hdlSources.files;
 window.setDipSwitches = (v) => {
   board.dip = v & 0xFFFF;
   if (typeof updatePeripherals === 'function') updatePeripherals();
@@ -298,7 +298,7 @@ window.setDipSwitches = (v) => {
 };
 window.getLedState = () => board.leds;
 window.getSevsegState = () => board.sevseg;
-window.getSimEngineMode = () => simEngineMode;
+window.getSimEngineMode = () => ui.engine;
 window.hdlBuildTestbench = hdlBuildTestbench;
 window.hdlHasDoubleBuffer = hdlHasDoubleBuffer;
 window.hdlMemFiles = hdlMemFiles;
@@ -308,8 +308,8 @@ window.hdlParseTrace = hdlParseTrace;
 window.hdlDiscoverRegBank = hdlDiscoverRegBank;
 window.hdlStimFile = hdlStimFile;
 window.hdlRxFile = hdlRxFile;
-window.getHdlTrace = () => hdlTrace;
-window.getHdlIndex = () => hdlIdx;
+window.getHdlTrace = () => hdlRec.trace;
+window.getHdlIndex = () => hdlRec.idx;
 window.hdlSeek = hdlSeek;
 window.hdlSynthLint = hdlSynthLint;
 window.hdlLintFile = hdlLintFile;
@@ -323,19 +323,19 @@ window.hdlStepBack = hdlStepBack;
 // Install a recording captured elsewhere (used by the tests, which run
 // the engine from Node) so seeking can be exercised without a browser.
 window.hdlLoadTrace = (stdout, budget) => {
-  hdlTrace = hdlParseTrace(stdout);
-  hdlTrace.budget = budget || hdlCycleBudget;
-  hdlTrace.regBank = hdlRegBankPath();
-  hdlIdx = 0;
-  return hdlTrace;
+  hdlRec.trace = hdlParseTrace(stdout);
+  hdlRec.trace.budget = budget || hdlConfig.cycleBudget;
+  hdlRec.trace.regBank = hdlRegBankPath();
+  hdlRec.idx = 0;
+  return hdlRec.trace;
 };
 window.hdlCompareWithJs = hdlCompareWithJs;
 window.hdlPlayTo = hdlPlayTo;
 window.hdlStopPlay = hdlStopPlay;
 window.hdlLooksPipelined = hdlLooksPipelined;
-window.hdlSetBase = (b) => { hdlBase = Object.assign({}, hdlBase, b); };
-window.hdlSetStim = (list) => { hdlStim = list.slice(); };
-window.hdlSetRx = (list) => { hdlRx = list.slice(); };
+window.hdlSetBase = (b) => { hdlRec.base = Object.assign({}, hdlRec.base, b); };
+window.hdlSetStim = (list) => { hdlRec.stim = list.slice(); };
+window.hdlSetRx = (list) => { hdlRec.rx = list.slice(); };
 window.uartTickDelivery = uartTickDelivery;
 window.setUartSendMode = setUartSendMode;
 window.setUartCharInstr = setUartCharInstr;
@@ -347,6 +347,6 @@ window.hdlLoadPrebuiltProcessor = hdlLoadPrebuiltProcessor;
 // Load sources programmatically (the drop zone and file picker route
 // through hdlAddFiles; this is the same thing without a FileList).
 window.hdlSetSources = (list) => {
-  hdlFiles = list.map(f => ({ name: f.name, src: f.src }));
+  hdlSources.files = list.map(f => ({ name: f.name, src: f.src }));
   renderHdlFileList();
 };

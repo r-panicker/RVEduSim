@@ -248,7 +248,7 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       // With the single-cycle datapath on screen, the arrows walk its
       // phases, as its ▶ and ◀ do.
-      const phases = !pipeMode && simEngineMode !== 'hdl' && dpModel && vizShown() && !dpBlocker();
+      const phases = !pipeline.on && ui.engine !== 'hdl' && dpModel && vizShown() && !dpBlocker();
       if (e.key === 'ArrowRight') phases ? dpNext() : stepOnce();
       else phases ? dpPrev() : stepBack();
       return;

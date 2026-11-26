@@ -64,7 +64,7 @@ async function loadYosysEngine() {
 // fixed and is not the thing being checked.
 function hdlCoreFiles() {
   const wrapper = hdlFindWrapper();
-  return hdlFiles.filter(f => !wrapper || f.name !== wrapper.name);
+  return hdlSources.files.filter(f => !wrapper || f.name !== wrapper.name);
 }
 
 // Synthesis resolves parameters away, but the fixed Wrapper instantiates
@@ -174,7 +174,7 @@ function hdlObservable(stdout) {
 
 // What the panels are currently showing, for every user-facing message.
 function hdlModeLabel() {
-  return hdlSynthEnabled ? 'behavioural + post-synthesis' : 'behavioural';
+  return hdlConfig.synthEnabled ? 'behavioural + post-synthesis' : 'behavioural';
 }
 
 // Index of the first event where two runs disagree, or -1 if identical.

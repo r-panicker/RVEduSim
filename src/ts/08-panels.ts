@@ -1104,7 +1104,7 @@ function updateEditor() {
   const code = editor.value;
   if (code.trim()) {
     try {
-      const mc = assemble(code, layout.baseAddress);
+      const mc = assemble(code, layout.baseAddress, { language: editorLanguageMode, report: log });
       program.machineCode = mc;
       updateMachineCode();
       updateDisassembly();
@@ -1433,7 +1433,7 @@ const TEXT_RO_TITLE =
 // Every edit entry point (see 11-memory-register-views.ts) guards on this as
 // well as rendering the cell read-only: a keyboard shortcut or a row
 // rendered before the engine switched can still reach one.
-function stateIsReplayed() { return simEngineMode === 'hdl'; }
+function stateIsReplayed() { return ui.engine === 'hdl'; }
 
 function updateRegisters() {
   let html = '';

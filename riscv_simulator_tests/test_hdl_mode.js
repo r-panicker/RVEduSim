@@ -749,17 +749,17 @@ setTimeout(async () => {
         let played = false;
         win.hdlPlayTo(nSteps, () => { played = true; });
         await sleep(200);
-        const mid = win.eval('hdlIdx');
+        const mid = win.eval('hdlRec.idx');
         check('part-way through, playback is between the start and the end (' + mid + ' of ' + nSteps + ')',
           mid > 20 && mid < nSteps - 20 && !played);
         check('and the Run button pauses it', /Pause/.test(doc.getElementById('runPauseBtn').textContent));
         win.hdlStopPlay();
         await sleep(150);
-        check('paused, it stays put', win.eval('hdlIdx') === mid && !played);
+        check('paused, it stays put', win.eval('hdlRec.idx') === mid && !played);
         win.setClkDivBits(13);                   // 12.2 kHz: the rest in a few ms
         win.hdlPlayTo(nSteps, () => { played = true; });
         await sleep(250);
-        check('resumed, it reaches the end and reports done', played && win.eval('hdlIdx') === nSteps);
+        check('resumed, it reaches the end and reports done', played && win.eval('hdlRec.idx') === nSteps);
         win.setRunPace('max');
         win.setClkDivBits(5);
 

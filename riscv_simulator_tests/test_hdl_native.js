@@ -207,7 +207,7 @@ setTimeout(async () => {
     // The replay is joined onto the recording in place; it is done once the
     // recording's input timeline holds the change and nothing runs.
     const replayed = (win, v) => { const t = win.getHdlTrace();
-      return !!t && !win.eval('hdlRunning') && !!t.timeline && t.timeline.stim.some(s => s.value === v); };
+      return !!t && !win.eval('hdlActivity.running') && !!t.timeline && t.timeline.stim.some(s => s.value === v); };
     await until(() => replayed(nat.win, 0x72), 120000);
     const tResim = Date.now() - t2;
     wasm.win.setDipSwitches(0x0072);
@@ -387,7 +387,8 @@ setTimeout(async () => {
       win.setRunPace('max');
       win.setClkDivBits(5);
 
-      check('…and is lit after Reset', (win.resetAll(), win.updatePeripherals(), clk()));
+      win.resetAll();
+      check('…and is lit after Reset', await until(() => (win.updatePeripherals(), clk()), 2000));
 
       await fresh();
       win.setHdlTrace(false);

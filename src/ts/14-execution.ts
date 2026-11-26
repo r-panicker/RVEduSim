@@ -111,8 +111,8 @@ function resetCyclesConfig() {
   run.cycleConfig.system = 1;
   run.statementStepping = false;
   run.maxInstructions = 100000000;
-  pipeHaz = Object.assign({}, PIPE_HAZ_DEFAULT);
-  pipeBP = Object.assign({}, PIPE_BP_DEFAULT);
+  pipeline.hazards = Object.assign({}, PIPE_HAZ_DEFAULT);
+  pipeline.predictor = Object.assign({}, PIPE_BP_DEFAULT);
   pipeSetMode(false);
   buildCyclesPanel();
   setStatus('Simulator settings reset to defaults', 'success');
@@ -121,7 +121,7 @@ function resetCyclesConfig() {
 // --- Settings modal (Compiler, Linker, Simulator) ---
 // The Simulation tab shows the active engine's settings only.
 function refreshSimSettingsScope() {
-  const hdl = (typeof simEngineMode !== 'undefined' && simEngineMode === 'hdl');
+  const hdl = (typeof ui.engine !== 'undefined' && ui.engine === 'hdl');
   const js = document.getElementById('simGroupJs'), hw = document.getElementById('simGroupHdl');
   if (js) js.hidden = hdl;
   if (hw) hw.hidden = !hdl;
@@ -355,7 +355,7 @@ function resetCurrentSettingsTab() {
     set('ms-stack', DEFAULT_DATA_BASE + 0x200);
     set('ms-mmio', 0xFFFF0000);
     setStatus('Linker defaults filled in - Apply to use them', 'info');
-  } else if (ui.settingsTab === 'simulator' && simEngineMode !== 'hdl') {
+  } else if (ui.settingsTab === 'simulator' && ui.engine !== 'hdl') {
     resetCyclesConfig();
   } else if (ui.settingsTab === 'simulator') {
     // Settings only - the loaded sources are the user's work, and Clear
@@ -456,7 +456,7 @@ const DOWNLOADS = {
     save: () => hdlDownloadTestbench()
   },
   vcd: {
-    ready: () => !!hdlLastVcd,
+    ready: () => !!hdlBuild.lastVcd,
     save: () => hdlDownloadVcd()
   }
 };
@@ -498,12 +498,12 @@ function sourceLineForPc(addr) {
     }
     return -1;
   }
-  const line = pcToLineMap.get(addr);
+  const line = program.pcToLine.get(addr);
   return line === undefined ? -1 : line;
 }
 
 function pipeStageLines() {
-  if (!pipeMode || simEngineMode === 'hdl' || !pipe || !program.assembled) return [];
+  if (!pipeline.on || ui.engine === 'hdl' || !pipeline.regs || !program.assembled) return [];
   const byLine = new Map();
   const add = (addr, letter) => {
     const line = sourceLineForPc(addr >>> 0);
@@ -511,7 +511,7 @@ function pipeStageLines() {
     byLine.set(line, (byLine.has(line) ? byLine.get(line) + ' ' : '') + letter);
   };
   if (!programFinished && readMem(cpu.pc >>> 0, 4, true)) add(cpu.pc, 'F');
-  ['D', 'E', 'M', 'W'].forEach(k => { if (pipe[k]) add(pipe[k].pc, k); });
+  ['D', 'E', 'M', 'W'].forEach(k => { if (pipeline.regs[k]) add(pipeline.regs[k].pc, k); });
   return Array.from(byLine.entries()).sort((a, b) => a[0] - b[0]);
 }
 
@@ -675,7 +675,7 @@ function prepareAssembly() {
   cFunctionLocals = new Map();
   try {
     log('Assembling...', 'info');
-    const mc = assemble(source, layout.baseAddress);
+    const mc = assemble(source, layout.baseAddress, { language: editorLanguageMode, report: log });
     program.machineCode = mc;
     let hasError = false;
     for (const item of mc) {
@@ -702,7 +702,7 @@ function executeOne() {
   const addr = cpu.pc;
   const instr32 = fetchInstruction(addr);
   if (instr32 === 0) { cpu.pc += 4; return; }
-  cpu.totalCycles += jsArch === 'multi' ? instrCycles(instr32) : 1;
+  cpu.totalCycles += pipeline.arch === 'multi' ? instrCycles(instr32) : 1;
   cpu.instructionCount++;
   cpu.pc = decodeAndExecute(instr32, addr);
   cpu.lastChangedReg = cpu.lastExecutedRd;
