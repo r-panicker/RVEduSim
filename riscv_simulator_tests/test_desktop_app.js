@@ -174,7 +174,9 @@ async function launch(userData) {
     if (!vlLit || !vb) console.log(vlLog.split('\n').slice(-25).map(l => '    | ' + l).join('\n'));
     await page.eval(() => { resetAll(); setHdlCycles(50000000); });
     await page.click('#runPauseBtn');
-    await page.until(() => /running live/.test(document.getElementById('statusBar').textContent), 60000);
+    if (!(await page.until(() => /running live/.test(document.getElementById('statusBar').textContent), 60000)))
+      console.log('    status: ' + (await page.eval(() => document.getElementById('statusBar').textContent)) + '\n' +
+        (await page.eval(() => [...document.querySelectorAll('#console div')].slice(-15).map(d => '    | ' + d.textContent).join('\n'))));
     await page.eval(() => setDipSwitches(0x000f));
     const followed = await page.until(() => getLedState() === 0x0f, 10000);
     const stillLive = await page.eval(() => /running live/.test(document.getElementById('statusBar').textContent));
