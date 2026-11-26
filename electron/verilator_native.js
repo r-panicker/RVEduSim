@@ -159,7 +159,10 @@ function createVerilator({ root, cacheDir }) {
     const tmp = dest + '.part';
     await fs.promises.rm(tmp, { recursive: true, force: true });
     await fs.promises.mkdir(tmp, { recursive: true });
-    const r = await sh('tar', ['-xf', archive, '-C', tmp]);
+    // Windows' own tar (bsdtar) reads the .zip; a GNU tar from Git or MSYS2
+    // earlier on the PATH does not.
+    const sysTar = process.platform === 'win32' && path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+    const r = await sh(sysTar && fs.existsSync(sysTar) ? sysTar : 'tar', ['-xf', archive, '-C', tmp]);
     if (r.code !== 0) throw new Error('Could not unpack ' + ZIG.file + ': ' + r.out);
     await fs.promises.rm(dest, { recursive: true, force: true });
     await fs.promises.rename(path.join(tmp, name), dest);

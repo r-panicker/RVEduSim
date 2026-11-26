@@ -115,6 +115,15 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then export PATH="/c/msys64/mingw64/bin:$PATH"; fi
           node test_verilator.js
 
+      # Again with Zig, which the app downloads on a computer without a C++
+      # compiler. Run from PowerShell, as the app is, with no MSYS2 on the PATH.
+      - name: Verilator with Zig (Windows)
+        if: runner.os == 'Windows'
+        working-directory: riscv_simulator_tests
+        env:
+          RVSIM_FORCE_ZIG: '1'
+        run: node test_verilator.js
+
       - name: Package
         working-directory: electron
         shell: bash

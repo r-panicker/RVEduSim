@@ -239,12 +239,13 @@ async function checkpointSection(dir, cache) {
   // every saved value is changed.
   for (const c of ct.vlCks) {
     const lines = c.txt.split('\n');
+    // On Windows the file has CRLF line ends; the \r stays where it is.
     if (PREBUILT) {
       for (let i = 0; i < lines.length; i++)
-        if (/[01]$/.test(lines[i])) lines[i] = lines[i].slice(0, -1) + (lines[i].endsWith('0') ? '1' : '0');
+        lines[i] = lines[i].replace(/([01])(\r?)$/, (m, v, r) => (v === '0' ? '1' : '0') + r);
     } else {
       const i = lines.length - 2;
-      lines[i] = lines[i].slice(0, -3) + (lines[i].slice(-3) === '000' ? '100' : '000');
+      lines[i] = lines[i].replace(/([01]{3})(\r?)$/, (m, v, r) => (v === '000' ? '100' : '000') + r);
     }
     c.txt = lines.join('\n');
   }
@@ -433,8 +434,6 @@ if (process.argv[2] === '--checkpoints') {
     const liveArch = steps2arch(lt);
     const replay = await win.hdlBuildTrace(300000, { quiet: true });
     check('A replay of that timeline from reset records the same run', !!replay && steps2arch(replay) === liveArch);
-    check('Followed live flat out, the waveform stops at 20 MB and says so',
-      consoleText(doc).some(l => /too fast to follow/.test(l)));
     check('The waveform was built on Pause and covers the last 50,000 cycles',
       !!win.getHdlLastVcd() && /#2500000\b|#25000\d{2}/.test(win.getHdlLastVcd().slice(0, 200000)) && win.parseVcd(win.getHdlLastVcd()).vars.length > 50);
     {
@@ -445,7 +444,7 @@ if (process.argv[2] === '--checkpoints') {
       win.resetAll();
       doc.getElementById('console').innerHTML = '';
       const flat = win.runHdlSimulation();
-      await until(said, 60000);
+      check('Followed live flat out, the waveform stops at 20 MB and says so', await until(said, 60000));
       await sleep(500);                 // the model closes it at its next edge
       const id = win.eval('hdlLive && hdlLive.id');
       const size = async () => { const b = id && await win.rvNative.vlLiveRead(id, 'dump.vcd', 1); return b ? b.size : -1; };

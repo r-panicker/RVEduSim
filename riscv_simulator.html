@@ -17490,6 +17490,10 @@ endmodule
             continue;
           }
           hdlReportVerilator(c.log);
+          // A failure before Verilator ran (no compiler, a failed download)
+          // has no %Error line to report.
+          if (!/^%Error/m.test(c.log) && !/C\+\+ compilation failed|Linking failed|No C\+\+20 compiler/.test(c.log))
+            hdlLog(c.log.trim() || 'The Verilator build failed without a message.', 'err');
           hdlStatus('compile error', 'err');
           return null;
         }

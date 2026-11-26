@@ -377,7 +377,7 @@ setTimeout(async () => {
       const r3 = win.runHdlSimulation();
       await until(() => /running - cycle/.test(st()), 60000);
       await sleep(1500);
-      const shownAt = win.getHdlTrace().steps[win.getHdlIndex()].cyc;
+      const shownAt = win.eval('hdlCurrentCycle()');
       win.setDipSwitches(0x5a);
       const ledRt = await until(() => win.getLedState() === 0x5a, 3000);
       win.toggleRunPause();
