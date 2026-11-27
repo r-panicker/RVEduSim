@@ -55,6 +55,8 @@ that on GitHub's runners. Start it from the Actions tab, or push a tag
 `desktop-v<version>`, which also makes a draft release holding the installers. Started
 from the Actions tab with *release* ticked, it makes the same draft for the version in
 `app/tauri.conf.json`; publishing the draft creates the tag on the commit that was built.
+The draft is titled with its version, as in *RVEduSim 24.185.0*. Publish it on the Releases page, or with the
+[Publish desktop release](../.github/workflows/publish-release.yml) workflow.
 The version shown is `version` in `app/tauri.conf.json` (and `Cargo.toml`).
 
 The `.deb` depends on `libwebkit2gtk-4.1-0` and recommends `g++`; it is for Ubuntu 24.04

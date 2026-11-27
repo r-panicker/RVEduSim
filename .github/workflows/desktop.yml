@@ -232,10 +232,12 @@ jobs:
       - id: tag
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            tag=${GITHUB_REF#refs/tags/}
           else
-            echo "name=desktop-v$(jq -r .version desktop/app/tauri.conf.json)" >> "$GITHUB_OUTPUT"
+            tag=desktop-v$(jq -r .version desktop/app/tauri.conf.json)
           fi
+          echo "name=$tag" >> "$GITHUB_OUTPUT"
+          echo "title=RVEduSim ${tag#desktop-v}" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -244,6 +246,7 @@ jobs:
         with:
           draft: true
           tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.title }}
           target_commitish: ${{ github.sha }}
           files: |
             dist/**/*.deb

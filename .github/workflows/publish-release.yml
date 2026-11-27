@@ -1,0 +1,31 @@
+# Publishes the draft desktop release that the Desktop app workflow made,
+# titled "RVEduSim <version>". Publishing creates its desktop-v<version> tag
+# on the commit the installers were built from. Run it from the Actions tab;
+# the version defaults to the one in desktop/app/tauri.conf.json.
+name: Publish desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish (blank for the one in tauri.conf.json)
+        type: string
+        default: ''
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: desktop/app/tauri.conf.json
+          sparse-checkout-cone-mode: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          v=${VERSION:-$(jq -r .version desktop/app/tauri.conf.json)}
+          gh release edit "desktop-v$v" --draft=false --title "RVEduSim $v"
+          gh release view "desktop-v$v" --json url,tagName,isDraft
