@@ -595,7 +595,7 @@ setTimeout(async () => {
       ev('mobileTab') === 'datapath' && !bar.hidden && bar.dataset.mode === 'dp' &&
       doc.body.classList.contains('float-dp') && barBtns().every(b => !b.hidden),
       `${ev('mobileTab')} hidden=${bar.hidden} mode=${bar.dataset.mode}`);
-    doc.body.classList.remove('dp-open');
+    ev('setPageMode({ dpOpen: false })');
     ev('updateFloatSteps()');
     check('it does not depend on the desktop strip having been opened', !bar.hidden && doc.body.classList.contains('float-dp'));
     const findBtn = doc.getElementById('mobileFindBtn');

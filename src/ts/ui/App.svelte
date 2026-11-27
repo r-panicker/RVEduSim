@@ -5,7 +5,7 @@
   // created in #cmEditorContainer at boot (find-replace.ts).
   import { viewRev } from './views.svelte';
   import { dockView } from './panels';
-  import { pageLayout } from './page-layout';
+  import { pageLayout, pageMode, PAGE_MODE_CLASS } from './page-layout';
   import { onMainSplitterDown, onMainSplitterMove, onMainSplitterUp } from './editor';
   import { onConsoleResizeStart, setConsoleHeight, CONSOLE_H_DEFAULT } from './engine-mode';
   import { onWaveResizeStart, onWaveResizeReset } from './waveform';
@@ -24,6 +24,13 @@
 
   const mobile = $derived.by(() => { viewRev.dock; return dockView.mobile; });
   const dockW = $derived.by(() => { viewRev.page; return pageLayout.dockW; });
+  // <body> is outside the component, so its classes are set here.
+  const modes = $derived.by(() => { viewRev.page; return { ...pageMode }; });
+  $effect(() => {
+    for (const k of Object.keys(PAGE_MODE_CLASS) as (keyof typeof pageMode)[]) {
+      document.body.classList.toggle(PAGE_MODE_CLASS[k], modes[k]);
+    }
+  });
 </script>
 
 <div class="container">

@@ -37,6 +37,7 @@ import { toggleWaveDock } from './waveform';
 import { byId, targetEl } from './dom';
 import { redrawToolbar, toolbar } from './toolbar-state';
 import { redraw } from './views.svelte';
+import { pageMode, setPageMode } from './page-layout';
 
 
 // The instruction at the PC as the single-cycle diagram sees it: its
@@ -412,7 +413,7 @@ export function dpDrawable(m: typeof dpModel): m is DpModel { return !!m && m.pi
 
 export function dpActive() {
   return !!dpSvg() && ui.engine !== 'hdl' &&
-    (document.body.classList.contains('dp-open') || document.body.classList.contains('dp-in-panel'));
+    (pageMode.dpOpen || pageMode.dpInPanel);
 }
 
 // What makes the current instruction a different one: a Step, a Back, a
@@ -742,8 +743,8 @@ export function dpDrawEncoding(m: DpEval | null) {
 export function dpPlaceEncoding() {
   const body = byId('dpBody');
   if (!body || !dpPanel.enc || !dpActive()) return;
-  body.classList.remove('dp-enc-below', 'dp-enc-side');
-  body.classList.add(body.clientWidth >= 900 ? 'dp-enc-side' : 'dp-enc-below');
+  const place = body.clientWidth >= 900 ? 'side' : 'below';
+  if (place !== dpPanel.encPlace) setDpPanel({ encPlace: place });
 }
 
 // One clock period down the single-cycle drawing's left margin: the nine
@@ -803,7 +804,8 @@ export let dpHeader = {
 };
 // The caption (authored markup), the encoding column and the timeline
 // (DatapathDock.svelte and its parts).
-export let dpPanel = { caption: '', enc: null as DpEncView | null, tl: null as DpTlView | null };
+// encPlace: the encoding column beside the drawing or below it.
+export let dpPanel = { caption: '', enc: null as DpEncView | null, tl: null as DpTlView | null, encPlace: null as 'side' | 'below' | null };
 function setDpPanel(part: Partial<typeof dpPanel>) {
   dpPanel = { ...dpPanel, ...part };
   redraw('dpPanel');
@@ -1392,7 +1394,7 @@ export let dpView = 'diagram';
 
 export function dpSetView(v: string) {
   dpView = v === 'timeline' && pipeline.on ? 'timeline' : 'diagram';
-  document.body.classList.toggle('dp-view-timeline', dpView === 'timeline');
+  setPageMode({ dpTimeline: dpView === 'timeline' });
   setDpHeader({ view: dpView });
   if (dpView === 'timeline') pdpRenderTimeline();
   else dpPlaceEncoding();
@@ -1550,8 +1552,7 @@ export function dpSavedHeight() {
 // The inline flex from a drag outranks the folded and in-panel rules, so
 // it is only present while the strip is open at the bottom.
 export function dpApplyDockSize() {
-  const b = document.body.classList;
-  if (b.contains('dp-open') && !b.contains('dp-in-panel') && !b.contains('dp-max')) setDpHeight(dpSavedHeight(), false);
+  if (pageMode.dpOpen && !pageMode.dpInPanel && !pageMode.dpMax) setDpHeight(dpSavedHeight(), false);
   else setDpHeader({ dockFlex: null });
 }
 
@@ -1561,16 +1562,15 @@ export function dpApplyDockSize() {
 export let dpWanted = false;
 export function dpApplyOpen() {
   const open = dpWanted && !dpBlocker();
-  const was = document.body.classList.contains('dp-open');
-  document.body.classList.toggle('dp-open', open);
-  if (!open) document.body.classList.remove('dp-max');
+  const was = pageMode.dpOpen;
+  setPageMode(open ? { dpOpen: true } : { dpOpen: false, dpMax: false });
   dpApplyDockSize();
   if (open && !was) dpSync(true);
   updateVizButton();
 }
 
 export function toggleDpDock() {
-  dpWanted = !document.body.classList.contains('dp-open');
+  dpWanted = !pageMode.dpOpen;
   try { localStorage.setItem(DP_OPEN_KEY, dpWanted ? '1' : '0'); } catch (e) { /* private mode */ }
   dpApplyOpen();
 }
@@ -1613,7 +1613,7 @@ export function vizShown() {
     const pd = panelDock[hdl ? 'waveform' : 'datapath'];
     return !!(pd && pd.visible);
   }
-  return document.body.classList.contains(hdl ? 'wave-open' : 'dp-open');
+  return hdl ? pageMode.waveOpen : pageMode.dpOpen;
 }
 
 export function toggleVisualisation() {
@@ -1640,7 +1640,7 @@ export function toggleVisualisation() {
 // waveform), or the strip's in pipelined mode, where those step cycles.
 export let floatStepsWanted = false;
 export function floatOnDpTab() {
-  return ui.engine !== 'hdl' && document.body.classList.contains('dp-in-panel') &&
+  return ui.engine !== 'hdl' && pageMode.dpInPanel &&
     !!(panelDock.datapath && panelDock.datapath.visible) &&
     typeof mobileTab !== 'undefined' && mobileTab === 'datapath';
 }
@@ -1655,7 +1655,7 @@ export let floatView = { show: false, mode: 'tb', buttons: [] as FloatButton[] }
 export function updateFloatSteps() {
   const onDp = mobileMode() && program.assembled && floatOnDpTab();
   const show = onDp || (floatStepsWanted && mobileMode() && program.assembled);
-  document.body.classList.toggle('float-dp', onDp);
+  setPageMode({ floatDp: onDp });
   if (!show) {
     if (floatView.show) { floatView = { ...floatView, show: false }; redraw('floatSteps'); }
     return;
@@ -1707,8 +1707,8 @@ export function updateVizButton() {
 }
 
 export function toggleDpMax() {
-  if (!document.body.classList.contains('dp-open')) toggleDpDock();
-  document.body.classList.toggle('dp-max');
+  if (!pageMode.dpOpen) toggleDpDock();
+  setPageMode({ dpMax: !pageMode.dpMax });
   dpApplyDockSize();
 }
 
@@ -1718,7 +1718,7 @@ export function toggleDpMax() {
 // so reaching it does not scroll the toolbar away. Where it is drawn is
 // the page's (App.svelte and Panel.svelte); this sets the in-panel styles.
 export function syncDatapathPanelHost() {
-  document.body.classList.toggle('dp-in-panel', mobileMode());
+  setPageMode({ dpInPanel: mobileMode() });
   if (document.body.dataset.booted) dpApplyDockSize();
 }
 
@@ -1790,7 +1790,7 @@ export function initDatapath() {
 // did: the stamps (dpCurrentStamp, dpCurrentValueStamp) are compared first.
 export function dpOnStateChange() {
   const blocked = !!dpBlocker();
-  if ((dpWanted && !blocked) !== document.body.classList.contains('dp-open')) dpApplyOpen();
+  if ((dpWanted && !blocked) !== pageMode.dpOpen) dpApplyOpen();
   if (blocked !== dpWasBlocked) {
     dpWasBlocked = blocked;
     updateDatapathPanelAvailability();
@@ -1803,9 +1803,7 @@ export let dpWasBlocked = false;
 
 // The microarchitecture, the drawing or a hazard switch changed.
 export function dpOnModeChange() {
-  const b = document.body.classList;
-  b.toggle('dp-pipe', pipeline.on);
-  b.toggle('dp-bp', pipeline.predictor.on);
+  setPageMode({ dpPipe: pipeline.on, dpBp: pipeline.predictor.on });
   setDpHeader({ pipe: pipeline.on });
   dpSetView(pipeline.on ? dpView : 'diagram');
   pdpPlaying = false;

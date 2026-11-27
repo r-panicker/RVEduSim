@@ -21,6 +21,7 @@ import { escapeHtml, mobileMode, panelDock, setMobileTab, setPanelVisible } from
 import { updateToolbarButtonStates } from './run-control';
 import { byId, targetEl } from './dom';
 import { redraw } from './views.svelte';
+import { pageMode, setPageMode } from './page-layout';
 import { errorMessage } from '../errors';
 
 export function hdlDownloadVcd() {
@@ -334,7 +335,7 @@ export function waveSavedHeight() {
 // setWaveHeight writes an inline flex, which outranks any rule, so folding
 // and the in-panel layout have to clear it rather than style around it.
 export function waveApplyDockSize() {
-  if (waveInPanel() || !document.body.classList.contains('wave-open')) {
+  if (waveInPanel() || !pageMode.waveOpen) {
     setWaveView({ flex: null });
   } else {
     setWaveHeight(waveSavedHeight(), false);
@@ -376,7 +377,7 @@ export function initWaveDock() {
 export function applyWaveOpen() {
   // Only ever open in HDL mode: there are no waveforms to show otherwise.
   const on = waveOpen && ui.engine === 'hdl';
-  document.body.classList.toggle('wave-open', on);
+  setPageMode({ waveOpen: on });
   if (waveView.foldTitle !== 'Hide the waveform') { waveView = { ...waveView, foldTitle: 'Hide the waveform' }; redraw('waveform'); }
   if (typeof updateVizButton === 'function') updateVizButton();
   waveApplyDockSize();
@@ -385,7 +386,7 @@ export function applyWaveOpen() {
 }
 
 export function waveInPanel() {
-  return document.body.classList.contains('wave-in-panel');
+  return pageMode.waveInPanel;
 }
 
 export function toggleWaveDock() {
@@ -433,7 +434,7 @@ export function waveEnableVcdAndRerun() {
 
 export function updateWaveView() {
   const dock = waveDockEl();
-  if (!dock || !(document.body.classList.contains('wave-open') || waveInPanel())) return;
+  if (!dock || !(pageMode.waveOpen || waveInPanel())) return;
   waveApplyDefaultSpan();
   const say = (notice: WaveNotice) => {
     waveView = { ...waveView, notice, info: '', empty: true };
@@ -752,7 +753,7 @@ export function waveNiceStep(n: number) {
 export function drawWaveforms() {
   const canvas = byId<HTMLCanvasElement>('waveCanvas');
   const p = waveParsed;
-  if (!canvas || !p || !(document.body.classList.contains('wave-open') || waveInPanel())) return;
+  if (!canvas || !p || !(pageMode.waveOpen || waveInPanel())) return;
   // The rows define the height; the body scrolls if the strip is shorter.
   // Set before measuring, so the first draw is already the right size.
   const needed = WAVE_AXIS_H + waveSignals.length * WAVE_ROW_H;

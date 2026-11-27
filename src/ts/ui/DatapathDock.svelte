@@ -16,6 +16,7 @@
   const flex = $derived.by(() => { viewRev.datapath; return dpHeader.dockFlex; });
   // Authored in datapath.ts, with markup for the signal names and values.
   const caption = $derived.by(() => { viewRev.dpPanel; return dpPanel.caption; });
+  const encPlace = $derived.by(() => { viewRev.dpPanel; return dpPanel.encPlace; });
   let body: HTMLElement;
   $effect(() => {
     dpDockMounted();
@@ -29,7 +30,8 @@
 <div class="dp-dock" id="dpDock" style:flex={flex}>
   <DatapathHeader />
   <div class="dp-caption" id="dpCaption">{@html caption}</div>
-  <div class="dp-body" id="dpBody" bind:this={body} onclick={onDpBodyClick}>
+  <div class="dp-body" id="dpBody" class:dp-enc-side={encPlace === 'side'} class:dp-enc-below={encPlace === 'below'}
+    bind:this={body} onclick={onDpBodyClick}>
     <DpEncoding />
     {@html single}{@html pipelined}{@html pipelinedBp}
     <DpTimeline />

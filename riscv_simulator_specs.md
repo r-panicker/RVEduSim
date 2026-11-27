@@ -74,8 +74,11 @@ returns, for the caller and for a test reading the DOM next. A view's model is b
 `.ts` module, where `tsc` checks it, and assigned afresh as a new object (`disasmModel`,
 `memModel`, `regModel`, `localsModel`, `periphDisplay()`, `toolbar`, `dpHeader`, `dpPanel`,
 `waveView`, `settingsModel`, `immPopoverView`, `findView`, `floatView`, `dockView`, `consoleLines`,
-and the dragged sizes in `ui/page-layout.ts`); the component derives from it on the counter, and
-holds markup and event bindings only. Called from inside Svelte's own update (a component's effect), `redraw()` only
+and the dragged sizes and the page's modes in `ui/page-layout.ts`); the component derives from it
+on the counter, and holds markup and event bindings only. The modes (`pageMode`: HDL mode, each
+strip open, in its panel tab, maximised, pipelined or showing the timeline) are classes on
+`<body>` for the stylesheet, which `App.svelte` sets from the model; code asks the model, not the
+classes. Called from inside Svelte's own update (a component's effect), `redraw()` only
 marks the view, which that update then draws. The toolbar's model (`ui/toolbar-state.ts`) has several
 owners: `run-control.ts` sets the buttons, `hdl/shared-ui.ts` HDL mode's overrides of them,
 `datapath.ts` the Datapath/Waveform button, `hdl/sources.ts` the Verilog chip, `editor.ts` the

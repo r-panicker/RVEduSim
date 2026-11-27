@@ -6,6 +6,7 @@ import { initializeState } from '../machine/reset';
 import { program, run, stepHistory, ui } from '../machine/state';
 import { compilerConfig } from '../c/state';
 import { redraw } from './views.svelte';
+import { setPageMode } from './page-layout';
 import { updateDisassembly, updateMachineCode } from './disassembly';
 import { cLanguage, clearLog, editor, editorHistory, log, riscvLanguage, setStatus } from './editor';
 import { editorState } from './editor-state';
@@ -88,7 +89,7 @@ export function startExampleSources() {
 // controls with it; there it is a sixth panel instead. Where it is drawn is
 // the page's (App.svelte and Panel.svelte); this sets the in-panel styles.
 export function syncWaveformPanelHost() {
-  document.body.classList.toggle('wave-in-panel', mobileMode());
+  setPageMode({ waveInPanel: mobileMode() });
   if (typeof waveApplyDockSize === 'function' && document.body.dataset.booted) waveApplyDockSize();
 }
 

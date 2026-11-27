@@ -12,7 +12,7 @@ import { updateRegisters } from './panels';
 import { resetAll, updateToolbarButtonStates } from './run-control';
 import { hdlInitSimulator, hdlSimulatorName, initWaveDock, initWavePicker, updateWaveAvailability } from './waveform';
 import { byId } from './dom';
-import { setConsoleH } from './page-layout';
+import { setConsoleH, setPageMode } from './page-layout';
 import { redrawToolbar, toolbar } from './toolbar-state';
 import { errorMessage } from '../errors';
 
@@ -40,7 +40,7 @@ export function setSimEngineMode(mode: string) {
   ui.engine = want;
   toolbar.engine = ui.engine === 'hdl' ? 'hdl' : 'js';
   redrawToolbar();
-  document.body.classList.toggle('hdl-mode', ui.engine === 'hdl');
+  setPageMode({ hdl: ui.engine === 'hdl' });
   if (ui.engine === 'hdl') {
     // Nothing can happen in HDL mode without the sources, so ask for them
     // straight away rather than waiting for Run to fail.
