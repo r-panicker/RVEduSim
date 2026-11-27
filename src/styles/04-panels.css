@@ -55,9 +55,11 @@
 }
 
 /* Docked panel container. With ≤2 docked panels this is a single vertical
-   stack (1 column); with more, the panels wrap into a 2-column grid.
-   Rows are created as .panel-dock-row wrappers, columns are separated by a
-   draggable .panel-hsplitter, rows by a draggable .panel-vsplitter. */
+   stack (1 column); with more, the panels wrap into a 2-column grid. Every
+   panel and splitter is a direct child: in the grid the stack wraps, each
+   row's panels side by side with a draggable .panel-hsplitter between
+   them, and the full-width .panel-vsplitter between the rows breaks the
+   line. A panel's width (its flex) and its row's height are inline. */
 .panel-stack {
   flex: 1;
   display: flex;
@@ -67,21 +69,21 @@
   position: relative;
 }
 
-/* A single row of the 2×2 grid (2 columns). */
-.panel-dock-row {
-  display: flex;
+.panel-stack.dock-grid {
   flex-direction: row;
-  align-items: stretch;
-  flex: 1 1 0;
-  min-height: 90px;
-  min-width: 0;
+  flex-wrap: wrap;
+  align-content: flex-start;
 }
 
-/* Row holding only ONE panel (e.g. the 3rd of 3 visible panels): the lone
-   panel must stretch to fill the entire row width — no blank space is left
-   for an invisible 4th panel. */
-.panel-dock-row-single > .tab-content {
-  flex: 1 1 0 !important;
+.panel-stack.dock-grid > .panel-vsplitter {
+  flex: 0 0 100%;
+}
+
+/* A panel never fits in no space, so the one after the row splitter starts
+   the next row rather than sharing the splitter's line at zero width. The
+   same floor as a dragged column (MIN_COL_W). */
+.panel-stack.dock-grid > .tab-content.panel-docked {
+  min-width: 90px;
 }
 
 /* Vertical separator between the two columns of the 2×2 grid. */

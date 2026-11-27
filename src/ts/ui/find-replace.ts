@@ -8,23 +8,28 @@ import { dpBlocker, dpModel, dpNext, dpPrev, vizShown } from './datapath';
 import { breakpointGutter, buildEditorExtensions, cLanguage, editor, execLineField, log, pipeStagesField, riscvAutocomplete, riscvEditorTheme, riscvHighlightStyle, riscvHoverTooltip, riscvLanguage, signatureHelpField } from './editor';
 import { editorState } from './editor-state';
 import { BAKED_ASM_EXAMPLE } from './examples-language';
-import { closeBpFigure, closeCreditsModal, closeSettingsModal, editorCursorLine, saveFile, toggleBreakpoint } from './execution';
+import { bpFigureOpen, closeBpFigure, closeCreditsModal, closeSettingsModal, creditsModel, editorCursorLine, saveFile, settingsModel, toggleBreakpoint } from './execution';
 import { focusLocalsVar } from './locals';
 import { updateEditor } from './panels';
 import { bumpAccelAxis, pbSetState } from './peripherals';
 import { assembleOnly, stepBack, stepOnce, toggleRunPause } from './run-control';
 import { byId, targetEl } from './dom';
+import { redraw } from './views.svelte';
 import type { EditorState, Line, SelectionRange } from '@codemirror/state';
 import type { BlockInfo, EditorView, ViewUpdate } from '@codemirror/view';
 
+// Whether the find bar is open, its match count and its Match case switch
+// (FindReplace.svelte).
+export let findView = { open: false, count: '0/0', caseOn: false };
+function setFindView(part: Partial<typeof findView>) {
+  findView = { ...findView, ...part };
+  redraw('find');
+}
+
 export function openFindReplace(focusReplace = false) {
-  const panel = byId('findReplacePanel');
-  if (!panel) return;
-  panel.style.display = 'flex';
+  setFindView({ open: true });
   const findInput = byId<HTMLInputElement>('findInput');
   const replaceInput = byId<HTMLInputElement>('replaceInput');
-  const replaceRow = byId('replaceRow');
-  if (replaceRow) replaceRow.style.display = 'flex';
 
   // If text is selected on a single line, prefill find query
   const sel = editor.value.substring(editor.selectionStart, editor.selectionEnd);
@@ -43,32 +48,29 @@ export function openFindReplace(focusReplace = false) {
 }
 
 export function closeFindReplace() {
-  const panel = byId('findReplacePanel');
-  if (panel) panel.style.display = 'none';
   editorState.find.matches = [];
   editorState.find.activeIndex = -1;
+  setFindView({ open: false });
   editor.focus();
 }
 
 export function toggleFindCase() {
   editorState.find.caseSensitive = !editorState.find.caseSensitive;
-  const btn = byId<HTMLButtonElement>('findCaseBtn');
-  if (btn) btn.classList.toggle('active', editorState.find.caseSensitive);
+  setFindView({ caseOn: editorState.find.caseSensitive });
   updateFindMatches();
 }
 
 export function updateFindMatches() {
   const findInput = byId<HTMLInputElement>('findInput');
-  const countEl = byId('findCount');
-  if (!findInput || !countEl) return;
+  if (!findInput) return;
 
   const query = findInput.value;
   editorState.find.matches = [];
   editorState.find.activeIndex = -1;
 
   if (!query) {
-    countEl.textContent = '0/0';
-      return;
+    setFindView({ count: '0/0' });
+    return;
   }
 
   const text = editor.value;
@@ -82,8 +84,8 @@ export function updateFindMatches() {
   }
 
   if (editorState.find.matches.length === 0) {
-    countEl.textContent = '0/0';
-      return;
+    setFindView({ count: '0/0' });
+    return;
   }
 
   // Find closest match at or after cursor
@@ -96,7 +98,7 @@ export function updateFindMatches() {
     }
   }
   editorState.find.activeIndex = bestIdx;
-  countEl.textContent = `${editorState.find.activeIndex + 1}/${editorState.find.matches.length}`;
+  setFindView({ count: `${editorState.find.activeIndex + 1}/${editorState.find.matches.length}` });
   // DO NOT steal focus from findInput while typing!
   selectFindMatch(editorState.find.activeIndex, false);
 }
@@ -112,8 +114,7 @@ export function selectFindMatch(idx: number, shouldFocusEditor = false) {
   if (shouldFocusEditor) {
     editor.focus();
   }
-  const countEl = byId('findCount');
-  if (countEl) countEl.textContent = `${idx + 1}/${editorState.find.matches.length}`;
+  setFindView({ count: `${idx + 1}/${editorState.find.matches.length}` });
 }
 
 export function findNext() {
@@ -301,8 +302,7 @@ export function initCodeMirrorEditor() {
         {
           key: "Escape",
           run: () => {
-            const panel = byId('findReplacePanel');
-            if (panel && panel.style.display !== 'none') {
+            if (findView.open) {
               closeFindReplace();
               return true;
             }
@@ -371,26 +371,22 @@ export function onFindReplaceLoad() {
       return;
     }
     if (e.key === 'Escape') {
-      const findPanel = byId('findReplacePanel');
-      if (findPanel && findPanel.style.display !== 'none') {
+      if (findView.open) {
         e.preventDefault();
         closeFindReplace();
         return;
       }
-      const bpOv = byId('bpFigOverlay');
-      if (bpOv && bpOv.classList.contains('open')) {
+      if (bpFigureOpen) {
         e.preventDefault();
         closeBpFigure();
         return;
       }
-      const creditsOv = byId('creditsOverlay');
-      if (creditsOv && creditsOv.classList.contains('open')) {
+      if (creditsModel.open) {
         e.preventDefault();
         closeCreditsModal();
         return;
       }
-      const settingsOv = byId('settingsOverlay');
-      if (settingsOv && settingsOv.classList.contains('open')) {
+      if (settingsModel.open) {
         e.preventDefault();
         closeSettingsModal();
         return;

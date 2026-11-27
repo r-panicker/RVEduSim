@@ -31,9 +31,11 @@ interface RvNative {
   vlLiveSend(id: number, line: string): Promise<void>;
   vlLiveRead(id: number, name: string, max: number): Promise<{ size: number; data?: Uint8Array } | null>;
   onVlLiveData(cb: (id: number, text: string) => void): void;
-  pickFolder(): Promise<string | null>;
-  readFolder(dir: string): Promise<{ path: string; src: string }[]>;
-  forgetFolder(): Promise<void>;
+  // kind: 'hdl' (the default) or 'examples'; each remembers its own folder.
+  pickFolder(kind?: 'hdl' | 'examples'): Promise<string | null>;
+  readFolder(dir: string, kind?: 'hdl' | 'examples'): Promise<{ path: string; src: string }[]>;
+  forgetFolder(kind?: 'hdl' | 'examples'): Promise<void>;
+  rememberedExamplesFolder?: string | null;
 }
 
 // The parts of the File System Access API's directory handle the page uses.
@@ -61,4 +63,10 @@ interface Window {
   showDirectoryPicker?: (opts?: { id?: string; mode?: 'read' | 'readwrite' }) => Promise<DirHandle>;
   cmEditor?: import('@codemirror/view').EditorView;
   languageCompartment?: import('@codemirror/state').Compartment;
+}
+
+// A drawing in src/figures, imported as its markup (tools/bundle.js).
+declare module '*.svg' {
+  const markup: string;
+  export default markup;
 }

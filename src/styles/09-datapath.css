@@ -49,12 +49,11 @@ body.dp-max .dp-max-btn::after { content: '⤡'; }
 }
 
 .dp-speed {
+  --sel-h: 22px;
   font-size: 11px;
-  background: #313244;
-  color: #cdd6f4;
-  border: 1px solid #45475a;
-  border-radius: 3px;
-  padding: 1px 2px;
+  padding: 0 18px 0 6px;
+  background-position: right 6px center;
+  border-radius: 4px;
 }
 
 .dp-caption {
@@ -72,7 +71,6 @@ body.dp-max .dp-max-btn::after { content: '⤡'; }
 body.dp-in-panel #tab-datapath .dp-caption:empty { display: none; }
 /* Below the drawing: the instruction and the picture belong together. */
 .dp-caption { order: 1; border-bottom: none; border-top: 1px solid #313244; }
-.stat-lag { color: #fab387; }
 #dpClock .dp-clk-wave { fill: none; stroke: #4c4f69; stroke-width: 9; }
 #dpClock .dp-clk-next { fill: none; stroke: #4c4f69; stroke-width: 9; stroke-dasharray: 16 12; }
 #dpClock .dp-clk-arrow { fill: #4c4f69; }

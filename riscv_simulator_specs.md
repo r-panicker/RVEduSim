@@ -4,8 +4,8 @@
 
 | File | What it is |
 |---|---|
-| [`src/`](src/) | The simulator's source: `index.html` (the markup), `styles/*.css` (in the order of `styles/order.json`) and `ts/` (ES modules, entered at `ts/main.ts`). Assembling, simulating and the HDL engine run in the browser. The **DIP to LED** example (assembly and C) is built in; every other example, and C compilation, need the page served over `http://`. |
-| [`tools/page.js`](tools/page.js), [`tools/build.js`](tools/build.js) | The build: `npm run build` writes `dist/` (`index.html`, a minified `app.js` and `app.css`). `dist/` is not committed; the Pages workflow and the desktop app build it. |
+| [`src/`](src/) | The simulator's source: `index.html` (the markup), `styles/*.css` (in the order of `styles/order.json`) and `ts/` (ES modules and Svelte components, entered at `ts/main.ts`). Assembling, simulating and the HDL engine run in the browser. The **DIP to LED** example (assembly and C) is built in; every other example, and C compilation, need the page served over `http://`. |
+| [`tools/page.js`](tools/page.js), [`tools/bundle.js`](tools/bundle.js), [`tools/build.js`](tools/build.js) | The build: `npm run build` writes `dist/` (`index.html`, a minified `app.js` and `app.css`). `dist/` is not committed; the Pages workflow and the desktop app build it. |
 | [`examples/`](examples/) | All other examples: `asm/*.asm`, `c/*.c`, fetched when selected. `examples/hdl/` holds `Wrapper.v` and `RV_reference.v`, a prebuilt gate-level netlist of a reference core. |
 | [`examples/index.txt`](examples/index.txt) | The Example menu: one markdown-style table row per example, giving its key, language, label, file, the `IROM`/`DMEM` depth bits it needs, and a description. Adding a row and a file adds an example; the HTML is not edited. The file is `.txt` so static site generators serve it verbatim rather than render it. |
 | [`vendor/`](vendor/README.md) | Local copies of the external engines: the CodeMirror 6 bundle, Icarus Verilog compiled to WebAssembly, and Yosys (`@yowasp/yosys`). |
@@ -31,11 +31,13 @@ The scripts in `src/ts/` are ES modules in folders by layer:
   the cross-check).
 - `ui/`: the editor, panels, peripherals, waveform, datapath drawing and the rest of the page.
 
-`main.ts` is the entry point. esbuild bundles from it into one script; main.ts puts every
+`main.ts` is the entry point. esbuild bundles from it into one script (`tools/bundle.js`, with
+the `esbuild-svelte` plugin; it runs in a child process because the plugin needs esbuild's
+asynchronous API and `tools/page.js` is synchronous for the build and the tests); main.ts puts every
 module's exports on `window` as getters (so a variable reads its current value), for the
-markup's inline handlers (`onclick="runProgram()"`) and the tests, and then runs the load-time
-work of the modules that have any (`on…Load()`) in page order, ending with the boot
-(`ui/datapath.ts`). A module does nothing but declare at load: event listeners, `window` aliases
+tests and the few inline handlers left in `index.html`, mounts the Svelte components
+(`ui/mount.ts`), and then runs the load-time work of the modules that have any (`on…Load()`)
+in page order, ending with the boot (`ui/datapath.ts`). A module does nothing but declare at load: event listeners, `window` aliases
 and the boot are in its `on…Load()`.
 
 The simulator's state is in `machine/state.ts`, one object per part: `cpu` (registers, PC,
@@ -56,7 +58,53 @@ with no host installed it runs silently. Where HDL mode or the datapath drawing 
 shared action (Step, Reset, refreshing the registers or the toolbar), the shared function calls
 them by name.
 
-`npm run typecheck` runs `tsc` over all of `src/ts` under `strict`. `src/ts/globals.d.ts`
+The page is one Svelte 5 component, `ui/App.svelte`, made of the others in `ui/*.svelte`;
+`index.html` holds only the head and the script. `ui/mount.ts` mounts it on `<body>` before any
+module's load-time work, so every element exists from load, as it would in static markup, and
+keeps the id the modules and the tests use. The diagrams are files in `src/figures`, included
+as markup at build time (`tools/bundle.js` loads `.svg` as text): the single-cycle datapath,
+and the pipelined datapaths and the branch predictor that `tools/pdp_build.py --embed` writes.
+CodeMirror is created in `#cmEditorContainer` at boot.
+
+The state the components show stays plain objects, not `$state`: the simulator reads and
+writes it on every instruction, and a reactive proxy there would cost every instruction.
+Instead each view has a revision counter in `ui/views.svelte.ts` (`viewRev`), and
+`redraw(view)` raises it and calls `flushSync()`, so the view is drawn before the call
+returns, for the caller and for a test reading the DOM next. A view's model is built in its
+`.ts` module, where `tsc` checks it, and assigned afresh as a new object (`disasmModel`,
+`memModel`, `regModel`, `localsModel`, `periphDisplay()`, `toolbar`, `dpHeader`, `waveView`,
+`settingsModel`, `findView`, `floatView`, `dockView`, `consoleLines`, and the dragged sizes in
+`ui/page-layout.ts`); the component derives from it on the counter, and holds markup and event
+bindings only. Called from inside Svelte's own update (a component's effect), `redraw()` only
+marks the view, which that update then draws. The toolbar's model (`ui/toolbar-state.ts`) has several
+owners: `run-control.ts` sets the buttons, `hdl/shared-ui.ts` HDL mode's overrides of them,
+`datapath.ts` the Datapath/Waveform button, `hdl/sources.ts` the Verilog chip, `editor.ts` the
+status message and `shared-ui.ts` the metrics.
+
+A control's state comes from the model (the Send button's label from `uart.pending`, a slider
+from `accel`, a button's `disabled` and `title` from the toolbar's), so code that changes the
+state does not also write to the control. Text boxes the user types into (an address, a
+filter, the UART input) are left uncontrolled and read by id. A cell edited in place
+(`contenteditable`: a register value, a memory byte) holds what was typed rather than the text
+the view drew, so ending an edit redraws it afresh: the Registers body and a Memory row are
+keyed on an edit counter. The register and memory-word popup is one component,
+`EditPopup.svelte`, mounted on `<body>` by `edit-popup.ts` while open. Canvas drawing (the
+OLED, the waveform) and the datapath's animation of its diagrams stay imperative, by id, as
+does the markup some modules generate as text: the datapath's caption, encodings and timeline,
+and in Settings the HDL file list, the cycles table and the linker fields.
+
+The waveform and datapath strips are at the bottom of the page on desktop and in their panel
+tabs on a phone, and a component is not moved between parents: crossing the breakpoint mounts
+the strip afresh in its other place. So a strip keeps its state in its model and its listeners
+in its component, and on mounting puts back what it was showing (`dpDockMounted()`, and the
+waveform's own effect).
+
+Svelte delegates `click`, `input`, `change` and `keydown` handlers to the root they are mounted
+in, so an event a test dispatches has to bubble, as a browser's does. Svelte also collapses
+whitespace in markup; text whose spaces matter (the datapath header's) is written as an
+expression.
+
+`npm run typecheck` runs `tsc` over all of `src/ts` under `strict`; it does not read `.svelte` files, which the Svelte compiler only strips of their types, so their logic is kept to calls into the `.ts` modules. `src/ts/globals.d.ts`
 declares what is on `window` besides the modules' exports: the desktop app's bridge
 (`RvNative`, mirroring `desktop/app/src/rvnative.js`), the folder handle of the File System Access API
 (`DirHandle`), Compiler Explorer's response (`GodboltResponse`) and the test hooks. `CM6`, the
@@ -64,7 +112,7 @@ CodeMirror bundle, is typed from the `@codemirror/*` and `@lezer/highlight` pack
 `package.json` pins, the same ones `npm run build:cm6` builds the bundle from
 (`vendor/codemirror/`), and the editor code imports their types with `import type`, which the
 build drops. Nothing in the page is `any`.
-`ui/dom.ts` has `byId<T>()`, an element lookup typed by what the id names in `index.html`, and
+`ui/dom.ts` has `byId<T>()`, an element lookup typed by what the id names (in `index.html` or a mounted component), and
 `targetEl()`, the element an event happened on; `errors.ts` has `errorMessage()` for whatever a
 `catch` receives. The styles are joined in the order of
 `src/styles/order.json`. `dist/index.html` names `app.js` and `app.css` with a hash of their
@@ -157,7 +205,7 @@ Components:
 
 ### 2.1 Technology stack
 
-- **Runtime**: HTML5, CSS3 and plain JavaScript (ES6+). No build step.
+- **Runtime**: HTML5, CSS3, TypeScript and Svelte 5 components, bundled into one script (see Source and build).
 - **Editor engine**: a single CodeMirror 6 bundle, `cm6_bundle.min.js`, assembled into `window.CM6` (see §2.2).
 - **Theme**: Catppuccin Mocha palette:
 
@@ -178,7 +226,8 @@ Components:
 - **Layout**: editor and panel column separated by a draggable `.splitter`. The editor side keeps at least 360 px (`LEFT_MIN`), re-clamped on window resize. Below 800 px wide the page switches to a mobile layout.
 - **Typography**: system UI font stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`).
 - **Icon**: an inline SVG chip icon with an `RV` label, used in the header and as the favicon.
-- **Toolbar controls**: 28 px high on desktop, 30 px on mobile.
+- **Toolbar controls**: 30 px high, 34 px where the editor's column is phone-narrow.
+- **Dropdowns**: every `<select>` draws its own closed box (`appearance: none`, a chevron as a background image, `src/styles/03-controls.css`), so it looks and aligns the same in Chrome, Safari and WebKitGTK. Its height is `--sel-h`, and its line height equals that height, since engines centre the text differently otherwise. The list a dropdown opens stays native.
 
 ### 2.2 Editor and language modes
 
@@ -279,6 +328,7 @@ the datapath or waveform view: as a dock on desktop, as its panel on mobile.
 ```
 
 - **Chips** (`#panelChip-<name>`): show or hide a panel. A filled mauve dot marks a visible panel; a blue haloed dot marks a floating one.
+- **Layout** (`dockView`, `applyPanelDock()`): every panel and splitter is a direct child of `#panelStack`, in dock order, so no relayout moves a panel's contents. In the 2×2 grid the stack wraps: a docked panel carries its row (`data-row`) and height inline, and the full-width row splitter breaks the line.
 - **Docked stack** (`.panel-stack`): with up to two docked panels they stack vertically. Each has a header (`.panel-hdr`) with its title, a ⧉ float / ▣ dock toggle and a ✕ hide button. A `.panel-vsplitter` between panels redistributes height; double-click evens it out.
 - **2×2 grid** (`dockUsesTwoColumns()`): with more than two docked panels, row 1 holds the first ⌈n/2⌉ panels and row 2 the rest. The dock widens to 50% of the window (`DOCK_TWO_COL_WIDTH_PCT`) and returns to its previous width when two or fewer panels are docked. `.panel-hsplitter` resizes the columns (minimum `MIN_COL_W = 90` px) and `.panel-vsplitter` the rows; double-click either to even them out.
 - **Floating panels** (`.tab-content.panel-floating`): `position: fixed`, dragged by the header, resized from any edge (`resize: both`). They sit above the editor and below the Settings modal, and are clamped into the viewport on window resize.
@@ -316,23 +366,28 @@ hidden in the saved desktop layout, the tab view still shows one panel (Register
 ### 2.6 Toolbar and button states
 
 ```
-+--------------------------------------------------------------------------------------------+
-| Row 1: [ ASM | C ] [ JS | HDL ]  Example: [ … ▼ ]  📂 Open  💾 Save  |  ↶ Undo  ↷ Redo  🔍 Find |
-| Row 2: ⚙ Assemble  ▶ Run  ⏭ Step  ⏮ Back  ⟲ Reset  |  ⧉ Datapath  ⭳ Download ▼  ⚙ Settings… |
-| Row 3: <status message>                    <time> | Cycles: N single | Instr: N | PC: 0x… |
-+--------------------------------------------------------------------------------------------+
++------------------------------------------------------------------------------------------+
+| RVEduSim  RISC-V Functional and HDL Simulator                                 ⓘ Credits |
+| [ ASM | C ] [ JS | HDL ]  Example [ … ▼ ]  [Open] [Save]  [↶] [↷] [Find]      [Settings] |
+| [Assemble] [ ▶ Run | Step | Back | Reset ]  [Datapath] [Download ▼]   <status>  <metrics> |
++------------------------------------------------------------------------------------------+
 ```
 
-- **Row 1, source and editing**: language toggle, engine toggle, the HDL source chip (`#hdlFilesChip`, HDL mode only), Example selector, Open (`.asm .s .c .h .txt .v .sv .vh .svh`), Save, Undo, Redo, Find.
-- **Row 2, simulation**: Assemble (`Ctrl+Enter`), Run / Pause / Resume (`F5`), Step (`F8`), Back (`Shift+F8`), Reset; the Datapath / Waveform toggle; the Download menu (`AA_IROM.mem`, `AA_DMEM.mem`, testbench `.v`, waveform `.vcd`); Settings.
-- **Row 3, status**: the status message (`#statusBar`, levels `info`, `success`, `warn`, `error`) and the metrics (`#statsBar`): simulated time, `Cycles: N <tag>`, `Instr: N`, `CPI` (multi-cycle and pipelined models), `Mispredicts` (pipelined with branch prediction), and `PC`. The tag names where the cycle count comes from: `single`, `multi` or `pipe` for the functional model, `hw` for clock edges in HDL mode. The PC is the address of the instruction about to execute.
-- **Mobile**: the toolbar becomes a grid. Row 1 holds the file and mode group; row 2 holds the editor group and the Datapath/Download/Settings group side by side, with Undo, Redo, Find and Settings as icons; row 3 holds the simulation controls; the status row follows.
+`ui/Toolbar.svelte`, with its own scoped styles and icons (`ui/Icon.svelte`: 16 px strokes in
+the text colour). Two rows, laid out by the width of the editor's column (a container query),
+not the window's, so the main splitter reflows it too. A group never splits across lines.
+
+- **Row 1, the program**: language toggle, engine toggle, the HDL source chip (`#hdlFilesChip`, HDL mode only), Example selector, Open (`.asm .s .c .h .txt .v .sv .vh .svh`), Save, Undo, Redo, Find, and Settings at the end.
+- **Row 2, running it**: Assemble (`Ctrl+Enter`); Run / Pause / Resume (`F5`), Step (`F8`), Back (`Shift+F8`) and Reset as one joined control; the Datapath / Waveform toggle; the Download menu (`AA_IROM.mem`, `AA_DMEM.mem`, testbench `.v`, waveform `.vcd`); then the status message (`#statusBar`, levels `info`, `success`, `warn`, `error`, cut short with the whole text in its tooltip) and the metrics (`#statsBar`): simulated time, `Cycles: N <tag>`, `Instr: N`, `CPI` (multi-cycle and pipelined models), `Mispredicts` (pipelined with branch prediction), `PC`.
+- **The next action** is filled in the accent colour: Assemble while the source has not been assembled as it stands, Run once it has; Pause is filled peach while a run goes.
+- **Narrower** (column ≤ 1040 px): the status takes a line of its own. ≤ 820 px: Open, Save, Settings, Datapath and Download keep only their icons and tooltips. ≤ 640 px: the subtitle goes.
+- **Phone width** (≤ 560 px): four lines, the mode toggles and Example; every tool as an icon; Assemble and the run controls at full width; the status, with the metrics stacked at its right. ≤ 380 px the run controls keep only their icons; ≤ 300 px (a squeezed desktop split) a group wraps within itself rather than run off the edge.
 
 **Button states:**
 
 - **Assemble** (`#btnAssemble`): enabled when the source is new or modified; disabled with the tooltip "Program is already assembled and up to date" once assembled.
 - **Undo / Redo** (`#btnUndo`, `#btnRedo`): follow `CM6.undoDepth` and `CM6.redoDepth`.
-- **Run** (`#runPauseBtn`): disabled until assembled; `▶ Run` when ready, `⏸ Pause` while running, `▶ Resume` when paused.
+- **Run** (`#runPauseBtn`): disabled until assembled; Run when ready, Pause while running, Resume when paused (Run HDL in HDL mode).
 - **Step / Back** (`#btnStep`, `#btnBack`): Step is enabled when assembled and paused; Back when there is history (`stepHistory.entries.length > 0`).
 - **Reset** (`#btnReset`): resets registers and peripherals and keeps the program assembled, so it can be stepped or run without re-assembling.
 
@@ -410,9 +465,10 @@ The toolbar's `JS | HDL` pill chooses which engine Run, Step, Back and Reset dri
 | Speed | Millions of instructions/s | About 40k–200k cycles/s |
 
 Only one engine executes at a time (`setSimEngineMode()`):
-- Switching away from a running functional simulation stops it. Its state is kept, so switching back and pressing Resume continues.
+- Switching away from a running functional simulation stops it.
+- Switching to JS resets the functional model to the start of the program (`resetAll()`): the state the recording reached is the hardware's, not the model's to carry on from.
 - The toggle is disabled while an HDL run is in progress, because an HDL run cannot be paused.
-- A switch does not discard the HDL recording. Each switch lands on the instruction the other engine had reached.
+- A switch does not discard the HDL recording. Switching to HDL lands on the instruction the functional model had reached.
 
 ### 4.1 Functional engine: run loop and timing model
 - **Run loop.** Execution proceeds in batches of `BATCH_SIZE = min(10000, run limit)` instructions per event-loop tick, so the UI stays responsive during long runs.
@@ -504,7 +560,7 @@ With the toolbar's `JS | HDL` pill set to **HDL**, Run, Step and Back execute yo
 3. Assemble a program.
 4. **Run**, then **Step** and **Back** through what the hardware did. With a recording in hand, Run is labelled **Resume**; **Reset** (⟲) discards the recording.
 
-Switching between JS and HDL keeps the recording, and each switch lands on the instruction the other engine had reached. Only one engine executes at a time: switching away from a running functional simulation pauses it, and the engine toggle is locked while an HDL run is in progress.
+Switching between JS and HDL keeps the recording. Switching to HDL lands on the instruction the functional model had reached; switching to JS starts the model afresh. Only one engine executes at a time: switching away from a running functional simulation stops it, and the engine toggle is locked while an HDL run is in progress.
 
 ### 5.2 Controls
 
@@ -517,7 +573,7 @@ There is no HDL panel; the panel layout is the same as in JS mode.
 | Console (under the editor) | engine output, tagged `[HDL]` |
 | Status bar | the engine's current activity |
 
-The source chip beside the pill shows the number of loaded files (names on hover), or an amber `⚠ no Verilog` / `⚠ no Wrapper`. Clicking it opens the Simulation tab.
+The source chip beside the pill shows the number of loaded files (names on hover), or an amber `⚠ no Verilog` / `⚠ no Wrapper` / `⚠ 2 Wrappers` (short forms `⚠ no .v`, `⚠ no top`, `⚠ 2 tops`). Clicking it opens the Simulation tab, whose warning names the files that declare `module Wrapper` when there is more than one. Run is offered only with exactly one, and `hdlPrepareRun` refuses otherwise (`hdlWrappers()` in `hdl/verilog.ts`).
 
 The toolbar's **Cycles** readout is tagged `hw` in HDL mode: clock edges counted by the simulation. In JS mode it is tagged `single`, `multi` or `pipe` and comes from the per-instruction cycles table, which has no effect in HDL mode.
 
@@ -571,7 +627,7 @@ The testbench the page runs contains no assembled code, no switch settings and n
 
 `+LIVE` and `+LIVEFROM=<d>` apply only to live runs with Verilator in the desktop app.
 
-The clock period is 10 ns; `RESET` is released at 12 ns. `UART_TX_ready` is held at 1. `TRACE` levels: `0` silent, `1` peripherals only, `2` adds the architectural trace. The design's own `$display` output passes through to the console.
+The clock period is 10 ns; `RESET` is released at 12 ns. Cycles are numbered as the Wrapper's `CYCLECOUNT` counts them: `cyc` starts at −1, so cycle 0 begins at the last rising edge in reset (5 ns) and the first instruction executes in it, and cycle *c* begins at 10*c*+5 ns. A single-cycle core runs *N* instructions in *N* cycles, and the instruction of cycle *c* reads `CYCLECOUNT` = *c*; the JS model counts an instruction's cycles after executing it, so it reads the same. The waveform draws cycle *c* from that rising edge (`waveCycleT0`, read from `CLK`'s own edges), so a cycle's box holds its instruction's signals, and the cursor sits at the falling edge in it, where they have settled. `UART_TX_ready` is held at 1. `TRACE` levels: `0` silent, `1` peripherals only, `2` adds the architectural trace. The design's own `$display` output passes through to the console.
 
 The compiled binary is cached against a hash of the simulator, Verilog standard, all sources, the testbench and the checkpoint module, so a re-run, a step or an input change skips `ivlpp` and `ivl`.
 
@@ -650,7 +706,7 @@ Changing a DIP switch, a button or the accelerometer, or sending UART input, whi
 
 The page keeps up to 40 checkpoints (`HDL_CK_KEEP`), 1024 cycles apart to start with (`HDL_CK_EVERY`); the spacing doubles as the recording grows. A replay starts from the latest checkpoint at least 16 cycles (`HDL_CK_VERIFY`) before the first cycle at which the input timeline changed. Extending the recording starts from the checkpoint near its end.
 
-The new run's output is joined onto the old recording at the first cycle where the input timelines differ, or at its end for an extension, so a join costs the same however long the recording is. The new VCD is joined onto the old one, shifted 10 ns per cycle. Both VCDs must hold the same signals, so a recording made with a different *Signals* setting is replayed from reset instead.
+The new run's output is joined onto the old recording at the first cycle where the input timelines differ, or at its end for an extension, so a join costs the same however long the recording is. The new VCD is joined onto the old one, shifted by 10(*k*+1) ns for a checkpoint at cycle *k* (`hdlCkShift`): the checkpoint is the state at the falling edge of cycle *k*, and the replay restores it 1 ns into its own run. Both VCDs must hold the same signals, so a recording made with a different *Signals* setting is replayed from reset instead.
 
 The saved state is found by reading the sources (regs, `integer`s, ANSI `output reg` ports, instances, through the hierarchy under the Wrapper), so a design could hold state this misses. Each replay from a checkpoint must therefore reproduce at least the 16 overlapping cycles of the old recording record for record. If it does not, the run is repeated from reset and checkpoints are turned off for those sources. A design with a `generate` loop, an array of instances, a `generate` block that declares regs or instances, or a multi-dimensional memory has no checkpoints, and the console says why. Section 15 of `test_hdl_mode.js` checks that a joined replay from a checkpoint matches the run from reset, waveform included.
 
@@ -769,7 +825,8 @@ subfolders, keeping only what belongs to the design:
   loaded if it declares any module reached that way. A file that declares no module, and every
   header, is loaded too. Testbenches that instantiate the Wrapper and spare copies of a module
   are left out, and the console lists them; they would otherwise become a second top level.
-  With no Wrapper in the folder, everything is loaded and the *no Wrapper* warning shows.
+  With no Wrapper in the folder, everything is loaded and the *no Wrapper* warning shows. With
+  two, both are loaded and flagged as above; the console lists them with the other duplicates.
 - **No tool output.** Folders whose names start with `.`, `node_modules`, `xsim.dir`, and any
   ending in `.cache`, `.runs`, `.sim`, `.hw`, `.ip_user_files` or `.gen` are skipped. They hold
   Vivado's generated copies (`*_stub.v`, simulation netlists).
@@ -821,7 +878,8 @@ these differences:
   checkpoints on: preprocess and compile 40 ms native against 180 ms in WASM, simulation 5.2 s
   against 8.6 s; replaying an input change near the end, 0.65 s. With all three off, native
   `vvp` runs about 18,000 cycles a second: the cost is Icarus's event-driven evaluation.
-- **Network.** HDL simulation, CodeMirror and the examples need none. Yosys, used only by
+- **Network.** HDL simulation, CodeMirror and the prebuilt processor need none; the example
+  programs other than DIP to LED are read from the RVEduSim site (§9). Yosys, used only by
   post-synthesis simulation, is not carried: it is fetched from the CDN when first used, as in a
   browser, and kept in the webview's cache. C compilation uses Compiler Explorer, as in a browser.
 - **The bridge** (`desktop/app/src/rvnative.js`, `window.rvNative`) is set up before the page
@@ -840,7 +898,9 @@ these differences:
 - **No menu bar** on Windows and Linux. macOS keeps the standard menu, which copy and paste
   depend on.
 - **Linux.** WebKitGTK's DMA-BUF renderer is turned off (`WEBKIT_DISABLE_DMABUF_RENDERER=1`)
-  unless the variable is set, since it leaves the window blank with some graphics drivers.
+  unless the variable is set, since it leaves the window blank with some graphics drivers. The
+  list a dropdown opens is a GTK window drawn by the GTK theme, so `style_dropdown_lists()` adds
+  GTK CSS, scoped to `webkitwebview window`, that paints it in the page's palette.
 - **Verilator** can be chosen instead of Icarus ([§5.19](#519-verilator-desktop-app)).
 
 Building, packaging, signing and testing are described in [`desktop/README.md`](desktop/README.md).
@@ -1003,7 +1063,7 @@ The **Settings** button opens a modal with three tabs: Compiler, Linker and Simu
 |                     [ ] Post-synthesis functional simulation (Icarus)                      |
 |  REGISTER FILE      [ dut.RV1.RegFile1.RegBank ]  detected automatically                   |
 +--------------------------------------------------------------------------------------------+
-| [ Reset Defaults ]                                                        [ Apply & Close ] |
+| [ Reset Defaults ] [ Reset All ]                                          [ Apply & Close ] |
 +--------------------------------------------------------------------------------------------+
 ```
 
@@ -1061,6 +1121,22 @@ restores Clang 20.1.0, `-O0` and RV32I, clearing the compiled program if anythin
 Linker tab it fills in the default layout, which takes effect on Apply. On the Simulation tab in
 HDL mode it restores the cycle counts, Verilog-2005, automatic register-file detection, Icarus
 and *Full*, and keeps the loaded sources; *Clear files* removes those.
+
+**Persistence.** Every setting is saved under `rvsim.settings.v1` (`ui/settings-store.ts`): the
+Compiler tab's controls, the memory layout, the microarchitecture, hazard switches, branch
+predictor, cycles table, statement stepping and batch limit, the clock divider and pacing, the
+UART send mode and gaps, and in HDL mode the Detail options, *Cycles per Run* for each simulator,
+the Verilog standard and the register-file path. The simulator choice keeps its own key,
+`rvsim.hdlSimulator`, and the layout keys are listed in §2.5 and §2.7. A snapshot is written after
+any `change` event in the page, on Apply, Reset Defaults, selecting an example (which sets the
+layout) and `pagehide`; it is read once in `bootSimulator()`, before the first assembly, and
+nothing is written before that. A saved value of the wrong type or out of range is ignored.
+The editor's language, the engine, the program and the HDL sources are not settings and are
+not saved. The desktop app keeps `localStorage` in its data folder (§5.18).
+
+**Reset All** asks for a second click (the button turns red for 4 s; `window.confirm` is not shown
+by every desktop webview), then removes every `rvsim.*` key from `localStorage` and reloads the
+page. A source folder remembered in IndexedDB, or by the desktop app, is kept.
 
 ---
 
@@ -1192,15 +1268,23 @@ Each section title shows the register addresses; status bits (`RX_VALID`, `TX_RE
 
 ## 9. Example programs
 
-There are 13 examples, 7 in assembly and 6 in C. `dip_led` and `dip_led_c` are built into the page (`src/ts/ui/examples-language.ts`); the rest are fetched from `examples/asm/` or `examples/c/` when selected, which requires the page to be served over `http://`.
+There are 13 examples, 7 in assembly and 6 in C. `dip_led` and `dip_led_c` are built into the page (`BAKED_ASM_EXAMPLE`, `BAKED_C_EXAMPLE` in `src/ts/ui/examples-language.ts`); the rest are fetched from `examples/asm/` or `examples/c/` when selected, which requires the page to be served over `http://`.
 
-The **Example** menu is built at startup from `examples/index.txt` by `loadExampleIndex()`. The file is plain text so that static site generators serve it verbatim. Its table has one row per example:
+**Sources.** The **Example** menu has one section (`<optgroup>`) per source, in the editor's language (`ui/example-sources.ts`, `updateExampleSelectorOptions()`):
+
+- *Built in*: DIP to LED, always present.
+- *Web*: a folder laid out as `examples/` is, read from its `index.txt`. By default it is the page's own `examples/`; the desktop app carries no example programs and reads `https://r-panicker.github.io/RVEduSim/examples/`. **Settings → Examples** takes another: a `github.com` folder (`/tree/<branch>/<path>`, or a repository, read at `HEAD`) is read through `raw.githubusercontent.com` (`examplesBaseUrl()`), any other http(s) URL as the folder itself. The section is then headed `GitHub: owner/repo/path` or the host. Rows of the default index whose keys are built in are left out; another folder's are listed under `web:<key>`.
+- A folder on this computer, picked in the same tab: through the desktop app (`pickFolder('examples')`, remembered as `examplesFolder` in its settings), a File System Access handle (IndexedDB `kv` / `examplesFolder`), or an `<input webkitdirectory>` copy that is not remembered. With an `index.txt` its rows are the menu; without one, every `.asm`, `.s` and `.c` file is listed by its path, with no memory depths. Keys are `local:<key or path>`. It is read again when the window regains focus and before an example is loaded from it.
+
+Nothing is cached: an index and an example are fetched with `cache: 'no-cache'` when the page starts, when the source changes and when the example is selected. A source that cannot be read, or has nothing in the current language, shows one disabled entry saying why (`unavailable: HTTP 404`, `unavailable: offline`, `no C programs`), and Settings shows each source's state. The last entry, *Example sources…*, opens Settings → Examples. The web URL is a setting (§6); Reset Defaults on the tab returns to the default and forgets the folder.
+
+**`index.txt`.** The file is plain text so that static site generators serve it verbatim. Its table has one row per example:
 
 ```
 | Key | Lang | Label | File | IROM | DMEM | Description |
 ```
 
-`Lang` is `asm` or `c`. `IROM` and `DMEM` are the `IROM_DEPTH_BITS`/`DMEM_DEPTH_BITS` the program needs (memory of `2**bits` bytes; default 9). Selecting an example sets the Linker segment sizes from them, and HDL mode refuses a program that does not fit the loaded `Wrapper.v`. Rows before the first all-dashes row are treated as headers. The parsed table fills `EXAMPLE_MENU`, `EXAMPLE_FILENAMES` and `EXAMPLE_DEPTHS`. Adding an example is a row in the index plus the source file; `riscv_simulator.html` does not change unless a baked example changes, in which case its baked copy must be updated to match. The menu layout assumes up to 15 rows per language. Until the index loads (permanently, over `file://`), the menu holds only the baked example for each language.
+`Lang` is `asm` or `c`. `IROM` and `DMEM` are the `IROM_DEPTH_BITS`/`DMEM_DEPTH_BITS` the program needs (memory of `2**bits` bytes; default 9). Selecting an example sets the Linker segment sizes from them (`applyExampleMemoryConfig()`, from `exampleDepths()`), and HDL mode refuses a program that does not fit the loaded `Wrapper.v`. Rows before the first all-dashes row are treated as headers. Adding an example is a row in the index plus the source file; if a built-in example changes, its baked copy must be updated to match.
 
 ### 9.1 C examples
 
@@ -1342,6 +1426,8 @@ Shared infrastructure, not suites: `godbolt_cache.js` with `godbolt_cache*.json`
 | `test_new_c_simulation.js` | Compiles and runs `Circle_delay_accel.c` and `ImageDisplay_autoadvance_accel.c`. |
 | `test_baked_examples_full.js` | Compiles and runs the four heaviest examples, two assembly and two C, checking rendered pixels and UART output. |
 | `test_statement_stepping.js` | Statement Stepping in C and assembly, and stepping back over a statement. |
+| `test_example_sources.js` | The Example menu's sections: built in, the site's examples (without a second DIP to LED), a GitHub folder through `raw.githubusercontent.com` (URL forms, its own DIP to LED, a 404 shown as a disabled entry, Reset Defaults), and a local folder with and without `index.txt`, loading from each. |
+| `test_settings_persistence.js` | Settings changed through the controls come back in a second page started with the first one's `localStorage`, the first program assembled into the saved layout; malformed values are ignored; Reset All takes two clicks and removes every `rvsim.*` key. |
 | `test_sim_max_instructions_setting.js` | The run-limit setting and execution-loop throttling. |
 | `test_reset_and_image_display.js` | OLED auto-advance mode 5 rendering, assembly/C pixel parity, peripheral reset. |
 | `test_oled_swap_race.js` | The warning for pixels written after a present without an `OLED_STATUS` read. |

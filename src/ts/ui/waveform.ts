@@ -20,6 +20,7 @@ import { downloadTextFile } from './execution';
 import { escapeHtml, mobileMode, panelDock, setMobileTab, setPanelVisible } from './panels';
 import { updateToolbarButtonStates } from './run-control';
 import { byId, targetEl } from './dom';
+import { redraw } from './views.svelte';
 import { errorMessage } from '../errors';
 
 export function hdlDownloadVcd() {
@@ -184,6 +185,22 @@ export function waveTicksPerCycle(p: ParsedVcd | null) {
   return period > 0 ? period : 10;
 }
 
+// Cycle c starts at a rising edge (the testbench's cycle 0 at the last
+// one in reset), so a cycle's box on the waveform is the instruction that
+// executes in it. The offset of those edges is read from CLK too.
+export function waveCycleT0(p: ParsedVcd | null) {
+  const tpc = waveTicksPerCycle(p);
+  const clk = p && (p.byPath.get('cg3207_hdl_tb.CLK') ||
+    p.vars.find(v => v.name === 'CLK' || v.name === 'clk'));
+  const c = clk && p.changes.get(clk.id);
+  if (c) for (let i = 0; i < c.times.length; i++) {
+    if (c.values[i] === '1') return ((c.times[i] % tpc) + tpc) % tpc;
+  }
+  return tpc / 2;
+}
+export function waveTimeOfCycle(p: ParsedVcd, cycle: number) { return cycle * waveTicksPerCycle(p) + waveCycleT0(p); }
+export function waveCycleOfTime(p: ParsedVcd, t: number) { return (t - waveCycleT0(p)) / waveTicksPerCycle(p); }
+
 export function waveEnsureParsed() {
   if (!hdlBuild.lastVcd) { waveParsed = null; waveParsedFrom = null; return null; }
   if (waveParsed && waveParsedFrom === hdlBuild.lastVcd) return waveParsed;
@@ -302,11 +319,9 @@ export function waveFormatValue(raw: string | null | undefined, width: number) {
 export function waveDockEl() { return byId('waveDock'); }
 
 export function setWaveHeight(px: number | null, persist: boolean) {
-  const dock = waveDockEl();
-  if (!dock) return;
   const max = Math.max(120, window.innerHeight - 220);
   const h = Math.max(120, Math.min(px ?? WAVE_H_DEFAULT, max));
-  dock.style.flex = '0 0 ' + h + 'px';
+  setWaveView({ flex: '0 0 ' + h + 'px' });
   if (persist) { try { localStorage.setItem(WAVE_H_KEY, String(h)); } catch (e) { /* private mode */ } }
 }
 
@@ -319,26 +334,21 @@ export function waveSavedHeight() {
 // setWaveHeight writes an inline flex, which outranks any rule, so folding
 // and the in-panel layout have to clear it rather than style around it.
 export function waveApplyDockSize() {
-  const dock = waveDockEl();
-  if (!dock) return;
   if (waveInPanel() || !document.body.classList.contains('wave-open')) {
-    dock.style.flex = '';
+    setWaveView({ flex: null });
   } else {
     setWaveHeight(waveSavedHeight(), false);
   }
 }
 
-export function initWaveResizer() {
-  const bar = byId('waveResizer');
+// Dragging the bar above the strip. It grows upwards, so dragging up makes
+// it taller.
+export function onWaveResizeStart(e: PointerEvent) {
+  const bar = e.currentTarget as HTMLElement;
   const el = waveDockEl();
-  if (!bar || !el) return;
-
-  let startY = 0, startH = 0;
-  const move = (e: { clientY: number; }) => {
-    // The strip grows upwards, so dragging up makes it taller.
-    setWaveHeight(startH + (startY - e.clientY), false);
-    drawWaveforms();
-  };
+  if (!el) return;
+  const startY = e.clientY, startH = el.getBoundingClientRect().height;
+  const move = (ev: PointerEvent) => { setWaveHeight(startH + (startY - ev.clientY), false); drawWaveforms(); };
   const up = () => {
     bar.classList.remove('dragging');
     window.removeEventListener('pointermove', move);
@@ -346,20 +356,19 @@ export function initWaveResizer() {
     setWaveHeight(el.getBoundingClientRect().height, true);
     drawWaveforms();
   };
-  bar.addEventListener('pointerdown', e => {
-    startY = e.clientY;
-    startH = el.getBoundingClientRect().height;
-    bar.classList.add('dragging');
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    e.preventDefault();
-  });
-  bar.addEventListener('dblclick', () => { setWaveHeight(WAVE_H_DEFAULT, true); drawWaveforms(); });
+  bar.classList.add('dragging');
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  e.preventDefault();
+}
 
-  if (window.ResizeObserver) {
-    new ResizeObserver(() => { if (waveOpen) drawWaveforms(); }).observe(el);
-  }
+export function onWaveResizeReset() {
+  setWaveHeight(WAVE_H_DEFAULT, true);
+  drawWaveforms();
+}
 
+// Whether the strip was open when the page was last left.
+export function initWaveDock() {
   try { waveOpen = localStorage.getItem(WAVE_OPEN_KEY) === '1'; } catch (e) { waveOpen = false; }
   applyWaveOpen();
 }
@@ -368,8 +377,7 @@ export function applyWaveOpen() {
   // Only ever open in HDL mode: there are no waveforms to show otherwise.
   const on = waveOpen && ui.engine === 'hdl';
   document.body.classList.toggle('wave-open', on);
-  const fold = byId<HTMLButtonElement>('waveFoldBtn');
-  if (fold) fold.title = 'Hide the waveform';
+  if (waveView.foldTitle !== 'Hide the waveform') { waveView = { ...waveView, foldTitle: 'Hide the waveform' }; redraw('waveform'); }
   if (typeof updateVizButton === 'function') updateVizButton();
   waveApplyDockSize();
   // As a panel it is shown by its tab, not by folding.
@@ -429,31 +437,19 @@ export function updateWaveView() {
   const dock = waveDockEl();
   if (!dock || !(document.body.classList.contains('wave-open') || waveInPanel())) return;
   waveApplyDefaultSpan();
-  const notice = byId('waveNotice');
-  const info = byId('waveInfo');
-
-  const say = (html: string) => {
-    dock.classList.add('wave-empty');
-    if (notice) notice.innerHTML = html;
-    if (info) info.textContent = '';
+  const say = (notice: WaveNotice) => {
+    waveView = { ...waveView, notice, info: '', empty: true };
+    redraw('waveform');
     const box = byId<HTMLInputElement>('waveCycleInput');
     if (box) box.value = '';
   };
 
-  if (!hdlConfig.dumpVcd) {
-    say('Waveforms come from the VCD dump, which is off. ' +
-      '<button type="button" onclick="waveEnableVcdAndRerun()">Turn it on and re-run</button>');
-    return;
-  }
+  if (!hdlConfig.dumpVcd) { say('vcdOff'); return; }
   const p = waveEnsureParsed();
-  if (!p) { say('Run the program to record a waveform.'); return; }
-  if (!waveSignals.length) {
-    say('No signals selected. Use <b>+ Signal</b> to pick some, ' +
-      'or <button type="button" onclick="waveResetSignals()">go back to the defaults</button>.');
-    return;
-  }
+  if (!p) { say('noRun'); return; }
+  if (!waveSignals.length) { say('noSignals'); return; }
 
-  dock.classList.remove('wave-empty');
+  if (waveView.notice || waveView.empty) { waveView = { ...waveView, notice: null, empty: false }; redraw('waveform'); }
   const cursor = Math.min(hdlCurrentCycle(), waveActiveEndCycle());
 
   // Follow the cursor: only move the window when it walks off the edge,
@@ -472,13 +468,33 @@ export function updateWaveView() {
 // on every row keeps two instances of a module distinguishable.
 export const WAVE_PICKER_LIMIT = 200;
 
+// What the dock's header, signal picker, notice and signal names show
+// (Waveform.svelte); the waveform itself is drawn on its canvas here.
+export type WaveNotice = 'vcdOff' | 'noRun' | 'noSignals';
+export type WavePickerItem = { path: string; on: boolean; width: string };
+export let waveView = {
+  notice: null as WaveNotice | null,
+  info: '',
+  foldTitle: 'Fold the waveform strip',
+  pickerOpen: false,
+  // null: no run to list the signals of.
+  picker: null as { items: WavePickerItem[]; more: number } | null,
+  names: [] as { path: string; label: string }[],
+  // Nothing to draw: the notice says why.
+  empty: false,
+  // The strip's height while it is open at the bottom; null leaves it to
+  // the stylesheet.
+  flex: null as string | null,
+};
+function setWaveView(part: Partial<typeof waveView>) {
+  waveView = { ...waveView, ...part };
+  redraw('waveform');
+}
+
 export function toggleWavePicker() {
-  const el = byId('wavePicker');
-  if (!el) return;
-  el.hidden = !el.hidden;
-  const btn = byId<HTMLButtonElement>('waveAddBtn');
-  if (btn) btn.classList.toggle('active', !el.hidden);
-  if (!el.hidden) {
+  waveView = { ...waveView, pickerOpen: !waveView.pickerOpen };
+  redraw('waveform');
+  if (waveView.pickerOpen) {
     renderWavePicker();
     const f = byId<HTMLInputElement>('wavePickerFilter');
     if (f) f.focus();
@@ -486,59 +502,28 @@ export function toggleWavePicker() {
 }
 
 export function renderWavePicker() {
-  const list = byId('wavePickerList');
-  const picker = byId('wavePicker');
-  if (!list || !picker || picker.hidden) return;
-  if (!waveParsed) {
-    list.innerHTML = '<div class="wave-picker-empty">Run with the VCD dump on to see the signal list.</div>';
-    return;
+  if (!waveView.pickerOpen) return;
+  let picker: typeof waveView.picker = null;
+  if (waveParsed) {
+    const f = byId<HTMLInputElement>('wavePickerFilter');
+    const q = (f && f.value || '').toLowerCase();
+    const hits = waveParsed.vars.filter((v: { path: string; }) => !q || v.path.toLowerCase().includes(q));
+    picker = {
+      items: hits.slice(0, WAVE_PICKER_LIMIT).map(v => ({
+        path: v.path, on: waveSignals.includes(v.path), width: v.width > 1 ? '[' + (v.width - 1) + ':0]' : '1',
+      })),
+      more: Math.max(0, hits.length - WAVE_PICKER_LIMIT),
+    };
   }
-  const f = byId<HTMLInputElement>('wavePickerFilter');
-  const q = (f && f.value || '').toLowerCase();
-  const hits = waveParsed.vars.filter((v: { path: string; }) => !q || v.path.toLowerCase().includes(q));
-  if (!hits.length) {
-    list.innerHTML = '<div class="wave-picker-empty">No signal matches.</div>';
-    return;
-  }
-  const shown = hits.slice(0, WAVE_PICKER_LIMIT);
-  let html = '';
-  for (const v of shown) {
-    const on = waveSignals.includes(v.path);
-    html += `<div class="wave-picker-item${on ? ' on' : ''}" data-path="${escapeHtml(v.path)}">` +
-      `<span>${on ? '✓' : ' '}</span><span>${escapeHtml(v.path)}</span>` +
-      `<span class="wave-picker-w">${v.width > 1 ? '[' + (v.width - 1) + ':0]' : '1'}</span></div>`;
-  }
-  if (hits.length > shown.length) {
-    html += `<div class="wave-picker-empty">${hits.length - shown.length} more — narrow the filter.</div>`;
-  }
-  list.innerHTML = html;
+  waveView = { ...waveView, picker };
+  redraw('waveform');
 }
 
 export function initWavePicker() {
-  const f = byId<HTMLInputElement>('wavePickerFilter');
-  if (f) {
-    f.addEventListener('input', renderWavePicker);
-    f.addEventListener('keydown', e => { if (e.key === 'Escape') toggleWavePicker(); });
-  }
-  const list = byId('wavePickerList');
-  if (list) {
-    list.addEventListener('click', e => {
-      const item = targetEl(e)?.closest('.wave-picker-item');
-      if (item) waveToggleSignal(item.getAttribute('data-path') ?? '');
-    });
-  }
-  const names = byId('waveNames');
-  if (names) {
-    names.addEventListener('click', e => {
-      const btn = targetEl(e)?.closest('.wave-name-remove');
-      if (btn) waveRemoveSignal(btn.getAttribute('data-path') ?? '');
-    });
-  }
   // Clicking away closes it, the way any dropdown behaves - otherwise the
   // only way out is a button, and the nearest button is easy to miss.
   document.addEventListener('pointerdown', e => {
-    const el = byId('wavePicker');
-    if (!el || el.hidden) return;
+    if (!waveView.pickerOpen) return;
     if (targetEl(e)?.closest('#wavePicker') || targetEl(e)?.closest('#waveAddBtn')) return;
     toggleWavePicker();
   });
@@ -569,7 +554,7 @@ export function waveSetSpan(n: number, anchorCycle?: number | undefined) {
 export function waveActiveEndCycle() {
   const p = waveParsed;
   if (!p) return 0;
-  const recorded = Math.floor(p.endTime / waveTicksPerCycle(p));
+  const recorded = Math.max(0, Math.floor(waveCycleOfTime(p, p.endTime)));
   const t = hdlRec.trace;
   if (!t || !t.steps.length) return recorded;
   // +1 so the last instruction's own cycle is fully drawn.
@@ -619,23 +604,21 @@ export function waveFit() {
 export function updateWaveHeaderAndDraw() {
   const p = waveParsed;
   if (!p) return;
-  const info = byId('waveInfo');
   const box = byId<HTMLInputElement>('waveCycleInput');
   if (box && document.activeElement !== box) box.value = String(hdlCurrentCycle());
-  if (info) {
-    const last = waveActiveEndCycle();
-    const cyc = hdlCurrentCycle();
-    const first = waveFirstCycle(p);
-    // Once the PC stops, the hardware keeps counting cycles while the
-    // waveform stops; saying only "cycle 200 ... of 7" would look wrong.
-    const notes: string[] = [];
-    if (cyc > last) notes.push(`PC last advanced at cycle ${last - 1}`);
-    if (cyc < first) notes.push(`the waveform starts at cycle ${first}`);
-    if (waveDropped) {
-      notes.push(`${waveDropped} chosen signal${waveDropped > 1 ? 's' : ''} not in this run`);
-    }
-    info.textContent = notes.join(' · ');
+  const last = waveActiveEndCycle();
+  const cyc = hdlCurrentCycle();
+  const first = waveFirstCycle(p);
+  // Once the PC stops, the hardware keeps counting cycles while the
+  // waveform stops; saying only "cycle 200 ... of 7" would look wrong.
+  const notes: string[] = [];
+  if (cyc > last) notes.push(`PC last advanced at cycle ${last - 1}`);
+  if (cyc < first) notes.push(`the waveform starts at cycle ${first}`);
+  if (waveDropped) {
+    notes.push(`${waveDropped} chosen signal${waveDropped > 1 ? 's' : ''} not in this run`);
   }
+  waveView = { ...waveView, info: notes.join(' · ') };
+  redraw('waveform');
   drawWaveNames(p);
   drawWaveforms();
 }
@@ -644,7 +627,7 @@ export function updateWaveHeaderAndDraw() {
 export function waveFirstCycle(p: ParsedVcd) {
   let t = Infinity;
   for (const c of p.changes.values()) if (c.times.length && c.times[0] < t) t = c.times[0];
-  return Number.isFinite(t) ? Math.floor(t / waveTicksPerCycle(p)) : 0;
+  return Number.isFinite(t) ? Math.max(0, Math.floor(waveCycleOfTime(p, t))) : 0;
 }
 
 // A cycle typed into the header goes there as a click on the waveform
@@ -681,66 +664,63 @@ export function waveSeekToCycle(cycle: number) {
   hdlSeek(idx);
 }
 
-export function initWaveCanvas() {
-  const box = byId<HTMLInputElement>('waveCycleInput');
-  if (box) {
-    box.addEventListener('keydown', e => {
-      if (e.key === 'Enter') { e.preventDefault(); waveGotoCycle(box.value); box.blur(); }
-      else if (e.key === 'Escape') box.blur();
-    });
-    box.addEventListener('blur', () => { if (waveParsed) updateWaveHeaderAndDraw(); });
+// The Cycle box: Enter goes there, Escape leaves it, and leaving it puts
+// back the cycle the simulation is at.
+export function onWaveCycleKey(e: KeyboardEvent) {
+  const box = e.currentTarget as HTMLInputElement;
+  if (e.key === 'Enter') { e.preventDefault(); waveGotoCycle(box.value); box.blur(); }
+  else if (e.key === 'Escape') box.blur();
+}
+export function onWaveCycleBlur() {
+  if (waveParsed) updateWaveHeaderAndDraw();
+}
+
+// A plain wheel is left alone so it scrolls the signal list, which is
+// what a wheel does everywhere else on the page. Zoom takes the usual
+// modifier instead (ctrl, or the trackpad pinch that reports as ctrl).
+export function onWaveWheel(e: WheelEvent) {
+  if (!waveParsed) return;
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    waveSetSpan(waveSpan * (e.deltaY > 0 ? 1.2 : 1 / 1.2), waveCycleAtX(e.clientX));
+  } else if (e.shiftKey) {
+    e.preventDefault();
+    const step = Math.max(1, Math.round(waveSpan * 0.15));
+    waveStart += (e.deltaY > 0 || e.deltaX > 0) ? step : -step;
+    waveClampStart();
+    updateWaveHeaderAndDraw();
   }
-  const canvas = byId<HTMLCanvasElement>('waveCanvas');
-  if (!canvas) return;
+}
 
-  // A plain wheel is left alone so it scrolls the signal list, which is
-  // what a wheel does everywhere else on the page. Zoom takes the usual
-  // modifier instead (ctrl, or the trackpad pinch that reports as ctrl).
-  canvas.addEventListener('wheel', e => {
-    if (!waveParsed) return;
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      waveSetSpan(waveSpan * (e.deltaY > 0 ? 1.2 : 1 / 1.2), waveCycleAtX(e.clientX));
-    } else if (e.shiftKey) {
-      e.preventDefault();
-      const step = Math.max(1, Math.round(waveSpan * 0.15));
-      waveStart += (e.deltaY > 0 || e.deltaX > 0) ? step : -step;
-      waveClampStart();
-      updateWaveHeaderAndDraw();
-    }
-  }, { passive: false });
-
-  let downX = 0, startAtDown = 0, dragging = false, moved = false;
-  canvas.addEventListener('pointerdown', e => {
-    if (!waveParsed) return;
-    dragging = true; moved = false;
-    downX = e.clientX;
-    startAtDown = waveStart;
-    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
-  });
-  canvas.addEventListener('pointermove', e => {
-    if (!dragging) return;
-    const dx = e.clientX - downX;
-    if (Math.abs(dx) > 3) {
-      moved = true;
-      canvas.classList.add('wave-panning');
-      const r = canvas.getBoundingClientRect();
-      waveStart = Math.round(startAtDown - (dx / Math.max(1, r.width)) * waveSpan);
-      waveClampStart();
-      updateWaveHeaderAndDraw();
-    }
-  });
-  const end = (e: PointerEvent) => {
-    if (!dragging) return;
-    dragging = false;
-    canvas.classList.remove('wave-panning');
-    canvas.releasePointerCapture && canvas.hasPointerCapture &&
-      canvas.hasPointerCapture(e.pointerId) && canvas.releasePointerCapture(e.pointerId);
-    // A drag pans; only a press that stayed put is a seek.
-    if (!moved) waveSeekToCycle(Math.floor(waveCycleAtX(e.clientX)));
-  };
-  canvas.addEventListener('pointerup', end);
-  canvas.addEventListener('pointercancel', () => { dragging = false; canvas.classList.remove('wave-panning'); });
+// A drag on the waves pans them; a press that stays put seeks there.
+let wavePan0: { x: number; start: number; moved: boolean } | null = null;
+export let wavePanning = false;
+export function onWaveDown(e: PointerEvent) {
+  if (!waveParsed) return;
+  wavePan0 = { x: e.clientX, start: waveStart, moved: false };
+  (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+}
+export function onWaveMove(e: PointerEvent) {
+  if (!wavePan0) return;
+  const dx = e.clientX - wavePan0.x;
+  if (Math.abs(dx) > 3) {
+    wavePan0.moved = true;
+    if (!wavePanning) { wavePanning = true; redraw('waveform'); }
+    const r = (e.currentTarget as Element).getBoundingClientRect();
+    waveStart = Math.round(wavePan0.start - (dx / Math.max(1, r.width)) * waveSpan);
+    waveClampStart();
+    updateWaveHeaderAndDraw();
+  }
+}
+export function onWaveUp(e: PointerEvent) {
+  if (!wavePan0) return;
+  const moved = wavePan0.moved;
+  onWaveCancel();
+  if (!moved) waveSeekToCycle(Math.floor(waveCycleAtX(e.clientX)));
+}
+export function onWaveCancel() {
+  wavePan0 = null;
+  if (wavePanning) { wavePanning = false; redraw('waveform'); }
 }
 
 export function waveShortLabel(path: string) {
@@ -754,19 +734,12 @@ export function waveShortLabel(path: string) {
 }
 
 export function drawWaveNames(p: ParsedVcd) {
-  const host = byId('waveNames');
-  if (!host) return;
-  let html = '<div class="wave-names-axis">cycle</div>';
-  for (const path of waveSignals) {
+  waveView = { ...waveView, names: waveSignals.map(path => {
     const v = p.byPath.get(path);
-    const label = waveShortLabel(path);
     const bits = v && v.width > 1 ? `[${v.width - 1}:0]` : '';
-    html += `<div class="wave-name" title="${escapeHtml(path)}">` +
-      `<span>${escapeHtml(label)}${bits ? ' ' + bits : ''}</span>` +
-      `<button class="wave-name-remove" type="button" data-path="${escapeHtml(path)}" ` +
-      `title="Remove this signal">✕</button></div>`;
-  }
-  host.innerHTML = html;
+    return { path, label: waveShortLabel(path) + (bits ? ' ' + bits : '') };
+  }) };
+  redraw('waveform');
 }
 
 export function drawWaveforms() {
@@ -792,7 +765,6 @@ export function drawWaveforms() {
   ctx.fillStyle = '#1e1e2e';
   ctx.fillRect(0, 0, w, h);
 
-  const tpc = waveTicksPerCycle(p);
   const pxPerCycle = w / waveSpan;
   const xOf = (cycle: number) => (cycle - waveStart) * pxPerCycle;
   const activeEnd = waveActiveEndCycle();
@@ -847,8 +819,8 @@ export function drawWaveforms() {
 
     // Walk the transitions that fall in view, plus the one before it so
     // the trace starts at the value actually held at the left edge.
-    const tStart = waveStart * tpc;
-    const tEnd = Math.min(waveStart + waveSpan, activeEnd) * tpc;
+    const tStart = waveTimeOfCycle(p, waveStart);
+    const tEnd = waveTimeOfCycle(p, Math.min(waveStart + waveSpan, activeEnd));
     let k = waveChangeIndexAt(c, tStart);
     if (k < 0) k = 0;
 
@@ -895,10 +867,10 @@ export function drawWaveforms() {
       }
     };
 
-    prevX = Math.max(0, xOf(c.times[k] / tpc));
+    prevX = Math.max(0, xOf(waveCycleOfTime(p, c.times[k])));
     if (c.times[k] <= tStart) prevX = 0;
     for (let j = k + 1; j < c.times.length && c.times[j] <= tEnd; j++) {
-      const x = xOf(c.times[j] / tpc);
+      const x = xOf(waveCycleOfTime(p, c.times[j]));
       drawSeg(prevX, x, prevVal);
       if (single) {
         // The vertical edge between levels.
@@ -938,8 +910,10 @@ export function drawWaveforms() {
   // ---- the cursor: where the simulator is stopped ----
   // Pinned to the active region: once the program halts the run keeps
   // counting cycles, and a cursor floating inside the masked area would
-  // point at nothing.
-  const cursor = Math.min(hdlCurrentCycle(), activeEnd);
+  // point at nothing. It sits mid-cycle, at the falling edge, where the
+  // instruction's signals have settled, rather than on the edge where
+  // they change.
+  const cursor = Math.min(hdlCurrentCycle() + 0.5, activeEnd);
   const cx = Math.round(xOf(cursor)) + 0.5;
   if (cx >= 0 && cx <= w) {
     ctx.strokeStyle = '#f9e2af';

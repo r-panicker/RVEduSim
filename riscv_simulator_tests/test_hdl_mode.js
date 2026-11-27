@@ -199,6 +199,9 @@ setTimeout(async () => {
 
     // --- 2. Engine mode switching --------------------------------------
     console.log('\n[2] Engine mode toggle');
+    // Some progress in the JS model first, to see what a round trip does to it.
+    win.stepOnce(); win.stepOnce(); win.stepOnce();
+    const stepsBefore = win.eval('cpu.instructionCount');
     win.setSimEngineMode('hdl');
     check('HDL mode marks the body', doc.body.classList.contains('hdl-mode'));
     check('HDL button becomes active', doc.getElementById('engBtnHdl').classList.contains('active'));
@@ -213,6 +216,9 @@ setTimeout(async () => {
       /no Verilog/.test(doc.getElementById('hdlFilesChip').textContent));
     win.setSimEngineMode('js');
     check('Switching back to JS clears the body class', !doc.body.classList.contains('hdl-mode'));
+    check('Switching back to JS starts the program afresh rather than resuming (' + stepsBefore + ' steps before)',
+      stepsBefore > 0 && win.eval('cpu.instructionCount') === 0 && win.eval('cpu.pc === layout.baseAddress') &&
+      win.eval('program.assembled') && !win.eval('run.finished'));
     win.refreshSimSettingsScope();
     check('In JS mode the JS settings are back and the HDL ones hidden',
       !doc.getElementById('simGroupJs').hidden && doc.getElementById('simGroupHdl').hidden);
@@ -568,7 +574,7 @@ setTimeout(async () => {
       (Math.pow(2, win.hdlRequiredDepths().irom)).toString(16) + ')',
       win.hdlRequiredDepths().irom === 10 && win.hdlRequiredDepths().dmem === 9);
 
-    doc.getElementById('console').innerHTML = '';
+    win.clearLog();
     const refused = await win.hdlBuildTrace(2000, {});
     const refusalLog = [...doc.querySelectorAll('#console div')].map(d => d.textContent);
     check('A program too big for the loaded Wrapper is refused, not half-loaded',
@@ -599,8 +605,27 @@ setTimeout(async () => {
     await win.loadExample('dip_led');
     check('…and back down again (' + depthsOf() + ')', depthsOf() === '9/9');
 
+    // A folder with two Wrappers cannot be elaborated: the testbench names
+    // one. The chip, Settings and Run all say so, naming both files.
+    console.log('\n[5c] More than one Wrapper');
+    const design = DESIGN.map(n => ({ name: n, src: fs.readFileSync(path.join(RV, n), 'utf8') }));
+    win.hdlSetSources(design.concat([{ name: 'Wrapper_old.v', src: design.find(f => f.name === 'Wrapper.v').src }]));
+    const chip = doc.getElementById('hdlFilesChip');
+    check('The toolbar chip flags two Wrappers (' + chip.textContent + ')',
+      /2 Wrappers/.test(chip.textContent) && chip.classList.contains('warn') &&
+      /Wrapper\.v, Wrapper_old\.v/.test(chip.title));
+    const warnEl = doc.getElementById('hdlWrapperWarn');
+    check('Settings names both files', warnEl.style.display === 'block' &&
+      /2 of the loaded files declare/.test(warnEl.textContent) && /Wrapper_old\.v/.test(warnEl.textContent));
+    check('Run is not offered', doc.getElementById('runPauseBtn').disabled);
+    const refusal = await win.hdlBuildTrace(2000, {}).then(() => '', e => e.message);
+    check('A run is refused, naming both files', /2 of the loaded files declare/.test(refusal) &&
+      /Wrapper_old\.v/.test(refusal));
+
     win.hdlSetSources(DESIGN.map(n => ({ name: n, src: fs.readFileSync(path.join(RV, n), 'utf8') })));
     await win.loadExample('dip_led');
+    check('One Wrapper again clears the warning', doc.getElementById('hdlWrapperWarn').style.display === 'none' &&
+      !doc.getElementById('hdlFilesChip').classList.contains('warn'));
 
     // --- 6. Stimulus file format ---------------------------------------
     console.log('\n[6] Run-time stimulus files');
@@ -689,6 +714,34 @@ setTimeout(async () => {
         check('The store to the LED MMIO register was captured',
           allMem.some(w => w[0] === 0xFFFF0060 && w[2] === 0xbead));
         check('A final snapshot closes the trace', !!t.final && !!t.next);
+
+        // Cycles count from the end of reset, as the Wrapper's CYCLECOUNT
+        // does: the first instruction executes in cycle 0, so a single-cycle
+        // core runs N instructions in N cycles.
+        check('The first instruction is recorded at cycle 0', t.steps[0].cyc === 0);
+        check('400 cycles hold 400 instructions, the one of cycle i at step i (' + t.steps.length + ')',
+          t.steps.length === 400 && t.steps.every((s, i) => s.cyc === i));
+        check('…and the run says so', win.hdlRunSummary(t, 400) === '400 instructions in 400 cycles');
+        win.editor.value = 'main:\n  lui t0, 0xFFFF0\n  lw t1, 0xA0(t0)\n  lw t2, 0xA0(t0)\n  sw t2, 0x60(t0)\n' +
+          'loop:\n  addi t3, t3, 1\n  j loop\n';
+        win.assembleOnly();
+        const ccMem = win.hdlMemFiles(fs.readFileSync(path.join(RV, 'Wrapper.v'), 'utf8')).files;
+        const ccRun = await icarus.run(['+CYCLES=40'], Object.assign({}, base,
+          { 'AA_IROM.mem': ccMem['AA_IROM.mem'], 'AA_DMEM.mem': ccMem['AA_DMEM.mem'] }));
+        const cc = win.hdlParseTrace(ccRun);
+        const wrote = (r) => cc.steps.find(s => s.regw.some(w => w[0] === r));
+        const t1 = wrote(6), t2 = wrote(7);
+        check('CYCLECOUNT read by the instruction of cycle 1 is 1, and of cycle 2 is 2',
+          t1 && t1.cyc === 1 && t1.regw.find(w => w[0] === 6)[1] === 1 &&
+          t2 && t2.cyc === 2 && t2.regw.find(w => w[0] === 7)[1] === 2);
+        win.hdlLoadTrace(ccRun, 40);
+        const ccEl = doc.getElementById('console'), ccN = ccEl.children.length;
+        await win.hdlCompareWithJs();
+        const ccVerdict = Array.from(ccEl.children).slice(ccN).map(d => d.textContent).join('\n');
+        if (!/matches the functional model/.test(ccVerdict)) console.log(ccVerdict);
+        check('The functional model reads the same CYCLECOUNT values', /matches the functional model/.test(ccVerdict), ccVerdict);
+        await win.loadExample('dip_led');
+        win.assembleOnly();
 
         // --- 8a. The cross-check compares effects, not fetch order -----
         console.log('\n[8a] The cross-check compares effects, whatever the microarchitecture');

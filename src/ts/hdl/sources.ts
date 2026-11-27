@@ -7,14 +7,15 @@ import { hdlReportLint } from './lint';
 import { hdlSyncReferenceWrapperDepths } from './memory-images';
 import { hdlDiscardTrace } from './run';
 import { hdlActivity, hdlSources, type HdlFolder, type HdlSource } from './state';
-import { hdlFindWrapper, hdlStripNoise } from './verilog';
+import { hdlFindWrapper, hdlStripNoise, hdlWrappers } from './verilog';
 import { ui } from '../machine/state';
 import { setSimEngineMode } from '../ui/engine-mode';
-import { refreshDownloadMenu } from '../ui/execution';
+import { refreshDownloadMenu, setWrapperWarning } from '../ui/execution';
 import { escapeHtml } from '../ui/panels';
 import { updateToolbarButtonStates } from '../ui/run-control';
 import { hdlRefreshRegPathHint } from '../ui/waveform';
 import { byId } from '../ui/dom';
+import { redrawToolbar, toolbar } from '../ui/toolbar-state';
 import { errorMessage } from '../errors';
 export function hdlAddFiles(fileList: ArrayLike<File>) {
   const pending: Promise<HdlSource>[] = [];
@@ -313,9 +314,9 @@ export function hdlRenderFolderButton() {
   }
 }
 
-// One IndexedDB record holds the browser's folder handle, which
-// localStorage cannot store.
-export function hdlFolderStore(op: 'get' | 'put' | 'delete', value?: unknown) {
+// IndexedDB holds the browser's folder handles, which localStorage cannot
+// store: the HDL sources' under hdlFolder, the examples' under examplesFolder.
+export function hdlFolderStore(op: 'get' | 'put' | 'delete', value?: unknown, key = 'hdlFolder') {
   return new Promise<unknown>((resolve, reject) => {
     if (!window.indexedDB) { resolve(null); return; }
     const open = indexedDB.open('rvsim', 1);
@@ -323,8 +324,8 @@ export function hdlFolderStore(op: 'get' | 'put' | 'delete', value?: unknown) {
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const store = open.result.transaction('kv', op === 'get' ? 'readonly' : 'readwrite').objectStore('kv');
-      const req = op === 'get' ? store.get('hdlFolder')
-        : op === 'put' ? store.put(value, 'hdlFolder') : store.delete('hdlFolder');
+      const req = op === 'get' ? store.get(key)
+        : op === 'put' ? store.put(value, key) : store.delete(key);
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     };
@@ -399,35 +400,25 @@ export function renderHdlFileList() {
 
 export function updateHdlReadiness() {
   const wrapper = hdlFindWrapper();
-  const warn = byId('hdlWrapperWarn');
-  if (warn) warn.style.display = (hdlSources.files.length && !wrapper) ? 'block' : 'none';
+  const wrappers = hdlWrappers();
+  // Settings warns when there is no Wrapper, or more than one.
+  setWrapperWarning(hdlSources.files.length && wrappers.length !== 1 ? wrappers.map(w => w.name) : null);
 
-  // No panel shows the file list all the time, so this chip is the standing
-  // answer to "is my Verilog loaded?". Clicking it opens the tab that does.
-  const chip = byId<HTMLButtonElement>('hdlFilesChip');
-  if (chip) {
-    chip.style.display = (ui.engine === 'hdl') ? '' : 'none';
-    // Two labels: the narrow row cannot hold the long one beside six other
-    // controls, and CSS picks which is shown.
-    const label = (long: string, short: string) =>
-      '<span class="chip-long">' + long + '</span>' +
-      '<span class="chip-short">' + short + '</span>';
-    if (!hdlSources.files.length) {
-      chip.innerHTML = label('⚠ no Verilog', '⚠ no .v');
-      chip.className = 'hdl-chip hdl-chip-warn';
-      chip.title = 'HDL mode needs your processor sources - click to load them';
-    } else if (!wrapper) {
-      chip.innerHTML = label('⚠ no Wrapper', '⚠ no top');
-      chip.className = 'hdl-chip hdl-chip-warn';
-      chip.title = 'None of the ' + hdlSources.files.length +
-        ' loaded files declares `module Wrapper` - click to fix';
-    } else {
-      chip.innerHTML = label(hdlSources.files.length + ' files', hdlSources.files.length + ' files');
-      chip.className = 'hdl-chip';
-      chip.title = 'Loaded: ' + hdlSources.files.map(f => f.name).join(', ') +
-        ' - click to manage them';
-    }
-  }
+  // The toolbar's chip: whether the Verilog is loaded (Toolbar.svelte).
+  const n = hdlSources.files.length;
+  const show = ui.engine === 'hdl';
+  toolbar.hdlChip = !n
+    ? { show, long: '⚠ no Verilog', short: '⚠ no .v', warn: true,
+        title: 'HDL mode needs your processor sources - click to load them' }
+    : !wrapper
+    ? { show, long: '⚠ no Wrapper', short: '⚠ no top', warn: true,
+        title: 'None of the ' + n + ' loaded files declares `module Wrapper` - click to fix' }
+    : wrappers.length > 1
+    ? { show, long: '⚠ ' + wrappers.length + ' Wrappers', short: '⚠ ' + wrappers.length + ' tops', warn: true,
+        title: wrappers.length + ' files declare `module Wrapper` (' + wrappers.map(w => w.name).join(', ') + ') - click to remove all but one' }
+    : { show, long: n + ' files', short: n + ' files', warn: false,
+        title: 'Loaded: ' + hdlSources.files.map(f => f.name).join(', ') + ' - click to manage them' };
+  redrawToolbar();
   const note = byId('hdlSourcesNote');
   if (note) note.textContent = hdlSources.files.length
     ? hdlSources.files.length + ' loaded' + (hdlSources.folder && !hdlSources.folder.pending ? ' from ' + hdlSources.folder.name : '') +

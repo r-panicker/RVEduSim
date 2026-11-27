@@ -7,8 +7,7 @@ import { setMachineHost } from '../machine/host';
 import { pipeReset } from '../machine/pipeline';
 import { log } from './editor';
 import { sourceLineForPc, uartClockTick } from './execution';
-import { notePeripheralUse, renderUartTerminal, updateOledCanvas, updatePeripherals } from './peripherals';
-import { syncUartSendControls } from './uart-controls';
+import { notePeripheralUse, refreshPeriphPanel, renderUartTerminal, updateOledCanvas, updatePeripherals } from './peripherals';
 
 // Run once the page has loaded every module (main.ts), in page order.
 export function onMachineHostLoad() {
@@ -17,7 +16,7 @@ export function onMachineHostLoad() {
     peripheralsChanged: () => updatePeripherals(),
     oledChanged: () => updateOledCanvas(),
     uartOutput: () => renderUartTerminal(),
-    uartSettingsChanged: () => syncUartSendControls(),
+    uartSettingsChanged: () => refreshPeriphPanel(),
     peripheralUsed: reg => notePeripheralUse(reg),
     resetPipeline: () => pipeReset(),
     clockTicked: () => uartClockTick(),

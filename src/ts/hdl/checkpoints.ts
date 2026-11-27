@@ -140,13 +140,17 @@ export function hdlJoinCheck(oldRecs: string[], overText: string, lo: number, hi
   return got.length === oldRecs.length && got.every((r, i) => r === oldRecs[i]);
 }
 
-// The restore happens 1 ns into the run, so its waveform's times move by
-// 10k ns, as in hdlVcdJoin.
+// A checkpoint at cycle k is the state at the falling edge of cycle k,
+// 10(k+1) ns into the original run (cycle c starts at the rising edge at
+// 10c+5 ns). A run restored from it starts there, so its waveform's
+// times move by 10(k+1) ns.
+export function hdlCkShift(k: number, unit: number) { return Math.round(10 * (k + 1) * 1e-9 / unit); }
+
 export function hdlShiftVcd(text: string, k: number) {
   if (!text || !k) return text;
   const ts = /\$timescale\s+(\d+)\s*(s|ms|us|ns|ps|fs)\s+\$end/.exec(text);
   const unit = ts ? +ts[1] * VCD_UNITS[ts[2]] : 1e-9;
-  const shift = Math.round(10 * k * 1e-9 / unit);
+  const shift = hdlCkShift(k, unit);
   const defs = text.indexOf('$enddefinitions');
   if (defs < 0) return text;
   const at = text.indexOf('$end', defs + 15) + 4;
@@ -586,14 +590,13 @@ export function hdlVcdWindow(v: VcdDoc) {
 }
 
 // A run from the checkpoint at cycle k joined onto the waveform: the old
-// one up to the checkpoint, then the new one moved to where it belongs.
-// The restore happens 1 ns into the new run, against 10 ns per cycle (the
-// testbench's `always #5`) plus 1 ns in the old one, so its times move
-// by 10k ns.
+// one up to the checkpoint, then the new one moved to where it belongs
+// (hdlCkShift). The checkpoint was saved 1 ns after the falling edge of
+// cycle k and is restored 1 ns into the new run, so the two line up.
 export function hdlVcdJoin(prev: HdlWave | null, b: HdlWave | null, k: number): HdlWave | null {
   const nb = hdlVcdDoc(b, true);
   if (!nb || typeof nb === 'string') return nb;
-  const shift = Math.round(10 * k * 1e-9 / nb.unit);
+  const shift = hdlCkShift(k, nb.unit);
   const moved = nb.parts.map(p => ({ t: p.t + shift, text: p.text.replace(/^#(\d+)$/gm, (_, t: string) => '#' + (+t + shift)) }));
   const a = hdlVcdDoc(prev, true);
   // A join before the window's start has nothing left to join onto; the

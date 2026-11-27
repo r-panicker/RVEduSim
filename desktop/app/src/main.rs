@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use rvnative::verilator::{BuildOpts, BuildResult};
-use rvnative::{read_folder, FileData, Icarus, RunOpts, RunResult, Verilator};
+use rvnative::{read_folder_kind, FileData, Icarus, RunOpts, RunResult, Verilator};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::ipc::{Channel, Response};
@@ -183,9 +183,16 @@ fn vl_live_read(app: AppState<'_>, id: u64, name: String, max: u64) -> Response 
     }
 }
 
+/// The settings key that remembers the folder of each kind: the Verilog
+/// sources ("hdl", the default) or the example programs ("examples").
+fn folder_key(kind: &Option<String>) -> &'static str {
+    if kind.as_deref() == Some("examples") { "examplesFolder" } else { "folder" }
+}
+
 #[tauri::command]
-async fn folder_pick(app: AppState<'_>, handle: tauri::AppHandle) -> Result<Option<String>, String> {
+async fn folder_pick(app: AppState<'_>, handle: tauri::AppHandle, kind: Option<String>) -> Result<Option<String>, String> {
     let app = app.inner().clone();
+    let key = folder_key(&kind);
     blocking(move || {
         // RVSIM_TEST_FOLDER stands in for the dialog's answer: a WebDriver
         // test cannot reach a native dialog.
@@ -193,27 +200,28 @@ async fn folder_pick(app: AppState<'_>, handle: tauri::AppHandle) -> Result<Opti
             Ok(d) => d,
             Err(_) => {
                 let mut d = handle.dialog().file();
-                if let Some(Value::String(f)) = app.settings.lock().unwrap().get("folder") { d = d.set_directory(f); }
+                if let Some(Value::String(f)) = app.settings.lock().unwrap().get(key) { d = d.set_directory(f); }
                 let Some(picked) = d.blocking_pick_folder() else { return Ok(None) };
                 picked.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned()
             }
         };
         app.allowed.lock().unwrap().insert(dir.clone());
-        app.settings.lock().unwrap().insert("folder".into(), Value::String(dir.clone()));
+        app.settings.lock().unwrap().insert(key.into(), Value::String(dir.clone()));
         app.save_settings();
         Ok(Some(dir))
     }).await
 }
 
 #[tauri::command]
-async fn folder_read(app: AppState<'_>, dir: String) -> Result<Vec<rvnative::folder::FolderFile>, String> {
+async fn folder_read(app: AppState<'_>, dir: String, kind: Option<String>) -> Result<Vec<rvnative::folder::FolderFile>, String> {
     if !app.allowed.lock().unwrap().contains(&dir) { return Err("That folder was not chosen in this app.".into()); }
-    blocking(move || Ok(read_folder(&PathBuf::from(dir)))).await
+    let kind = kind.unwrap_or_else(|| "hdl".into());
+    blocking(move || Ok(read_folder_kind(&PathBuf::from(dir), &kind))).await
 }
 
 #[tauri::command]
-fn folder_forget(app: AppState<'_>) {
-    app.settings.lock().unwrap().remove("folder");
+fn folder_forget(app: AppState<'_>, kind: Option<String>) {
+    app.settings.lock().unwrap().remove(folder_key(&kind));
     app.save_settings();
 }
 
@@ -221,6 +229,27 @@ fn folder_forget(app: AppState<'_>) {
 fn open_external(handle: tauri::AppHandle, url: String) {
     if url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:") {
         let _ = handle.opener().open_url(url, None::<&str>);
+    }
+}
+
+/// On Linux the list a dropdown opens is a GTK window, drawn by the GTK
+/// theme in its own colours; the page's palette is applied to it instead.
+/// It sits under the webview in GTK's style tree, so nothing else (the
+/// folder dialog) is touched.
+#[cfg(target_os = "linux")]
+fn style_dropdown_lists() {
+    const CSS: &str = "
+        webkitwebview window, webkitwebview window scrolledwindow, webkitwebview window treeview.view {
+          background-color: #1e1e2e; color: #cdd6f4; }
+        webkitwebview window scrolledwindow { border: 1px solid #45475a; }
+        webkitwebview window treeview.view:hover { background-color: #313244; }
+        webkitwebview window treeview.view:selected { background-color: #45475a; color: #cdd6f4; }
+        webkitwebview window treeview.view:disabled { color: #6c7086; }";
+    use gtk::prelude::CssProviderExt;
+    let provider = gtk::CssProvider::new();
+    if provider.load_from_data(CSS.as_bytes()).is_err() { return; }
+    if let Some(screen) = gtk::gdk::Screen::default() {
+        gtk::StyleContext::add_provider_for_screen(&screen, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
 }
 
@@ -252,16 +281,17 @@ fn main() {
             let settings: serde_json::Map<String, Value> = std::fs::read_to_string(&settings_path).ok()
                 .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
             let folder = settings.get("folder").and_then(Value::as_str).map(String::from);
+            let examples_folder = settings.get("examplesFolder").and_then(Value::as_str).map(String::from);
             let vl_version = vl_root.as_ref().and_then(|r| std::fs::read_to_string(r.join("VERSION")).ok())
                 .map(|v| v.split_whitespace().next().unwrap_or("").to_string());
             let info = json!({
                 "icarus": icarus.is_some(), "icarusVersion": icarus.as_ref().and_then(|i| i.version.clone()),
                 "verilator": vl_root.is_some(), "verilatorVersion": vl_version,
-                "folder": folder, "platform": platform(),
+                "folder": folder, "examplesFolder": examples_folder, "platform": platform(),
             });
             let state = Arc::new(App {
                 icarus, vl_root, vl_cache: data.join("verilator"), verilator: OnceLock::new(), settings_path,
-                allowed: Mutex::new(folder.into_iter().collect()), settings: Mutex::new(settings),
+                allowed: Mutex::new(folder.into_iter().chain(examples_folder.clone()).collect()), settings: Mutex::new(settings),
             });
             app.manage(state);
 
@@ -275,6 +305,8 @@ fn main() {
                 .title("RVEduSim")
                 .inner_size(1440.0, 920.0)
                 .background_color(tauri::window::Color(0x1e, 0x1e, 0x2e, 0xff))
+                // The page is dark, and so are the native parts of the window.
+                .theme(Some(tauri::Theme::Dark))
                 .initialization_script(format!("window.__RVNATIVE_INFO__ = {info};\n{}", include_str!("rvnative.js")))
                 // The app's own pages stay in the window; anything else opens in the browser.
                 .on_navigation(move |url| {
@@ -283,6 +315,8 @@ fn main() {
                     local
                 })
                 .build()?;
+            #[cfg(target_os = "linux")]
+            style_dropdown_lists();
             Ok(())
         })
         .build(tauri::generate_context!())

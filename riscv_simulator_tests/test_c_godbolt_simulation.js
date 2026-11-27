@@ -74,8 +74,8 @@ setTimeout(async () => {
     }
 
     const assembleBtn = win.document.getElementById('btnAssemble');
-    if (assembleBtn.innerHTML !== '⚙ Compile') {
-      throw new Error(`Expected assemble button to show "⚙ Compile", got "${assembleBtn.innerHTML}"`);
+    if (assembleBtn.textContent.trim() !== 'Compile') {
+      throw new Error(`Expected assemble button to read "Compile", got "${assembleBtn.textContent}"`);
     }
 
     const exampleSelect = win.document.getElementById('exampleSelect');

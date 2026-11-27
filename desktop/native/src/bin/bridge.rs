@@ -19,7 +19,7 @@ use std::thread;
 
 use base64::Engine;
 use rvnative::verilator::BuildOpts;
-use rvnative::{read_folder, FileData, Icarus, RunOpts, RunResult, Verilator};
+use rvnative::{read_folder_kind, FileData, Icarus, RunOpts, RunResult, Verilator};
 use serde_json::{json, Value};
 
 struct Bridge {
@@ -116,7 +116,8 @@ fn handle(b: &Arc<Bridge>, cmd: &str, a: &Value) -> Result<Value, String> {
             let f = vl()?.live_read(job, a["name"].as_str().unwrap_or(""), a.get("max").and_then(Value::as_u64).unwrap_or(0));
             Ok(match f { None => Value::Null, Some(f) => match f.data { Some(d) => json!({ "size": f.size, "data": handed(b, "live", &d)? }), None => json!({ "size": f.size }) } })
         }
-        "readFolder" => serde_json::to_value(read_folder(&PathBuf::from(a["dir"].as_str().unwrap_or("")))).map_err(|e| e.to_string()),
+        "readFolder" => serde_json::to_value(read_folder_kind(&PathBuf::from(a["dir"].as_str().unwrap_or("")),
+            a["kind"].as_str().unwrap_or("hdl"))).map_err(|e| e.to_string()),
         _ => Err(format!("unknown command {cmd}")),
     }
 }

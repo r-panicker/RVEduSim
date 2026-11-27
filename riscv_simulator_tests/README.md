@@ -52,7 +52,7 @@ npm run test:verilator # test_verilator.js: native Icarus and Verilator builds, 
 
 What each checks is in §12 of the specs. Each suite builds the page from `src/` in memory
 (`page.js`), so there is no build to run first; `RVSIM_TEST_MINIFIED=1` tests the minified
-build. The root `package.json` provides esbuild for it (`npm install` there once).
+build. The root `package.json` provides esbuild and Svelte for it (`npm install` there once).
 
 ---
 

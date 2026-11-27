@@ -5,8 +5,10 @@ import { ABI_NAMES } from '../isa/instructions';
 import { getMemByte, isMMIOAddr, readMem, writeMem } from '../machine/memory';
 import { mmioReadOnlyMessage, mmioRegisterAt } from '../machine/mmio';
 import { cpu, layout, memory, program, ui } from '../machine/state';
-import { memView, setStatus } from './editor';
-import { REPLAYED_STATE_TITLE, TEXT_RO_TITLE, applyPanelColLayout, escapeHtml, measureMemHexNatural, panelFindMatch, setPanelFindCount, stateIsReplayed, updateRegisters } from './panels';
+import { setStatus } from './editor';
+import { REPLAYED_STATE_TITLE, TEXT_RO_TITLE, applyPanelColLayout, bumpRegEditGen, escapeHtml, measureMemHexNatural, panelFindMatch, setPanelFindCount, stateIsReplayed, updateRegisters } from './panels';
+import { closeEditPopup, openEditPopup } from './edit-popup';
+import { redraw } from './views.svelte';
 import { updatePeripherals } from './peripherals';
 import { byId } from './dom';
 
@@ -18,11 +20,43 @@ export function isCodeSegmentAddress(addr: number) {
   return (addr >= layout.baseAddress && addr < layout.dataBase) || (activeMemRegion === 'code' && addr < layout.dataBase);
 }
 
+// A byte in the Byte view, and the 32-bit word in the Word view. `title`
+// says how to edit it, or why it cannot be.
+export type MemByte = { addr: number; hex: string; ch: string; changed: boolean; editable: boolean; title: string;
+  asciiTitle: string };
+export type MemWord = { addr: number; hex: string; dec: string; changed: boolean; editable: boolean; title: string;
+  decTitle: string };
+// The names shown above a row's word: the program's labels, or an MMIO
+// register's own name.
+export type MemLabel = { text: string; title: string | null; mmio: boolean };
+export type MemRow = { key: string; start: number; addr: string; label: MemLabel | null;
+  word: MemWord | null; bytes: MemByte[] | null };
+
+// What the Memory panel shows, rebuilt by updateMemoryView().
+export let memModel = {
+  rows: [] as MemRow[], wordMode: true, signed: true, segment: 'code', editable: 'Read only',
+};
+
+// A row's version, raised when an edit in it ends: the cell was typed into,
+// so it holds what was typed rather than the text the panel drew, and the
+// row is drawn afresh.
+const memRowGen = new Map<number, number>();
+function memRowKey(start: number) { return start + '.' + (memRowGen.get(start) ?? 0); }
+
+// The editability note in the legend. Nothing is editable while HDL state
+// is replayed, so the whole note goes rather than reading "Editable" over
+// cells that are not.
+function memEditableNote() {
+  return stateIsReplayed() ? ''
+    : ui.memSegment === 'code' ? 'Read only'
+    : ui.memSegment === 'mmio' ? 'Editable except RO'
+    : 'Editable';
+}
+
 export function updateMemoryView() {
   const addrEl = byId<HTMLInputElement>('memAddr');
   const rowsEl = byId<HTMLInputElement>('memRows');
-  // Guard against being invoked before the memory-view DOM is parsed
-  // (e.g. CodeMirror's very first editor dispatch on document load).
+  // Guard against being invoked before the panel is mounted.
   if (!addrEl || !rowsEl) return;
   const addrStr = addrEl.value;
   const rows = parseInt(rowsEl.value) || 16;
@@ -32,6 +66,11 @@ export function updateMemoryView() {
 
   const isStackView = (activeMemRegion === 'stack' || ui.memSegment === 'stack');
   const wordMode = (memViewMode === 'word');
+  const replayed = stateIsReplayed();
+  const hex2 = (v: number) => v.toString(16).padStart(2, '0');
+  const hex8 = (v: number) => (v >>> 0).toString(16).padStart(8, '0');
+  const changedAt = (offset: number) => cpu.lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size);
+  const asciiOf = (v: number) => v >= 32 && v <= 126 ? String.fromCharCode(v) : '.';
 
   // Build address -> label-name map (same approach as the disassembly view)
   const labelsByAddr: Record<number, string[]> = {};
@@ -45,15 +84,9 @@ export function updateMemoryView() {
     }
   }
 
-  // Returns an anchored orange "label" annotation that sits directly ABOVE
-  // the 4-byte word at `wordStart` ('' when no label falls inside it). The
-  // wrapper (.mem-row-label-anchor) stacks the label above the wrapped
-  // group of bytes/word cell so they share an exact column — this works in
-  // both byte and word display modes and for stack-view rows. `inner`
-  // carries the rendered cell(s) so they sit directly under the label.
-  // When a label is NOT word-aligned, a title tooltip reveals the exact
-  // byte address (hover only — zero visual clutter).
-  const labelAnnotationHtml = (wordStart: number, inner: string) => {
+  // The labels in the word at `wordStart`, shown directly above it. When a
+  // label is not word-aligned, a tooltip gives its exact byte address.
+  const programLabel = (wordStart: number): MemLabel | null => {
     const names: string[] = [];
     const offsets: number[] = [];
     for (let c = 0; c < 4; c++) {
@@ -63,210 +96,91 @@ export function updateMemoryView() {
         if (!offsets.includes(offset)) offsets.push(offset);
       }
     }
-    if (!names.length) return inner;
-    // Tooltip only when a label's byte offset within the word is non-zero,
-    // i.e. the symbol is not word-aligned (its exact byte matters).
+    if (!names.length) return null;
     const unaligned = offsets.some(o => (o - wordStart) % 4 !== 0);
-    const title = unaligned
-      ? ` title="Symbol${offsets.length > 1 ? 's' : ''} at ${offsets.map(o => '0x' + o.toString(16).padStart(8, '0')).join(', ')}"` : '';
     // Trailing ':' to match how a label reads in the program itself.
-    return '<span class="mem-row-label-anchor"><span class="mem-row-label"' + title + '>' +
-      names.map(escapeHtml).join(', ') + ':</span>' + inner + '</span>';
+    return { text: names.join(', ') + ':', mmio: false,
+      title: unaligned ? `Symbol${offsets.length > 1 ? 's' : ''} at ${offsets.map(o => '0x' + hex8(o)).join(', ')}` : null };
   };
 
-  // Same anchored-above placement as labelAnnotationHtml, but for an
-  // MMIO register's own name instead of a user symbol - "UART RX VALID
-  // (RO):", no address (the register IS the address). One register per
-  // word, so this is a straight lookup rather than a byte scan.
-  const mmioLabelAnnotationHtml = (wordStart: number, inner: string) => {
+  // An MMIO register's own name, "UART RX VALID (RO):", in the same place.
+  const mmioLabel = (wordStart: number): MemLabel | null => {
     const reg = mmioRegisterAt(wordStart);
-    if (!reg) return inner;
-    return '<span class="mem-row-label-anchor"><span class="mem-row-label mmio-row-label">' +
-      escapeHtml(reg.name) + ' (' + reg.access + '):</span>' + inner + '</span>';
+    return reg ? { text: `${reg.name} (${reg.access}):`, title: null, mmio: true } : null;
   };
 
-  // Content column header/toggle: Byte mode is always ASCII; Word mode
-  // is decimal, with a signed/unsigned switch that only makes sense there.
-  const contentLabelEl = byId('memContentColLabel');
-  const signToggleWrap = byId<HTMLLabelElement>('memDecSignToggleWrap');
-  const signToggleInput = byId<HTMLInputElement>('memDecSignToggle');
-  if (contentLabelEl) contentLabelEl.textContent = wordMode ? 'Content (DEC)' : 'Content (ASCII)';
-  if (signToggleWrap) signToggleWrap.hidden = !wordMode;
-  if (signToggleInput) signToggleInput.checked = memDecSigned;
-
-  // Update legend hint for the active view mode
-  const legendEl = byId('memLegendText');
-  if (legendEl) {
-    legendEl.innerHTML = wordMode
-      ? '<span class="mem-legend-endian">Full word (LSB to the right)</span>'
-      : '<span class="mem-legend-endian">Little endian (LSB to the left)</span>';
-  }
-
-  // One 32-bit word per row - each row's Hex and Content cells are the
-  // one word at that address, so wrapping (a narrow panel) drops the
-  // Content cell to its own line below the Hex cell but never splits a
-  // word's hex from its own ASCII/DEC, and never has a second word's
-  // data to be confused with.
-  let html = '';
-  let built = 0, shown = 0;
-  // The names a row displays above its word - user labels, or an MMIO
-  // register's own name. Searching for `main` or `UART` is at least as
-  // likely as searching for an address, so they join the row's text.
+  // The names a row displays above its word join the row's text for the
+  // panel's filter: searching for `main` or `UART` is at least as likely as
+  // searching for an address.
   const memRowNames = (rowStart: number) => {
     const names: string[] = [];
     for (let c = 0; c < 4; c++) {
       const offset = isStackView ? ((rowStart - c) >>> 0) : ((rowStart + c) >>> 0);
       for (const n of (labelsByAddr[offset] || [])) if (!names.includes(n)) names.push(n);
     }
-    const reg = typeof mmioRegisterAt === 'function' ? mmioRegisterAt(rowStart) : null;
+    const reg = mmioRegisterAt(rowStart);
     if (reg && reg.name) names.push(reg.name);
     return names.join(' ');
   };
 
-  // A byte can be read-only for either reason, and the tooltip should say
-  // which; HDL replay wins because it applies to every segment.
-  const roByteTitle = (offset: number) => stateIsReplayed()
-    ? REPLAYED_STATE_TITLE
-    : (isCodeSegmentAddress(offset) ? TEXT_RO_TITLE : '');
-
-  // Every branch below emits the same row shape, so they share one exit
-  // point - which is also where the panel's row filter gets applied.
-  const emitMemRow = (rowStart: number, hexVals: string, contentVals: string, text: string) => {
-    built++;
-    if (!panelFindMatch('memory', text + ' ' + memRowNames(rowStart))) return;
-    shown++;
-    html += `<div><span class="addr" data-col="addr">0x${rowStart.toString(16).padStart(8, '0')}</span><span class="mem-hex-block">${hexVals}</span><span class="mem-ascii-block">${contentVals}</span></div>`;
-  };
+  // One 32-bit word per row - each row's Hex and Content cells are the one
+  // word at that address, so wrapping (a narrow panel) drops the Content
+  // cell below the Hex cell but never splits a word's hex from its own
+  // ASCII/DEC. Hex and ASCII are kept apart in the filter text so a search
+  // for "dead" matches the hex run and a search for "Hell" the characters.
+  const out: MemRow[] = [];
+  let built = 0;
   for (let r = 0; r < rows; r++) {
     if (isStackView && addr < r * 4) break;
     // Stack grows downwards -> rows step downwards by 4 bytes; all other regions step upwards
     const wordStart = isStackView ? ((addr - r * 4) >>> 0) : ((addr + r * 4) >>> 0);
+    const mmio = isMMIOAddr(wordStart);
+    const reg = mmio ? mmioRegisterAt(wordStart) : null;
+    // Replayed HDL state is read-only throughout; see REPLAYED_STATE_TITLE.
+    const mmioEditable = mmio && !replayed && !!reg && reg.editable;
+    const mmioRoTitle = replayed ? REPLAYED_STATE_TITLE
+      : reg ? `${reg.name} (${reg.access}) is read-only` : (mmioReadOnlyMessage(wordStart) || '');
+    // Words and bytes of the row, in the order they are shown.
+    const offsets = [0, 1, 2, 3].map(c => (mmio || !isStackView) ? ((wordStart + c) >>> 0) : ((wordStart - c) >>> 0));
+    const vals = offsets.map(o => mmio ? readMem(o, 1, true) & 0xFF : getMemByte(o));
+    const label = mmio ? mmioLabel(wordStart) : programLabel(wordStart);
+    let text: string, word: MemWord | null = null, bytes: MemByte[] | null = null;
 
-    if (isMMIOAddr(wordStart)) {
-      const reg = mmioRegisterAt(wordStart);
-      // Replayed HDL state is read-only throughout; see REPLAYED_STATE_TITLE.
-      const editable = !stateIsReplayed() && !!reg && reg.editable;
-      const roTitle = `title="${escapeHtml(stateIsReplayed() ? REPLAYED_STATE_TITLE
-        : reg ? `${reg.name} (${reg.access}) is read-only` : mmioReadOnlyMessage(wordStart))}"`;
-
-      if (wordMode) {
-        let wordVal = 0;
-        let isChanged = false;
-        for (let i = 0; i < 4; i++) {
-          const offset = (wordStart + i) >>> 0;
-          const bv = readMem(offset, 1, true) & 0xFF;
-          wordVal |= bv << (i * 8);
-          if (cpu.lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size)) isChanged = true;
-        }
-        const cls = isChanged ? ' changed' : '';
-        const wordHex = (wordVal >>> 0).toString(16).padStart(8, '0');
-        const cell = editable
-          ? `<span class="val word-cell${cls}" data-addr="${wordStart}" data-size="4" onclick="startMemWordCellEdit(event,${wordStart})" title="Click to edit 32-bit word (little-endian)">${wordHex}</span>`
-          : `<span class="val word-cell${cls} readonly-code" data-addr="${wordStart}" data-size="4" ${roTitle}>${wordHex}</span>`;
-        const hexVals = mmioLabelAnnotationHtml(wordStart, cell);
-
-        const decText = (memDecSigned ? (wordVal | 0) : (wordVal >>> 0)).toString();
-        const contentVals = editable
-          ? `<span class="val-dec${cls}" onclick="startMemWordCellEdit(event,${wordStart})" title="Click to edit 32-bit word">${decText}</span>`
-          : `<span class="val-dec${cls} readonly-code" ${roTitle}>${decText}</span>`;
-        emitMemRow(wordStart, hexVals, contentVals,
-          `0x${wordStart.toString(16).padStart(8, '0')} ${wordHex} ${decText}`);
-        continue;
-      }
-
-      // Byte view: one 4-byte group, so a label can be anchored above it
-      let groupBytes = '';
-      let groupAscii = '';
-      // Hex and ASCII are kept apart so a search for "dead" matches the
-      // hex run and a search for "Hell" matches the characters.
-      let hexText = '', asciiText = '';
-      for (let i = 0; i < 4; i++) {
-        const offset = (wordStart + i) >>> 0;
-        const val = readMem(offset, 1, true) & 0xFF;
-        hexText += val.toString(16).padStart(2, '0');
-        const isChanged = cpu.lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size);
-        const cls = isChanged ? ' changed' : '';
-        if (editable) {
-          groupBytes += `<span class="val${cls}" contenteditable="true" spellcheck="false" data-addr="${offset}" data-size="1" data-old="${val.toString(16).padStart(2, '0')}" onfocus="startMemByteEdit(this)" ondblclick="startMemWordEdit(event,${offset})" onkeydown="handleMemByteEditKey(event,this)" onblur="commitMemByteEdit(this)" title="Single-click: edit byte | Double-click: edit word">${val.toString(16).padStart(2, '0')}</span>`;
-        } else {
-          groupBytes += `<span class="val${cls} readonly-code" data-addr="${offset}" data-size="1" style="cursor:default;opacity:0.88;" ${roTitle}>${val.toString(16).padStart(2, '0')}</span>`;
-        }
-
-        const ch = val >= 32 && val <= 126 ? String.fromCharCode(val) : '.';
-        asciiText += ch;
-        const asciiAttrs = editable
-          ? `onclick="focusMemByte(${offset})" title="Click matching hex byte to edit"`
-          : roTitle;
-        groupAscii += `<span class="ascii${cls}" ${asciiAttrs}>${escapeHtml(ch)}</span>`;
-      }
-      const hexVals = mmioLabelAnnotationHtml(wordStart, '<span class="mem-row-bytes">' + groupBytes + '</span>');
-      const contentVals = '<span class="mem-ascii-group">' + groupAscii + '</span>';
-      emitMemRow(wordStart, hexVals, contentVals,
-        `0x${wordStart.toString(16).padStart(8, '0')} ${hexText} ${asciiText}`);
-    } else if (wordMode) {
-      // Word view: the one 32-bit word at this row (little-endian)
-      const offsets: number[] = [];
-      let wordVal = 0;
-      let isChanged = false;
-      let allReadonly = true;
-      const replayed = stateIsReplayed();
-      // Two different reasons to be read-only, so two different tooltips.
-      const roWordTitle = replayed ? REPLAYED_STATE_TITLE : TEXT_RO_TITLE;
-      for (let c = 0; c < 4; c++) {
-        const offset = isStackView ? ((wordStart - c) >>> 0) : ((wordStart + c) >>> 0);
-        offsets.push(offset);
-        const bv = getMemByte(offset);
-        wordVal |= bv << (c * 8);
-        if (cpu.lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size)) isChanged = true;
-        if (!replayed && !isCodeSegmentAddress(offset)) allReadonly = false;
-      }
-      const cls = isChanged ? ' changed' : '';
-      const rowAddr = offsets[0];
-      const wordHex = (wordVal >>> 0).toString(16).padStart(8, '0');
-      const cell = allReadonly
-        ? `<span class="val word-cell${cls} readonly-code" data-addr="${rowAddr}" data-size="4" title="${roWordTitle}">${wordHex}</span>`
-        : `<span class="val word-cell${cls}" data-addr="${rowAddr}" data-size="4" onclick="startMemWordCellEdit(event,${rowAddr})" title="Click to edit 32-bit word (little-endian)">${wordHex}</span>`;
-      const hexVals = labelAnnotationHtml(rowAddr, cell);
-
-      const decText = (memDecSigned ? (wordVal | 0) : (wordVal >>> 0)).toString();
-      const contentVals = allReadonly
-        ? `<span class="val-dec${cls} readonly-code" title="${roWordTitle}">${decText}</span>`
-        : `<span class="val-dec${cls}" onclick="startMemWordCellEdit(event,${rowAddr})" title="Click to edit 32-bit word">${decText}</span>`;
-      emitMemRow(wordStart, hexVals, contentVals,
-        `0x${wordStart.toString(16).padStart(8, '0')} ${wordHex} ${decText}`);
+    if (wordMode) {
+      const wordVal = (vals[0] | (vals[1] << 8) | (vals[2] << 16) | (vals[3] << 24)) >>> 0;
+      // A word in the text segment, or replayed HDL state, is read-only,
+      // and the tooltip says which.
+      const editable = mmio ? mmioEditable : !replayed && offsets.some(o => !isCodeSegmentAddress(o));
+      const roTitle = mmio ? mmioRoTitle : replayed ? REPLAYED_STATE_TITLE : TEXT_RO_TITLE;
+      word = {
+        addr: offsets[0], hex: hex8(wordVal), dec: String(memDecSigned ? (wordVal | 0) : wordVal),
+        changed: offsets.some(changedAt), editable,
+        title: editable ? 'Click to edit 32-bit word (little-endian)' : roTitle,
+        decTitle: editable ? 'Click to edit 32-bit word' : roTitle,
+      };
+      text = `0x${hex8(wordStart)} ${word.hex} ${word.dec}`;
     } else {
-      // Byte view: the one 4-byte group at this row, so a label can be anchored above it
-      let groupBytes = '';
-      let groupAscii = '';
-      let hexText = '', asciiText = '';
-      for (let i = 0; i < 4; i++) {
-        const offset = isStackView ? ((wordStart - i) >>> 0) : ((wordStart + i) >>> 0);
-        const val = getMemByte(offset);
-        hexText += val.toString(16).padStart(2, '0');
-        asciiText += (val >= 32 && val <= 126) ? String.fromCharCode(val) : '.';
-        const isChanged = cpu.lastChangedMem.some(m => offset >= m.addr && offset < m.addr + m.size);
-        const cls = isChanged ? ' changed' : '';
-        const isCodeSegment = stateIsReplayed() || isCodeSegmentAddress(offset);
-
-        if (isCodeSegment) {
-          groupBytes += `<span class="val${cls} readonly-code" data-addr="${offset}" data-size="1" style="cursor:default;opacity:0.88;" title="${roByteTitle(offset)}">${val.toString(16).padStart(2, '0')}</span>`;
-          const ch = val >= 32 && val <= 126 ? String.fromCharCode(val) : '.';
-          groupAscii += `<span class="ascii${cls}" title="${roByteTitle(offset)}">${escapeHtml(ch)}</span>`;
-        } else {
-          groupBytes += `<span class="val${cls}" contenteditable="true" spellcheck="false" data-addr="${offset}" data-size="1" data-old="${val.toString(16).padStart(2, '0')}" onfocus="startMemByteEdit(this)" ondblclick="startMemWordEdit(event,${offset})" onkeydown="handleMemByteEditKey(event,this)" onblur="commitMemByteEdit(this)" title="Single-click: edit byte (00-ff) | Double-click: edit word (Enter commits, Esc cancels)">${val.toString(16).padStart(2, '0')}</span>`;
-          const ch = val >= 32 && val <= 126 ? String.fromCharCode(val) : '.';
-          const asciiOnclick = `onclick="focusMemByte(${offset})" title="Click matching hex byte to edit"`;
-          groupAscii += `<span class="ascii${cls}" ${asciiOnclick}>${escapeHtml(ch)}</span>`;
-        }
-      }
-      const hexVals = labelAnnotationHtml(wordStart, '<span class="mem-row-bytes">' + groupBytes + '</span>');
-      const contentVals = '<span class="mem-ascii-group">' + groupAscii + '</span>';
-      emitMemRow(wordStart, hexVals, contentVals,
-        `0x${wordStart.toString(16).padStart(8, '0')} ${hexText} ${asciiText}`);
+      bytes = offsets.map((o, i) => {
+        // A byte can be read-only for either reason, and the tooltip should
+        // say which; HDL replay wins because it applies to every segment.
+        const editable = mmio ? mmioEditable : !replayed && !isCodeSegmentAddress(o);
+        const roTitle = mmio ? mmioRoTitle : replayed ? REPLAYED_STATE_TITLE : TEXT_RO_TITLE;
+        return {
+          addr: o, hex: hex2(vals[i]), ch: asciiOf(vals[i]), changed: changedAt(o), editable,
+          title: !editable ? roTitle : mmio ? 'Single-click: edit byte | Double-click: edit word'
+            : 'Single-click: edit byte (00-ff) | Double-click: edit word (Enter commits, Esc cancels)',
+          asciiTitle: editable ? 'Click matching hex byte to edit' : roTitle,
+        };
+      });
+      text = `0x${hex8(wordStart)} ${bytes.map(b => b.hex).join('')} ${bytes.map(b => b.ch).join('')}`;
     }
+    built++;
+    if (!panelFindMatch('memory', text + ' ' + memRowNames(wordStart))) continue;
+    out.push({ key: memRowKey(wordStart), start: wordStart, addr: '0x' + hex8(wordStart), label, word, bytes });
   }
-  memView.innerHTML = html;
-  setPanelFindCount('memory', shown, built);
+  memModel = { rows: out, wordMode, signed: memDecSigned, segment: ui.memSegment, editable: memEditableNote() };
+  redraw('memory');
+  setPanelFindCount('memory', out.length, built);
   // Re-measure the hex data's natural width (it changes with the
   // Byte/Word mode) so the Hex column's drag floor stays honest, then
   // re-run the layout against it.
@@ -276,10 +190,6 @@ export function updateMemoryView() {
 
 export function setMemViewMode(mode: string) {
   memViewMode = (mode === 'word') ? 'word' : 'bytes';
-  const bytesBtn = byId<HTMLButtonElement>('memViewModeBytes');
-  const wordBtn = byId<HTMLButtonElement>('memViewModeWord');
-  if (bytesBtn) bytesBtn.classList.toggle('active', memViewMode === 'bytes');
-  if (wordBtn) wordBtn.classList.toggle('active', memViewMode === 'word');
   updateMemoryView();
   setStatus(memViewMode === 'word' ? 'Memory view: 32-bit word display' : 'Memory view: separate byte display', 'info');
 }
@@ -350,48 +260,45 @@ export function writeMemFromPanel(addr: number, val: number, size: number) {
   try { writeMem(addr, val, size); } finally { memory.panelEdit = false; }
 }
 
+// The byte was typed into: its row is drawn afresh, whether the edit was
+// kept or not.
+function endMemByteEdit(el: HTMLElement) {
+  el.classList.remove('editing');
+  const row = Number(el.closest<HTMLElement>('[data-row]')?.dataset.row);
+  if (Number.isFinite(row)) memRowGen.set(row, (memRowGen.get(row) ?? 0) + 1);
+  updateMemoryView();
+}
+
 export function commitMemByteEdit(el: HTMLElement) {
   if (!el || !el.classList || !el.classList.contains('editing')) return;
   const addr = parseInt(el.dataset.addr ?? '', 10);
-  if (isCodeSegmentAddress(addr)) {
-    el.textContent = el.dataset.old || '00';
-    el.classList.remove('editing');
-    setStatus('Text segment is read-only in Memory View', 'warning');
-    return;
-  }
-  const roMsg = mmioReadOnlyMessage(addr);
+  const roMsg = isCodeSegmentAddress(addr) ? 'Text segment is read-only in Memory View' : mmioReadOnlyMessage(addr);
   if (roMsg) {
-    el.textContent = el.dataset.old || '00';
-    el.classList.remove('editing');
+    endMemByteEdit(el);
     setStatus(roMsg, 'warning');
     return;
   }
-  const text = (el.textContent || '').trim();
-  const normalized = text.replace(/^0x/i, '');
+  const normalized = (el.textContent || '').trim().replace(/^0x/i, '');
   if (!/^[0-9a-fA-F]{1,2}$/.test(normalized)) {
-    const oldText = el.dataset.old || '00';
-    el.textContent = oldText;
-    el.classList.remove('editing');
+    endMemByteEdit(el);
     setStatus('Invalid byte value; use hex 00-ff', 'error');
     return;
   }
   const val = parseInt(normalized, 16);
-  if (isNaN(addr) || addr < 0 || isNaN(val) || val < 0 || val > 255) {
-    el.textContent = el.dataset.old || '00';
-    el.classList.remove('editing');
+  if (isNaN(addr) || addr < 0) {
+    endMemByteEdit(el);
     setStatus('Invalid memory edit', 'error');
     return;
   }
   writeMemFromPanel(addr, val, 1);
   cpu.lastChangedMem = [{ addr, size: 1 }];
-  updateMemoryView();
+  endMemByteEdit(el);
   updatePeripherals();
   setStatus('Memory updated at 0x' + addr.toString(16).padStart(8, '0'), 'success');
 }
 
 export function cancelMemByteEdit(el: HTMLElement) {
-  el.textContent = el.dataset.old || '00';
-  el.classList.remove('editing');
+  if (el.classList.contains('editing')) endMemByteEdit(el);
   el.blur();
 }
 
@@ -413,14 +320,7 @@ export function startMemWordEdit(event: Event, wordStartAddr: number) {
   }
   // Find the four bytes in this word (aligned to 4-byte boundary)
   const alignedAddr = wordStartAddr & ~0x3;
-  // Collect the 4 byte spans
-  const spans: HTMLElement[] = [];
-  for (let i = 0; i < 4; i++) {
-    const el = memView.querySelector<HTMLElement>(`[data-addr="${alignedAddr + i}"]`);
-    if (el) spans.push(el);
-  }
-  if (spans.length < 4) return;
-  openMemWordOverlay(alignedAddr, spans);
+  openMemWordOverlay(alignedAddr);
 }
 
 // Word-cell click handler for the "word view" memory display mode.
@@ -438,7 +338,7 @@ export function startMemWordCellEdit(event: Event, wordStartAddr: number) {
     setStatus(roMsg, 'warning');
     return;
   }
-  openMemWordOverlay(wordStartAddr & ~0x3, null);
+  openMemWordOverlay(wordStartAddr & ~0x3);
 }
 
 // The edit popups take `0x` as hex and bare digits as decimal, so a value
@@ -455,81 +355,29 @@ export function parseEditedWord(text: string | null) {
   return v >>> 0;
 }
 
-// The word being edited in the overlay: its address, and the byte cells
-// that show it (none in the word view).
-let wordEdit: { overlay: HTMLElement; addr: number; spans: HTMLElement[] } | null = null;
+// The address of the word being edited in the popup.
+let wordEditAddr: number | null = null;
 
-export function openMemWordOverlay(alignedAddr: number, spans: HTMLElement[] | null) {
-  // Read current word value (little-endian)
+export function openMemWordOverlay(alignedAddr: number) {
   let wordVal = 0;
-  if (spans && spans.length >= 4) {
-    for (let i = 0; i < 4; i++) {
-      wordVal |= (parseInt(spans[i].textContent || '00', 16) & 0xFF) << (i * 8);
-    }
-  } else {
-    for (let i = 0; i < 4; i++) {
-      const off = (alignedAddr + i) >>> 0;
-      wordVal |= (getMemByte(off) & 0xFF) << (i * 8);
-    }
-  }
-  const wordHex = (wordVal >>> 0).toString(16).padStart(8, '0');
-
-  // Create overlay with input
-  let overlay = document.getElementById('memWordEditOverlay');
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = 'memWordEditOverlay';
-    overlay.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:2px solid #cba6f7;border-radius:8px;padding:16px 24px;z-index:10000;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);';
-    document.body.appendChild(overlay);
-  }
-
-  overlay.innerHTML = `
-    <span style="color:#9aa3c4;font-size:12px;">Word at 0x${alignedAddr.toString(16).padStart(8, '0')} (${alignedAddr}..${alignedAddr + 3}):</span>
-    <input type="text" id="memWordEditInput" value="0x${wordHex}" style="background:#181825;color:#f5c2e7;border:1px solid #585b70;border-radius:4px;padding:6px 12px;font-size:16px;font-family:'Consolas',monospace;text-align:center;width:200px;outline:none;" spellcheck="false" autocomplete="off" autofocus>
-    <span style="color:#6c7086;font-size:10px;">Hex (0x…) or decimal. Enter=commit, Esc=cancel</span>
-  `;
-
-  const input = byId<HTMLInputElement>('memWordEditInput');
-  input.focus();
-  input.select();
-
-  const box = overlay;
-  wordEdit = { overlay: box, addr: alignedAddr, spans: spans || [] };
-
-  const handleKey = (e: KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      commitMemWordEdit();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      cancelMemWordEdit();
-    }
-  };
-  const handleBlur = () => {
-    // Only cancel if input still exists (blur from clicking elsewhere)
-    const input2 = document.getElementById('memWordEditInput');
-    if (input2) cancelMemWordEdit();
-  };
-
-  input.addEventListener('keydown', handleKey);
-  input.addEventListener('blur', handleBlur, { once: true });
-
-  // Also handle clicks outside to cancel
-  const handleOutsideClick = (e: MouseEvent) => {
-    if (!box.contains(e.target as Node | null)) {
-      cancelMemWordEdit();
-      document.removeEventListener('mousedown', handleOutsideClick);
-    }
-  };
-  document.addEventListener('mousedown', handleOutsideClick);
+  for (let i = 0; i < 4; i++) wordVal |= (getMemByte((alignedAddr + i) >>> 0) & 0xFF) << (i * 8);
+  wordEditAddr = alignedAddr;
+  openEditPopup({
+    id: 'memWordEditOverlay', inputId: 'memWordEditInput',
+    label: `Word at 0x${alignedAddr.toString(16).padStart(8, '0')} (${alignedAddr}..${alignedAddr + 3}):`,
+    value: '0x' + (wordVal >>> 0).toString(16).padStart(8, '0'),
+    hint: 'Hex (0x…) or decimal. Enter=commit, Esc=cancel',
+    accent: '#cba6f7', labelStyle: 'color:#9aa3c4;font-size:12px;', gap: 8, width: 200,
+    oncommit: commitMemWordEdit, onclose: cancelMemWordEdit,
+  });
 }
 
-export function commitMemWordEdit() {
-  if (!wordEdit) return;
+export function commitMemWordEdit(text?: string) {
+  if (wordEditAddr === null) return;
   const input = byId<HTMLInputElement>('memWordEditInput');
-  if (!input) return;
+  const value = text ?? (input ? input.value : '');
 
-  const addr = wordEdit.addr;
+  const addr = wordEditAddr;
   if (isCodeSegmentAddress(addr)) {
     cancelMemWordEdit();
     setStatus('Text segment is read-only in Memory View', 'warning');
@@ -542,27 +390,14 @@ export function commitMemWordEdit() {
     return;
   }
 
-  const val = parseEditedWord(input.value);
+  const val = parseEditedWord(value);
   if (val === null) {
     setStatus('Invalid word value; use hex (0x…) or decimal, within 32 bits', 'error');
     return;
   }
 
-  const spans = wordEdit.spans;
-
   writeMemFromPanel(addr, val, 4);
   cpu.lastChangedMem = [{ addr, size: 4 }];
-
-  // Update the individual byte spans visually
-  for (let i = 0; i < 4; i++) {
-    if (spans[i]) {
-      const byteVal = (val >> (i * 8)) & 0xFF;
-      spans[i].textContent = byteVal.toString(16).padStart(2, '0');
-      spans[i].classList.add('changed');
-      spans[i].dataset.old = byteVal.toString(16).padStart(2, '0');
-    }
-  }
-
   cancelMemWordEdit();
   updateMemoryView();
   updatePeripherals();
@@ -570,14 +405,12 @@ export function commitMemWordEdit() {
 }
 
 export function cancelMemWordEdit() {
-  if (!wordEdit) return;
-  for (const el of wordEdit.spans) el.classList.remove('changed');
-  wordEdit.overlay.remove();
-  wordEdit = null;
+  wordEditAddr = null;
+  closeEditPopup();
 }
 
 export function focusMemByte(addr: number) {
-  const el = memView.querySelector<HTMLElement>(`[data-addr="${addr}"]`);
+  const el = document.querySelector<HTMLElement>(`#memView [data-addr="${addr}"]`);
   if (!el) return;
   el.focus();
   selectElementText(el);
@@ -604,46 +437,36 @@ export function startRegEdit(el: HTMLElement) {
   selectElementText(el);
 }
 
+// The cell was typed into, which leaves it holding what was typed rather
+// than the text the panel drew: the panel draws its rows afresh. `editing`
+// goes first: a focused cell that stops being editable loses the focus at
+// once, and its blur commits whatever is still being edited.
+function endRegEdit(el: HTMLElement) {
+  el.classList.remove('editing');
+  el.contentEditable = "false";
+  bumpRegEditGen();
+  updateRegisters();
+}
+
 export function commitRegEdit(el: HTMLElement) {
   if (!el || !el.classList || !el.classList.contains('editing')) return;
-  el.contentEditable = "false";
-  el.classList.remove('editing');
   const idx = parseInt(el.dataset.idx ?? '', 10);
-  if (isNaN(idx) || idx < 0 || idx > 31) return;
-  if (idx === 0) {
-    cpu.regs[0] = 0;
-    updateRegisters();
-    return;
-  }
-  const type = el.dataset.type;
+  if (isNaN(idx) || idx < 0 || idx > 31) { endRegEdit(el); return; }
   const text = (el.textContent || '').trim();
-  let newVal: number;
-  if (type === 'hex') {
-    const hexStr = text.replace(/^0x/i, '');
-    newVal = parseInt(hexStr, 16);
-    if (isNaN(newVal)) {
-      el.textContent = el.dataset.old ?? '';
-      return;
-    }
-  } else {
-    newVal = parseInt(text, 10);
-    if (isNaN(newVal)) {
-      el.textContent = el.dataset.old ?? '';
-      return;
-    }
+  const newVal = el.dataset.type === 'hex' ? parseInt(text.replace(/^0x/i, ''), 16) : parseInt(text, 10);
+  // x0 stays 0, and text that is not a number leaves the register as it was.
+  const changed = idx !== 0 && !isNaN(newVal);
+  if (changed) {
+    cpu.regs[idx] = newVal >>> 0;
+    cpu.lastChangedReg = idx;
   }
-  const uval = newVal >>> 0;
-  cpu.regs[idx] = uval;
-  cpu.lastChangedReg = idx;
-  updateRegisters();
-  updateMemoryView();
+  endRegEdit(el);
+  if (changed) updateMemoryView();
 }
 
 export function cancelRegEdit(el: HTMLElement) {
   if (!el || !el.classList || !el.classList.contains('editing')) return;
-  el.contentEditable = "false";
-  el.classList.remove('editing');
-  el.textContent = el.dataset.old ?? '';
+  endRegEdit(el);
 }
 
 export function handleRegEditKey(event: KeyboardEvent, el: HTMLElement) {
@@ -680,54 +503,15 @@ export function popRegEditModal(event: { preventDefault: () => void; stopPropaga
   const idx = parseInt(el.dataset.idx ?? '', 10);
   if (isNaN(idx) || idx < 0 || idx > 31) return;
   const name = ABI_NAMES[idx] || `x${idx}`;
-  const type = el.dataset.type || 'hex';
   const val = cpu.regs[idx];
-  const uval = val >>> 0;
-  const initVal = (type === 'hex') ? '0x' + uval.toString(16).padStart(8, '0') : val.toString();
-
-  let overlay = document.getElementById('regEditOverlay');
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = 'regEditOverlay';
-    overlay.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;border:2px solid #89b4fa;border-radius:8px;padding:16px 24px;z-index:10000;display:flex;flex-direction:column;align-items:center;gap:10px;box-shadow:0 8px 32px rgba(0,0,0,0.5);';
-    document.body.appendChild(overlay);
-  }
-
-  overlay.innerHTML = `
-    <span style="color:#89b4fa;font-size:13px;font-weight:600;">Edit Register x${idx} (${name}):</span>
-    <input type="text" id="regEditModalInput" value="${initVal}" style="background:#181825;color:#f5c2e7;border:1px solid #585b70;border-radius:4px;padding:6px 12px;font-size:16px;font-family:'Consolas',monospace;text-align:center;width:220px;outline:none;" spellcheck="false" autocomplete="off" autofocus>
-    <span style="color:#6c7086;font-size:10px;">Hex (0x…) or decimal. Enter = commit, Esc = cancel</span>
-  `;
-
-  const input = byId<HTMLInputElement>('regEditModalInput');
-  input.focus();
-  input.select();
-
-  const handleKey = (e: KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      commitRegEditModal(idx, input.value);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      closeRegEditModal();
-    }
-  };
-
-  const handleBlur = () => {
-    const inp = document.getElementById('regEditModalInput');
-    if (inp) closeRegEditModal();
-  };
-
-  input.addEventListener('keydown', handleKey);
-  input.addEventListener('blur', handleBlur, { once: true });
-
-  const handleOutsideClick = (e: MouseEvent) => {
-    if (overlay && !overlay.contains(e.target as Node | null)) {
-      closeRegEditModal();
-      document.removeEventListener('mousedown', handleOutsideClick);
-    }
-  };
-  setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 10);
+  openEditPopup({
+    id: 'regEditOverlay', inputId: 'regEditModalInput',
+    label: `Edit Register x${idx} (${name}):`,
+    value: el.dataset.type === 'dec' ? val.toString() : '0x' + (val >>> 0).toString(16).padStart(8, '0'),
+    hint: 'Hex (0x…) or decimal. Enter = commit, Esc = cancel',
+    accent: '#89b4fa', labelStyle: 'color:#89b4fa;font-size:13px;font-weight:600;', gap: 10, width: 220,
+    oncommit: text => commitRegEditModal(idx, text), onclose: closeRegEditModal,
+  });
 }
 
 export function commitRegEditModal(idx: number, text: string) {
@@ -751,10 +535,7 @@ export function commitRegEditModal(idx: number, text: string) {
 }
 
 export function closeRegEditModal() {
-  const overlay = document.getElementById('regEditOverlay');
-  if (overlay) {
-    try { overlay.remove(); } catch (e) { }
-  }
+  closeEditPopup();
 }
 
 export function memGo(region: string) {
@@ -770,32 +551,8 @@ export function memGo(region: string) {
   updateMemoryView();
 }
 
+// The region buttons and the legend, after the region or the engine changed.
 export function updateMemSubTabs() {
-  const tabs = ['code', 'data', 'stack', 'mmio'];
-  tabs.forEach(t => {
-    const btn = document.getElementById('memTabBtn-' + t);
-    if (btn) {
-      if (t === ui.memSegment) btn.classList.add('active');
-      else btn.classList.remove('active');
-    }
-  });
-  // Sync the segmented Byte/Word display-mode buttons
-  const bytesBtn = byId<HTMLButtonElement>('memViewModeBytes');
-  const wordBtn = byId<HTMLButtonElement>('memViewModeWord');
-  if (bytesBtn) bytesBtn.classList.toggle('active', memViewMode === 'bytes');
-  if (wordBtn) wordBtn.classList.toggle('active', memViewMode === 'word');
-
-  const editableEl = byId('memLegendEditable');
-  if (editableEl) {
-    // Nothing is editable while HDL state is replayed, so the whole
-    // editability note goes rather than reading "Editable" over cells
-    // that are not.
-    const text = stateIsReplayed() ? ''
-      : ui.memSegment === 'code' ? 'Read only'
-      : ui.memSegment === 'mmio' ? 'Editable except RO'
-      : 'Editable';
-    editableEl.innerHTML = text ? `<span class="mem-legend-editable">${text}</span>` : '';
-    const sep = byId('memLegendSep');
-    if (sep) sep.hidden = !text;
-  }
+  memModel = { ...memModel, segment: ui.memSegment, wordMode: memViewMode === 'word', editable: memEditableNote() };
+  redraw('memory');
 }

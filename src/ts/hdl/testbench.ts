@@ -181,7 +181,10 @@ ${dbufDecl}  reg  [31:0] ACCEL_Data    = ${base ? h32(base.accel) : "32'h1900004
   reg         RESET         = 1'b1;
   reg         CLK           = 1'b0;
 
-  integer cyc = 0;
+  // Cycle 0 is the one that starts at the last rising edge in reset, during
+  // which the first instruction executes, as the Wrapper's cycle counter
+  // counts. So N instructions on a single-cycle core take N cycles.
+  integer cyc = -1;
   reg [31:0] argv = 32'h0;
 
   // Named association, so a Wrapper whose ports are ordered differently - or

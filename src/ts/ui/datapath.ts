@@ -25,17 +25,20 @@ import { setDisasmViewMode } from './disassembly';
 import { editor, formatActiveInstructionSignature, riscvAutocomplete } from './editor';
 import { editorState } from './editor-state';
 import { hdlInitSources } from './engine-mode';
-import { initCompilerSettingWatchers, loadExample, setLanguageMode, syncGodboltArchFlags, updateExampleSelectorOptions } from './examples-language';
+import { initCompilerSettingWatchers, loadExample, setLanguageMode, startExampleSources, syncGodboltArchFlags, updateExampleSelectorOptions } from './examples-language';
 import { closeCompilerConfigPanel, countVisit, findNextValidInstructionLine, openBpFigure, toggleBreakpoint, toggleCompilerConfigPanel } from './execution';
 import { closeFindReplace, findNext, findPrev, handleFindKey, heldAxisKeys, initCodeMirrorEditor, openFindReplace, replaceAll, replaceCurrent, toggleFindCase, updateFindMatches } from './find-replace';
 import { setLocalsDecSigned } from './locals';
 import { memViewMode, openMemWordOverlay, setMemDecSigned, setMemViewMode, startMemWordCellEdit } from './memory-register-views';
-import { RISCV_AUTOCOMPLETE_DOCS, escapeHtml, extractEditorSymbols, getAssemblyLineContext, mobileMode, mobileTab, panelDock, setMobileTab, setPanelVisible, setRegDecSigned } from './panels';
+import { RISCV_AUTOCOMPLETE_DOCS, escapeHtml, extractEditorSymbols, getAssemblyLineContext, mobileMode, mobileTab, panelDock, setMobileTab, setPanelChipShown, setPanelVisible, setRegDecSigned } from './panels';
 import { bumpAccelAxis, clearOledDisplay, initPeripherals, updateAccelValues } from './peripherals';
+import { restoreSettings } from './settings-store';
 import { pipeInitControls } from './pipeline-controls';
 import { assembleOnly, resetAll, runProgram, stepBack, stepOnce, toggleRunPause, updateToolbarButtonStates } from './run-control';
 import { toggleWaveDock } from './waveform';
-import { byId } from './dom';
+import { byId, targetEl } from './dom';
+import { redrawToolbar, toolbar } from './toolbar-state';
+import { redraw } from './views.svelte';
 
 
 // The instruction at the PC as the single-cycle diagram sees it: its
@@ -798,9 +801,26 @@ export function dpClockUpdate() {
   g.classList.toggle('dp-clk-edge', steps.length > 0 && dpPhase === steps.length);
 }
 
+// What the strip's header shows (DatapathHeader.svelte).
+export type DpHeaderPhase = { n: string; stage: string; colour: string; title: string };
+export let dpHeader = {
+  instr: null as { addr: string; text: string } | null,
+  phase: null as DpHeaderPhase | null,
+  pipe: false,
+  view: 'diagram',
+  prev: { on: true, title: 'Previous phase' },
+  next: { on: true, title: 'Next phase; at the clock edge, execute the instruction' },
+  play: { on: true, title: 'Play every phase of this instruction, then execute it', label: '▶▶' },
+  // The strip's height while it is open at the bottom; null leaves it to
+  // the stylesheet.
+  dockFlex: null as string | null,
+};
+function setDpHeader(part: Partial<typeof dpHeader>) {
+  dpHeader = { ...dpHeader, ...part };
+  redraw('datapath');
+}
+
 export function dpRender(animate: boolean) {
-  const instrEl = byId('dpInstr');
-  const phaseEl = byId('dpPhase');
   const capEl = byId('dpCaption');
   const total = dpPhaseList.length;
   if (pipeline.on) {
@@ -811,8 +831,7 @@ export function dpRender(animate: boolean) {
   }
   if (!dpModel) {
     dpClear();
-    if (instrEl) instrEl.textContent = '';
-    if (phaseEl) phaseEl.textContent = '';
+    setDpHeader({ instr: null, phase: null });
     if (capEl) capEl.innerHTML = program.assembled
       ? 'The program has finished.'
       : 'Assemble a program to follow its instructions through the datapath.';
@@ -822,23 +841,20 @@ export function dpRender(animate: boolean) {
   if (dpModel.pipe) {
     // The cycle count is the status line's and the log's, which number
     // the cycle just clocked; this header would be one ahead of them.
-    if (instrEl) instrEl.textContent = '';
-    if (phaseEl) phaseEl.textContent = '';
+    setDpHeader({ instr: null, phase: null });
     if (capEl) capEl.innerHTML = pdpCaption(dpModel);
     pdpDraw(dpModel);
     dpUpdateButtons();
     return;
   }
-  if (instrEl) instrEl.innerHTML = `<span class="dp-instr-addr">${dpHex(dpModel.pc)}  </span>` +
-    escapeHtml(dpModel.text || dpHex(dpModel.instr));
-  if (phaseEl) {
-    const ph = dpPhase ? dpPhaseList[dpPhase - 1] : null;
-    const stage = ph && ph.stage ? DP_STAGE_NAME[ph.stage] : '';
-    phaseEl.innerHTML = !ph ? '' : `${dpPhase}/${total} ` + (stage
-      ? (ph.title !== stage ? `<span class="dp-stage-name" style="color:${PDP_COLOUR[ph.stage ?? '']}">${stage} · </span>` + ph.title
-                            : `<span style="color:${PDP_COLOUR[ph.stage ?? '']}">${stage}</span>`)
-      : escapeHtml(ph.title));
-  }
+  // The phase as n/total, then its stage in the stage's colour and, when
+  // it says more than the stage's name, its title.
+  const ph = dpPhase ? dpPhaseList[dpPhase - 1] : null;
+  setDpHeader({
+    instr: { addr: dpHex(dpModel.pc), text: dpModel.text || dpHex(dpModel.instr) },
+    phase: ph ? { n: `${dpPhase}/${total}`, stage: ph.stage ? DP_STAGE_NAME[ph.stage] : '',
+      colour: PDP_COLOUR[ph.stage ?? ''], title: ph.title } : null,
+  });
   dpClockUpdate();
   if (capEl) capEl.innerHTML = dpPhase ? dpPhaseList[dpPhase - 1].caption : '';
   if (!animate || !dpPhase) { dpDrawStatic(dpPhase); dpUpdateButtons(); return; }
@@ -851,24 +867,24 @@ export function dpUpdateButtons() {
 }
 
 export function dpUpdateOwnButtons() {
-  const set = (id: string, on: boolean) => { const b = byId<HTMLButtonElement>(id); if (b) b.disabled = !on; };
-  const play = byId<HTMLButtonElement>('dpPlayBtn');
-  if (play) play.textContent = pdpPlaying ? '⏸' : '▶▶';
-  const tip = (id: string, t: string) => { const b = document.getElementById(id); if (b) b.title = t; };
-  tip('dpPrevBtn', pipeline.on ? 'Back one clock cycle' : 'Previous phase');
-  tip('dpNextBtn', pipeline.on ? 'Next clock cycle' : 'Next phase; at the clock edge, execute the instruction');
-  tip('dpPlayBtn', pipeline.on ? 'Clock one cycle after another; press again to pause' : 'Play every phase of this instruction, then execute it');
-  if (pipeline.on) {
+  const pipe = pipeline.on;
+  let prev: boolean, next: boolean, play: boolean;
+  if (pipe) {
     const ok = program.assembled && !run.running && ui.engine !== 'hdl';
-    set('dpPrevBtn', ok && !pdpPlaying && stepHistory.entries.length > 0);
-    set('dpNextBtn', ok && !run.finished);
-    set('dpPlayBtn', ok && (pdpPlaying || !run.finished));
-    return;
+    prev = ok && !pdpPlaying && stepHistory.entries.length > 0;
+    next = ok && !run.finished;
+    play = ok && (pdpPlaying || !run.finished);
+  } else {
+    const ok = !!dpModel && !run.running && ui.engine !== 'hdl';
+    prev = ok && (dpPhase > 0 || stepHistory.entries.length > 0);
+    next = play = ok && !run.finished;
   }
-  const ok = !!dpModel && !run.running && ui.engine !== 'hdl';
-  set('dpPrevBtn', ok && (dpPhase > 0 || stepHistory.entries.length > 0));
-  set('dpNextBtn', ok && !run.finished);
-  set('dpPlayBtn', ok && !run.finished);
+  setDpHeader({
+    prev: { on: prev, title: pipe ? 'Back one clock cycle' : 'Previous phase' },
+    next: { on: next, title: pipe ? 'Next clock cycle' : 'Next phase; at the clock edge, execute the instruction' },
+    play: { on: play, label: pdpPlaying ? '⏸' : '▶▶',
+      title: pipe ? 'Clock one cycle after another; press again to pause' : 'Play every phase of this instruction, then execute it' },
+  });
 }
 
 // Tokens for phase k fly along their routes; everything before k is
@@ -1406,9 +1422,7 @@ export let dpView = 'diagram';
 export function dpSetView(v: string) {
   dpView = v === 'timeline' && pipeline.on ? 'timeline' : 'diagram';
   document.body.classList.toggle('dp-view-timeline', dpView === 'timeline');
-  const d = byId<HTMLButtonElement>('dpViewDiagram'), t = byId<HTMLButtonElement>('dpViewTimeline');
-  if (d) d.classList.toggle('active', dpView === 'diagram');
-  if (t) t.classList.toggle('active', dpView === 'timeline');
+  setDpHeader({ view: dpView });
   if (dpView === 'timeline') pdpRenderTimeline();
   else dpPlaceEncoding();
   dpUpdateButtons();
@@ -1547,10 +1561,8 @@ export function pdpRenderTimeline() {
 
 // ---- The strip --------------------------------------------------------
 export function setDpHeight(px: number | null, persist: boolean) {
-  const dock = byId('dpDock');
-  if (!dock) return;
   const h = Math.max(200, Math.min(px ?? DP_H_DEFAULT, window.innerHeight - 160));
-  dock.style.flex = '0 0 ' + h + 'px';
+  setDpHeader({ dockFlex: '0 0 ' + h + 'px' });
   if (persist) { try { localStorage.setItem(DP_H_KEY, String(h)); } catch (e) { /* private mode */ } }
 }
 
@@ -1563,11 +1575,9 @@ export function dpSavedHeight() {
 // The inline flex from a drag outranks the folded and in-panel rules, so
 // it is only present while the strip is open at the bottom.
 export function dpApplyDockSize() {
-  const dock = byId('dpDock');
-  if (!dock) return;
   const b = document.body.classList;
   if (b.contains('dp-open') && !b.contains('dp-in-panel') && !b.contains('dp-max')) setDpHeight(dpSavedHeight(), false);
-  else dock.style.flex = '';
+  else setDpHeader({ dockFlex: null });
 }
 
 // Shown when asked for and when the program can be drawn: the diagram
@@ -1663,33 +1673,28 @@ export function floatStepsMode() {
   if (ui.engine === 'hdl') return 'tb';
   return pipeline.on || floatOnDpTab() ? 'dp' : 'tb';
 }
+// What the floating step controls show (FloatSteps.svelte).
+type FloatButton = { label: string; title: string; on: boolean; hidden: boolean };
+export let floatView = { show: false, mode: 'tb', buttons: [] as FloatButton[] };
+
 export function updateFloatSteps() {
-  const bar = byId('floatSteps');
-  if (!bar) return;
   const onDp = mobileMode() && program.assembled && floatOnDpTab();
   const show = onDp || (floatStepsWanted && mobileMode() && program.assembled);
   document.body.classList.toggle('float-dp', onDp);
-  bar.hidden = !show;
-  if (!show) return;
-  const dp = floatStepsMode() === 'dp';
-  bar.dataset.mode = dp ? 'dp' : 'tb';
-  const mirror = (btn: HTMLButtonElement, src: string, label: string, title?: string | undefined) => {
-    const s = byId<HTMLButtonElement>(src);
-    btn.textContent = label;
-    btn.title = title || (s ? s.title : '');
-    btn.disabled = !s || s.disabled;
-  };
-  const [a, b, c] = bar.querySelectorAll('button');
-  if (dp) {
-    mirror(a, 'dpPrevBtn', '◀');
-    mirror(b, 'dpNextBtn', '▶');
-    mirror(c, 'dpPlayBtn', pdpPlaying ? '⏸' : '▶▶');
-    c.hidden = false;
-  } else {
-    mirror(a, 'btnBack', '⏮');
-    mirror(b, 'btnStep', '⏭');
-    c.hidden = true;
+  if (!show) {
+    if (floatView.show) { floatView = { ...floatView, show: false }; redraw('floatSteps'); }
+    return;
   }
+  // The datapath strip's controls, or the toolbar's Back and Step.
+  const dp = floatStepsMode() === 'dp';
+  const h = dpHeader, t = toolbar;
+  const btn = (label: string, s: { on: boolean; title: string }, hidden = false) => ({ label, title: s.title, on: s.on, hidden });
+  floatView = {
+    show, mode: dp ? 'dp' : 'tb',
+    buttons: dp ? [btn('◀', h.prev), btn('▶', h.next), btn(pdpPlaying ? '⏸' : '▶▶', h.play)]
+      : [btn('⏮', t.back), btn('⏭', t.step), btn('', h.play, true)],
+  };
+  redraw('floatSteps');
 }
 export function floatStep(which: number) {
   const dp = floatStepsMode() === 'dp';
@@ -1714,19 +1719,16 @@ export function initFloatSteps() {
 }
 
 export function updateVizButton() {
-  const b = byId<HTMLButtonElement>('btnViz');
-  if (!b) return;
   const hdl = ui.engine === 'hdl';
   const block = hdl ? null : dpBlocker();
-  b.innerHTML = hdl ? '<span class="btn-ico">∿</span><span class="btn-text">Waveform</span>'
-                    : '<span class="btn-ico">⧉</span><span class="btn-text">Datapath</span>';
-  b.disabled = !!block;
-  b.classList.toggle('inactive', !!block);
-  b.classList.toggle('viz-on', !block && vizShown());
-  b.title = block
-    ? block.msg || `The datapath diagram cannot show this program: line ${block.line}, ${block.text}. ${block.why}`
-    : hdl ? 'Show or hide the waveform of the recorded run'
-          : 'Show or hide the datapath: the instruction at the PC, or the pipeline, one step at a time';
+  toolbar.viz = {
+    hdl, on: !block, shown: !block && vizShown(),
+    title: block
+      ? block.msg || `The datapath diagram cannot show this program: line ${block.line}, ${block.text}. ${block.why}`
+      : hdl ? 'Show or hide the waveform of the recorded run'
+            : 'Show or hide the datapath: the instruction at the PC, or the pipeline, one step at a time',
+  };
+  redrawToolbar();
 }
 
 export function toggleDpMax() {
@@ -1737,69 +1739,73 @@ export function toggleDpMax() {
 
 // Below the breakpoint the strip becomes a panel tab, the way the
 // waveform does, so reaching it does not scroll the toolbar away.
+// Below the breakpoint the strip is a panel tab, the way the waveform is,
+// so reaching it does not scroll the toolbar away. Where it is drawn is
+// the page's (App.svelte and Panel.svelte); this sets the in-panel styles.
 export function syncDatapathPanelHost() {
-  const dock = byId('dpDock');
-  const host = byId('tab-datapath');
-  const resizer = byId('dpResizer');
-  if (!dock || !host) return;
-  const body = host.querySelector(':scope > .panel-body') || host;
-  const wantMobile = mobileMode();
-  const inPanel = host.contains(dock);
-  if (wantMobile && !inPanel) body.appendChild(dock);
-  else if (!wantMobile && inPanel && resizer && resizer.parentNode) {
-    resizer.parentNode.insertBefore(dock, resizer.nextSibling);
-  }
-  document.body.classList.toggle('dp-in-panel', wantMobile);
+  document.body.classList.toggle('dp-in-panel', mobileMode());
   if (document.body.dataset.booted) dpApplyDockSize();
 }
 
 export function updateDatapathPanelAvailability() {
-  const chip = byId<HTMLButtonElement>('panelChip-datapath');
-  const hdlBtn = byId<HTMLButtonElement>('engBtnHdl');
-  const show = mobileMode() && !(hdlBtn && hdlBtn.classList.contains('active')) && !dpBlocker();
-  if (chip) chip.style.display = show ? '' : 'none';
+  const show = mobileMode() && ui.engine !== 'hdl' && !dpBlocker();
+  setPanelChipShown('datapath', show);
   if (!show && panelDock.datapath && panelDock.datapath.visible) {
     setPanelVisible('datapath', false);
   }
   syncDatapathPanelHost();
 }
 
-export function initDatapath() {
-  const bar = byId('dpResizer');
+// Dragging the bar above the strip; it grows upwards.
+export function onDpResizeStart(e: PointerEvent) {
+  const bar = e.currentTarget as HTMLElement;
   const dock = byId('dpDock');
-  if (bar && dock) {
-    let startY = 0, startH = 0;
-    const move = (e: MouseEvent) => setDpHeight(startH + (startY - e.clientY), false);
-    const up = () => {
-      bar.classList.remove('dragging');
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      setDpHeight(dock.getBoundingClientRect().height, true);
-    };
-    bar.addEventListener('pointerdown', e => {
-      startY = e.clientY;
-      startH = dock.getBoundingClientRect().height;
-      bar.classList.add('dragging');
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
-      e.preventDefault();
-    });
-    bar.addEventListener('dblclick', () => setDpHeight(DP_H_DEFAULT, true));
-  }
-  const body = byId('dpBody');
-  if (body && typeof ResizeObserver !== 'undefined') new ResizeObserver(() => dpPlaceEncoding()).observe(body);
-  try { dpWanted = localStorage.getItem(DP_OPEN_KEY) === '1'; } catch (e) { dpWanted = false; }
-  initFloatSteps();
-  pipeInitControls();
-  clockInitControls();
+  if (!dock) return;
+  const startY = e.clientY, startH = dock.getBoundingClientRect().height;
+  const move = (ev: PointerEvent) => setDpHeight(startH + (startY - ev.clientY), false);
+  const up = () => {
+    bar.classList.remove('dragging');
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    setDpHeight(dock.getBoundingClientRect().height, true);
+  };
+  bar.classList.add('dragging');
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  e.preventDefault();
+}
+
+export function onDpResizeReset() {
+  setDpHeight(DP_H_DEFAULT, true);
+}
+
+// The strip was mounted, at the bottom of the page or in its tab on a
+// phone: draw the clock into the diagram, label the Branch Predictor, and
+// once the page has booted put back what the diagram was showing.
+export function dpDockMounted() {
   dpClockInit();
   const bpBlock = document.querySelector('#dpPipeBpSvg [data-e="bp"]');
-  if (bpBlock) {
-    bpBlock.addEventListener('click', openBpFigure);
+  if (bpBlock && !bpBlock.querySelector('title')) {
     const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
     tip.textContent = 'What is inside the Branch Predictor';
     bpBlock.appendChild(tip);
   }
+  if (document.body.dataset.booted) {
+    dpApplyDockSize();
+    dpOnModeChange();
+  }
+}
+
+// A click on the Branch Predictor opens the drawing of what is inside it.
+export function onDpBodyClick(e: MouseEvent) {
+  if (targetEl(e)?.closest('#dpPipeBpSvg [data-e="bp"]')) openBpFigure();
+}
+
+export function initDatapath() {
+  try { dpWanted = localStorage.getItem(DP_OPEN_KEY) === '1'; } catch (e) { dpWanted = false; }
+  initFloatSteps();
+  pipeInitControls();
+  clockInitControls();
   updateDatapathPanelAvailability();
   dpApplyOpen();
   dpSync(true);
@@ -1827,8 +1833,7 @@ export function dpOnModeChange() {
   const b = document.body.classList;
   b.toggle('dp-pipe', pipeline.on);
   b.toggle('dp-bp', pipeline.predictor.on);
-  const arch = byId<HTMLSelectElement>('dpArch');
-  if (arch) arch.value = pipeline.on ? 'pipe' : 'single';
+  setDpHeader({ pipe: pipeline.on });
   dpSetView(pipeline.on ? dpView : 'diagram');
   pdpPlaying = false;
   dpClear();
@@ -1846,12 +1851,12 @@ export function bootSimulator() {
     return;
   }
   updateExampleSelectorOptions();
-  // Peripherals is a lazily-shown tab (refreshPanel() only builds it on
-  // first visit) but updatePeripherals() is called from many other
-  // places (memory edits, stepping) long before a user might open that
-  // tab. Build its DOM now so those calls have somewhere to write to,
-  // instead of writing to elements that do not exist yet.
+  // Sets the Peripherals panel's sections to their first fold state and
+  // draws it, whether or not its tab is open.
   initPeripherals();
+  // Before the first assembly, which the saved memory layout governs.
+  restoreSettings();
+  startExampleSources();
   initCodeMirrorEditor();
   // Auto-assemble the initial example so Run / Step are active on first load
   if (editorState.language === 'asm' && editor.value.trim()) {

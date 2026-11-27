@@ -1,7 +1,6 @@
 /* ============================================================
    HDL mode: the source list and drop zone in the settings dialog, the
-   register-file notices, the toolbar's HDL chip and engine toggle, and
-   the simulation settings groups
+   register-file notices and the simulation settings groups
    ============================================================ */
 .hdl-row {
   display: flex;
@@ -174,52 +173,6 @@
   line-height: 1.55;
 }
 
-/* Standing indicator of the loaded Verilog, in place of the panel's file list. */
-.hdl-chip {
-  background: #313244;
-  border: 1px solid #45475a;
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  color: #a6adc8;
-  cursor: pointer;
-}
-.hdl-chip .chip-short { display: none; }
-
-.hdl-chip:hover { background: #45475a; color: #cdd6f4; }
-.hdl-chip-warn {
-  border-color: #f9e2af;
-  color: #f9e2af;
-  background: #2a2618;
-}
-.hdl-chip-warn:hover { background: #3a3420; color: #f9e2af; }
-
-.dl-select {
-  background: #313244;
-  color: #cdd6f4;
-  border: 1px solid #45475a;
-  border-radius: 4px;
-  height: 28px;
-  padding: 0 6px;
-  font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 550;
-  cursor: pointer;
-}
-
-.dl-select:hover { border-color: #585b70; }
-.dl-select option:disabled { color: #6c7086; }
-
-    /* Marks which kind of cycle count the toolbar is showing. */
-.stat-tag {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #6c7086;
-  vertical-align: 1px;
-}
-
 /* Simulation settings, grouped by the engine each group reaches. */
 .sim-group {
   margin-bottom: 16px;
@@ -259,15 +212,7 @@
 .sim-group.sim-group-off { opacity: 0.45; }
 #simGroupJs[hidden], #simGroupHdl[hidden] { display: none; }
 .sim-dim { opacity: 0.45; }
-.pipe-select {
-  padding: 2px 4px;
-  background: #313244;
-  color: #cdd6f4;
-  border: 1px solid #45475a;
-  border-radius: 4px;
-  font-family: inherit;
-  font-size: 12px;
-}
+.pipe-select { --sel-h: 26px; }
 .pipe-haz {
   display: flex;
   flex-wrap: wrap;
@@ -328,35 +273,13 @@
   font-family: 'Consolas', 'Roboto Mono', monospace;
 }
 
-/* Engine toggle in the toolbar, styled like the ASM/C language pill. */
-.eng-toggle-group {
-  display: inline-flex;
-  border: 1px solid #45475a;
-  border-radius: 4px;
-  overflow: hidden;
-}
 
-.eng-btn {
-  background: #313244;
-  border: none;
-  color: #9399b2;
-  padding: 3px 9px;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-  letter-spacing: 0.2px;
-}
-
-.eng-btn:hover:not(.active) { color: #cdd6f4; }
-
-.eng-btn.active {
-  background: #cba6f7;
-  color: #11111b;
-  font-weight: 700;
-}
-
-#btnViz.viz-on {
-  background: #cba6f7;
-  color: #11111b;
-}
+/* Settings → Examples: a label with the source's state, then its controls. */
+.ex-card { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.ex-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  font-weight: 600; color: #cba6f7; font-size: 13px; }
+.ex-status { font-weight: 400; font-size: 11.5px; color: #a6adc8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ex-row { display: flex; gap: 6px; align-items: center; }
+.ex-row input[type="text"] { flex: 1 1 auto; min-width: 0; height: 28px; box-sizing: border-box; padding: 0 8px;
+  background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; font: inherit; font-size: 12px; }
+.ex-row input[type="text"]:focus-visible { outline: 2px solid #cba6f7; outline-offset: 1px; }

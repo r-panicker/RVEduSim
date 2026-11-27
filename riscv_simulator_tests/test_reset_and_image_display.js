@@ -148,7 +148,7 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   }
 
   const term = win.document.getElementById('uartTerminal');
-  const uartText = term ? term.innerText : '';
+  const uartText = term ? term.textContent : '';
   console.log(`  - UART terminal output: ${JSON.stringify(uartText)}`);
   if (!uartText.includes('Tilt X to observe the effect')) {
     throw new Error(`Expected UART output to contain "Tilt X to observe the effect", got: ${JSON.stringify(uartText)}`);

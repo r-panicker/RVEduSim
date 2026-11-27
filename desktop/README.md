@@ -15,7 +15,7 @@ and the measured speed, are in [§5.18 of the specs](../riscv_simulator_specs.md
 | `app/app-icon.png` | The page's favicon at 1024 px; `npx tauri icon desktop/app/app-icon.png -o desktop/app/icons` makes `icons/` |
 | `scripts/build-iverilog.sh` | Builds Icarus from source into `iverilog/<os>-<arch>/` |
 | `scripts/build-verilator.sh` | Builds Verilator from source into `verilator/<os>-<arch>/` (`bin/verilator_bin` and `include/`) |
-| `../tools/stage_desktop.js` | Copies the built page, CodeMirror and the examples into `web/`, which the app carries |
+| `../tools/stage_desktop.js` | Copies the built page, CodeMirror and the prebuilt processor (`examples/hdl/`) into `web/`, which the app carries; the example programs are read from the RVEduSim site |
 | `../.github/workflows/desktop.yml` | Builds the installers for all three platforms |
 | `../.github/workflows/toolchain.yml`, `scripts/toolchain-key.js` | Builds Icarus and Verilator for every platform once, as a prerelease the installer workflow downloads |
 

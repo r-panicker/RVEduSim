@@ -424,12 +424,12 @@ setTimeout(async () => {
     win.toggleWavePicker();
     check('+ Signal closes it again', picker.hidden === true);
 
+    const hdrTitles = Array.from(doc.querySelectorAll('#waveDock .wave-hdr-actions button')).map(btn => btn.title);
+    const at = t => hdrTitles.findIndex(x => x.startsWith(t));
     check('zoom and fit controls exist',
-      /onclick="waveZoom\(2\)"/.test(html) && /onclick="waveZoom\(0\.5\)"/.test(html) &&
-      /onclick="waveFit\(\)"/.test(html));
+      at('Zoom out') >= 0 && at('Zoom in') >= 0 && at('Fit the whole run') >= 0);
     check('pan controls sit to the left of them',
-      html.indexOf('onclick="wavePan(-1)"') < html.indexOf('onclick="wavePan(1)"') &&
-      html.indexOf('onclick="wavePan(1)"') < html.indexOf('onclick="waveZoom(2)"'));
+      at('Pan to earlier') >= 0 && at('Pan to earlier') < at('Pan to later') && at('Pan to later') < at('Zoom out'));
     check('the canvas advertises click, wheel and drag',
       /id="waveCanvas"[^>]*title="[^"]*[Cc]lick[^"]*wheel[^"]*drag/.test(html));
 
@@ -486,7 +486,7 @@ setTimeout(async () => {
         let agree = 0, tested = 0;
         for (let i = 0; i < Math.min(6, trace.steps.length); i++) {
           const s = trace.steps[i];
-          const raw = win.waveValueAt(rp, pcVar.id, s.cyc * tpc);
+          const raw = win.waveValueAt(rp, pcVar.id, win.waveTimeOfCycle(rp, s.cyc));
           const wave = win.waveFormatValue(raw, pcVar.width).padStart(8, '0');
           tested++;
           if (wave === s.pc.toString(16).padStart(8, '0')) agree++;

@@ -55,7 +55,7 @@ function check(name, ok) {
 const WARN = /pixels were written after a present/;
 const consoleText = () => doc.getElementById('console').textContent;
 function freshRun() {
-  doc.getElementById('console').innerHTML = '';
+  win.clearLog();
   win.eval('oledResetPages();');
 }
 

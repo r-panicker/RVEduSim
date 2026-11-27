@@ -9,9 +9,11 @@ import { cpu, program, run, ui } from '../machine/state';
 import { log, setStatus } from './editor';
 import { openSettingsModal, refreshSimSettingsScope, updateStats } from './execution';
 import { updateRegisters } from './panels';
-import { updateToolbarButtonStates } from './run-control';
-import { hdlInitSimulator, hdlRefreshRegPathHint, hdlSimulatorName, initWaveCanvas, initWavePicker, initWaveResizer, updateWaveAvailability } from './waveform';
+import { resetAll, updateToolbarButtonStates } from './run-control';
+import { hdlInitSimulator, hdlRefreshRegPathHint, hdlSimulatorName, initWaveDock, initWavePicker, updateWaveAvailability } from './waveform';
 import { byId } from './dom';
+import { setConsoleH } from './page-layout';
+import { redrawToolbar, toolbar } from './toolbar-state';
 import { errorMessage } from '../errors';
 
 export function setSimEngineMode(mode: string) {
@@ -36,10 +38,8 @@ export function setSimEngineMode(mode: string) {
   }
 
   ui.engine = want;
-  const jsBtn = byId<HTMLButtonElement>('engBtnJs');
-  const hdlBtn = byId<HTMLButtonElement>('engBtnHdl');
-  if (jsBtn) jsBtn.classList.toggle('active', ui.engine === 'js');
-  if (hdlBtn) hdlBtn.classList.toggle('active', ui.engine === 'hdl');
+  toolbar.engine = ui.engine === 'hdl' ? 'hdl' : 'js';
+  redrawToolbar();
   document.body.classList.toggle('hdl-mode', ui.engine === 'hdl');
   if (ui.engine === 'hdl') {
     // Nothing can happen in HDL mode without the sources, so ask for them
@@ -60,9 +60,11 @@ export function setSimEngineMode(mode: string) {
     }
     loadHdlEngine().catch((e: unknown) => hdlLog(errorMessage(e), 'err'));
   } else {
-    // Leave registers, memory and peripherals exactly as the recording
-    // left them: the functional engine carries straight on from here.
-    setStatus('Functional mode - Run executes the JavaScript model', 'info');
+    // The functional model starts the program afresh: the state the
+    // recording reached is the hardware's, not the model's to carry on from.
+    // The recording itself is kept for a return to HDL mode.
+    resetAll();
+    setStatus('Functional mode - reset to the start; Run executes the JavaScript model', 'info');
   }
   updateRegisters();
   updateStats();
@@ -77,44 +79,36 @@ export const CONSOLE_H_KEY = 'rvsim.consoleHeight.v1';
 export const CONSOLE_H_DEFAULT = 140;
 
 export function setConsoleHeight(px: number | null, persist: boolean) {
-  const el = byId('console');
-  if (!el) return;
   const h = Math.max(40, Math.min(px ?? 0, Math.round((window.innerHeight || 800) * 0.7)));
-  el.style.height = h + 'px';
-  el.style.maxHeight = h + 'px';
+  setConsoleH(h);
   if (persist) {
     try { localStorage.setItem(CONSOLE_H_KEY, String(h)); } catch (e) { /* no storage */ }
   }
 }
 
 export function initConsoleResizer() {
-  const bar = byId('consoleResizer');
-  const el = byId('console');
-  if (!bar || !el) return;
   let saved: number | null = null;
   try { saved = parseInt(localStorage.getItem(CONSOLE_H_KEY) || '', 10); } catch (e) { saved = null; }
   if (Number.isFinite(saved)) setConsoleHeight(saved, false);
+}
 
-  let startY = 0, startH = 0;
-  const move = (e: { clientY: number; }) => {
-    // The console grows upwards, so a drag up is a taller console.
-    setConsoleHeight(startH + (startY - e.clientY), false);
-  };
+// Dragging the bar above the console. The console grows upwards, so a
+// drag up is a taller console.
+export function onConsoleResizeStart(e: PointerEvent) {
+  const bar = e.currentTarget as HTMLElement;
+  const el = byId('console');
+  const startY = e.clientY, startH = el.getBoundingClientRect().height;
+  const move = (ev: PointerEvent) => setConsoleHeight(startH + (startY - ev.clientY), false);
   const up = () => {
     bar.classList.remove('dragging');
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
     setConsoleHeight(el.getBoundingClientRect().height, true);
   };
-  bar.addEventListener('pointerdown', e => {
-    startY = e.clientY;
-    startH = el.getBoundingClientRect().height;
-    bar.classList.add('dragging');
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    e.preventDefault();
-  });
-  bar.addEventListener('dblclick', () => setConsoleHeight(CONSOLE_H_DEFAULT, true));
+  bar.classList.add('dragging');
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  e.preventDefault();
 }
 
 // Verilog dropped anywhere on the page goes to the HDL source list. The
@@ -164,9 +158,8 @@ export function hdlInitSources() {
   renderHdlFileList();
   hdlRefreshRegPathHint();
   initConsoleResizer();
-  initWaveResizer();
+  initWaveDock();
   initWavePicker();
-  initWaveCanvas();
   updateWaveAvailability();
   initGlobalVerilogDrop();
 }

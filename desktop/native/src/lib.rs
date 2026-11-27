@@ -12,7 +12,7 @@ pub mod jobs;
 pub mod process;
 pub mod verilator;
 
-pub use folder::read_folder;
+pub use folder::{read_folder, read_folder_kind};
 pub use icarus::Icarus;
 pub use jobs::Jobs;
 pub use process::{FileData, RunOpts, RunResult};

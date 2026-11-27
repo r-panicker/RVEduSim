@@ -9,7 +9,7 @@ import { hdlFindWrapper, hdlModuleBody } from './verilog';
 import { getMemByte } from '../machine/memory';
 import { layout, program, type MachineLine, type PlacedLine } from '../machine/state';
 import { setStatus } from '../ui/editor';
-import { DEFAULT_DEPTH_BITS } from '../ui/examples-language';
+import { DEFAULT_DEPTH_BITS } from '../ui/example-sources';
 import { byId } from '../ui/dom';
 
 // ================================================================

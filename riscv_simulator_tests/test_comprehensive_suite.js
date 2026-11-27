@@ -196,8 +196,8 @@ setTimeout(async () => {
     // test_mmio_editability_and_content_column.js instead of this generic
     // Code/Data check.)
     // The mechanism differs between the two display modes this checks: in
-    // Word mode, the default, a cell is edited through the word overlay (an
-    // onclick calling startMemWordCellEdit) rather than by being
+    // Word mode, the default, a cell is edited through the word overlay
+    // (clicking it opens the word editor) rather than by being
     // contenteditable; in Byte mode the cell itself is contenteditable.
     console.log('\n[9] Testing Memory View read-only code / editable data (word + byte modes)...');
     const doc = win.document;
@@ -213,7 +213,8 @@ setTimeout(async () => {
     if (!codeWord.classList.contains('readonly-code')) {
       throw new Error('Word mode: code segment word cell MUST carry the readonly-code class');
     }
-    if (codeWord.getAttribute('onclick')) {
+    codeWord.click();
+    if (doc.getElementById('memWordEditOverlay')) {
       throw new Error('Word mode: code segment word cell MUST NOT be click-editable');
     }
     showData();
@@ -222,9 +223,11 @@ setTimeout(async () => {
     if (dataWord.classList.contains('readonly-code')) {
       throw new Error('Word mode: data segment word cell MUST NOT be read-only');
     }
-    if (!/startMemWordCellEdit/.test(dataWord.getAttribute('onclick') || '')) {
+    dataWord.click();
+    if (!doc.getElementById('memWordEditOverlay')) {
       throw new Error('Word mode: data segment word cell MUST open the word editor on click');
     }
+    win.cancelMemWordEdit();
     console.log('Word mode: code cell read-only, data cell click-editable');
 
     // --- Byte mode ---
@@ -281,9 +284,9 @@ setTimeout(async () => {
     // The controls by id rather than a count, so a failure names the missing
     // one. The memory dumps are entries in the Download menu, checked below.
     const expectRow1 = ['langBtnAsm', 'langBtnC', 'engBtnJs', 'engBtnHdl', 'btnOpen',
-                        'btnSave', 'btnUndo', 'btnRedo', 'btnFind'];
+                        'btnSave', 'btnUndo', 'btnRedo', 'btnFind', 'btnSettings'];
     const expectRow2 = ['btnAssemble', 'runPauseBtn', 'btnStep', 'btnBack', 'btnReset',
-                        'downloadSelect', 'btnSettings'];
+                        'btnViz', 'downloadSelect'];
     const missing = (row, ids) => ids.filter(id => !toolbar.querySelector(row + ' #' + id));
     const missing1 = missing('.toolbar-row-source', expectRow1);
     const missing2 = missing('.toolbar-row-simulation', expectRow2);
@@ -416,7 +419,7 @@ setTimeout(async () => {
     console.log('\n[12] Testing operand arity, range checks and label rules...');
     const consoleText = () => doc.getElementById('console').textContent;
     const tryAsm = (src) => {
-      doc.getElementById('console').innerHTML = '';
+      win.clearLog();
       win.editor.value = src;
       try { win.assembleOnly(); } catch (e) { /* surfaced in the console */ }
       return { ok: !!win.eval('program.assembled'), out: consoleText() };
@@ -494,7 +497,7 @@ setTimeout(async () => {
     // ecall works here but not on the board; say so once per assemble, and
     // only for assembly (every compiled C program ends with the CRT0 shim's).
     await win.loadExample('fib');
-    doc.getElementById('console').innerHTML = '';
+    win.clearLog();
     win.assembleOnly();
     if (!/uses ecall \(2 sites\)/.test(consoleText())) {
       throw new Error('No ecall notice for an assembly program that uses it');
@@ -503,7 +506,7 @@ setTimeout(async () => {
       throw new Error('The ecall notice does not say the hardware lacks support');
     }
     await win.loadExample('dip_led');
-    doc.getElementById('console').innerHTML = '';
+    win.clearLog();
     win.assembleOnly();
     if (/uses ecall/.test(consoleText())) {
       throw new Error('ecall notice fired for a program that does not use ecall');
@@ -546,7 +549,7 @@ setTimeout(async () => {
     await win.loadExample('circle_accel');
     doc.getElementById('ms-codesize').value = '0x100';
     win.eval('applyAndCloseSettings()');
-    doc.getElementById('console').innerHTML = '';
+    win.clearLog();
     win.assembleOnly();
     const overflowLine = [...doc.querySelectorAll('#console div')].map(d => d.textContent)
       .find(t => /over the .* Code segment/.test(t)) || '';
@@ -601,7 +604,7 @@ setTimeout(async () => {
     console.log('\n[15] Testing symbol-offset numbers and HTML attribute escaping...');
     win.setLanguageMode('asm');
     const asmSym = (expr) => {
-      doc.getElementById('console').innerHTML = '';
+      win.clearLog();
       win.editor.value = '.data\nmsg: .word 1,2,3,4,5,6,7,8,9,10\n.text\nmain:\n    la t0, ' + expr + '\n';
       try { win.assembleOnly(); } catch (e) { /* surfaced in the console */ }
       if (!win.eval('program.assembled')) return null;
@@ -641,7 +644,7 @@ setTimeout(async () => {
     // would take back. For `la` that is the auipc's 20-bit field, not the
     // address it stands for, which is well outside what auipc encodes.
     const nativesOf = (src) => {
-      doc.getElementById('console').innerHTML = '';
+      win.clearLog();
       win.editor.value = src;
       try { win.assembleOnly(); } catch (e) { /* surfaced in the console */ }
       if (!win.eval('program.assembled')) throw new Error('did not assemble: ' + src);
@@ -687,7 +690,7 @@ setTimeout(async () => {
     //     a wrong number and nothing on screen to say so.
     console.log('\n[16] Testing assembler, execution and edit-field corner cases...');
     const assembleSrc = (src) => {
-      doc.getElementById('console').innerHTML = '';
+      win.clearLog();
       win.editor.value = src;
       try { win.assembleOnly(); } catch (e) { /* surfaced in the console */ }
       return !!win.eval('program.assembled');
@@ -879,7 +882,7 @@ setTimeout(async () => {
     // Typing into OLED DATA after a present is the user, not a program race.
     assembleSrc('.text\nmain: li t0, 0xFFFF002C\n    li t1, 8\n    sw t1, 0(t0)\nhalt: j halt\n');
     for (let n = 0; n < 6; n++) win.stepOnce();
-    doc.getElementById('console').innerHTML = '';
+    win.clearLog();
     win.eval('writeMemFromPanel')(0xFFFF0028, 0xFF, 1);
     if (/OLED: pixels were written after a present/.test(doc.getElementById('console').textContent)) {
       throw new Error('a Memory-panel edit raised the OLED race warning');
@@ -894,16 +897,16 @@ setTimeout(async () => {
       const f = new win.File([text], name);
       if (!f.text) f.text = async () => text;   // jsdom's File has no text()
       Object.defineProperty(input, 'files', { configurable: true, value: [f] });
-      input.dispatchEvent(new win.Event('change'));
+      input.dispatchEvent(new win.Event('change', { bubbles: true }));   // as a browser's does
       for (let t = 0; t < 100 && !doc.getElementById('console').textContent.includes(name); t++) await new Promise(r => setTimeout(r, 20));
     };
     win.setLanguageMode('asm');
-    doc.getElementById('console').innerHTML = '';
+    win.clearLog();
     await openFile('opened.s', '.text\nmain: addi t0, zero, 7\nhalt: j halt\n');
     if (!win.editor.value.includes('addi t0, zero, 7')) throw new Error('an opened .s file did not reach the editor');
     if (!win.eval('program.assembled')) throw new Error('an opened .s file was not assembled');
     const filesBefore = win.eval('hdlSources.files.length');
-    doc.getElementById('console').innerHTML = '';
+    win.clearLog();
     await openFile('opened.v', 'module opened(input a, output b); assign b = a; endmodule\n');
     if (win.eval('hdlSources.files.length') !== filesBefore + 1 || !win.eval("hdlSources.files.some(f => f.name === 'opened.v')"))
       throw new Error('an opened .v file did not reach the HDL sources');

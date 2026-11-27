@@ -143,7 +143,8 @@ const arch = t => JSON.stringify(t.steps.map(s => [s.cyc, s.pc, s.instr, s.regw,
 async function checkpointSection(dir, cache) {
   const vl = createVerilator({ root: VL_ROOT, cacheDir: cache });
   // The same page with the checkpoint module left out: every replay from reset.
-  const noCk = html.replace(/let ck = ["']off["'] in state \? null : state;/, 'let ck = null;');
+  // The bundler may rename `state` (state2) when another module's name collides.
+  const noCk = html.replace(/let ck = ["']off["'] in (\w+) \? null : \1;/, 'let ck = null;');
   check('(the page can be built without checkpoints, for reference)', noCk !== html);
   const cp = makePage(createRunner(NATIVE), { next: dir }, vl);
   const cq = makePage(createRunner(NATIVE), { next: dir }, vl, noCk);
@@ -261,7 +262,7 @@ async function checkpointSection(dir, cache) {
   const oldPc = pcSrc.replace(/output reg \[31:0\] PC = PC_INIT\s*\);/, 'output reg [31:0] PC\n    );\n    initial begin\n        PC <= PC_INIT;\n    end');
   check('(the old ProgramCounter can be rebuilt for this)', oldPc !== pcSrc);
   fs.writeFileSync(path.join(dir, 'ProgramCounter.v'), oldPc);
-  cp.doc.getElementById('console').innerHTML = '';
+  cp.win.clearLog();
   for (const x of [cp, cq]) await fresh(x, 500000);
   await cp.win.runHdlSimulation();
   await cp.win.runHdlSimulation();
@@ -348,7 +349,7 @@ if (process.argv[2] === '--checkpoints') {
       !!tv && !!ti && arch(tv) === arch(ti));
     win.hdlSeek(tv.steps.length);
     check('The LEDs show the switches (0x' + win.getLedState().toString(16) + ')', win.getLedState() === 0xad);
-    doc.getElementById('console').innerHTML = '';
+    win.clearLog();
     win.hdlDiscardTrace();
     t0 = Date.now();
     await win.hdlStartTrace(40000);
@@ -383,11 +384,11 @@ if (process.argv[2] === '--checkpoints') {
     win.setHdlWaveTop(false);
 
     console.log('\n[5] Errors and Reset');
-    doc.getElementById('console').innerHTML = '';
+    win.clearLog();
     // On Windows Verilator's log arrives with CRLF line ends.
     win.hdlReportVerilator('%Error: x.v:1:2: crlf check\r\n%Error: Exiting due to 1 error(s)\r\n');
     check('An error in a CRLF log is reported', consoleText(doc).some(l => /x\.v:1:2: crlf check$/.test(l)));
-    doc.getElementById('console').innerHTML = '';
+    win.clearLog();
     fs.writeFileSync(path.join(dir, EDIT), fs.readFileSync(path.join(RV, EDIT), 'utf8').replace(/endmodule/, 'endmodul'));
     const bad = await win.hdlStartTrace(2000);
     check('A syntax error is reported with its file and line, and nothing runs',
@@ -444,7 +445,7 @@ if (process.argv[2] === '--checkpoints') {
       const said = () => consoleText(doc).some(l => /too fast to follow/.test(l));
       win.setHdlCycles(20000000);
       win.resetAll();
-      doc.getElementById('console').innerHTML = '';
+      win.clearLog();
       const flat = win.runHdlSimulation();
       check('Followed live flat out, the waveform stops at 20 MB and says so', await until(said, 60000));
       await sleep(500);                 // the model closes it at its next edge
@@ -614,7 +615,7 @@ if (process.argv[2] === '--checkpoints') {
     // An input moved while paused replays from reset but joins on at the change.
     win.hdlSeek(lg.steps.length - 1000);
     const t6 = Date.now();
-    doc.getElementById('statusBar').textContent = '';
+    win.setStatus('');
     win.setDipSwitches(0x0044);
     await until(() => /re-simulated/.test(doc.getElementById('statusBar').textContent), 60000);
     await sleep(100);

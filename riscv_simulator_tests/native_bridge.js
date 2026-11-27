@@ -131,9 +131,9 @@ function createVerilator({ root, cacheDir }) {
 }
 
 let folderBridge = null;
-function readFolder(dir) {
+function readFolder(dir, kind) {
   folderBridge = folderBridge || connect([]);
-  return folderBridge.call('readFolder', { dir });
+  return folderBridge.call('readFolder', { dir, kind: kind || 'hdl' });
 }
 
 module.exports = { createRunner, createVerilator, readFolder, findBinDir, findVerilator, icarusDirs, verilatorDirs };

@@ -6,6 +6,7 @@ licence.
 | Component | Where | Licence | Source |
 |---|---|---|---|
 | CodeMirror 6 and Lezer | `vendor/codemirror/cm6_bundle.min.js` (built from `riscv_simulator_tests/cm6_entry.js`) | MIT | <https://codemirror.net> |
+| Svelte 5 runtime | compiled into the page's `app.js` | MIT | <https://svelte.dev> |
 | Icarus Verilog, WebAssembly build | `vendor/verisim/` | GPL-2.0-or-later | <https://github.com/steveicarus/iverilog>; build from <https://github.com/senolgulgonul/verisim> |
 | Yosys, WebAssembly build (YoWASP `@yowasp/yosys` 0.68.1207) | `vendor/yosys/` | ISC, with the licences of the tools it bundles | <https://github.com/YosysHQ/yosys>, <https://yowasp.org> |
 | Icarus Verilog, native | desktop app, built from source by `desktop/scripts/build-iverilog.sh` | GPL-2.0-or-later | <https://github.com/steveicarus/iverilog> |

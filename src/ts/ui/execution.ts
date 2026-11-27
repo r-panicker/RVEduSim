@@ -19,14 +19,18 @@ import { uartTickDelivery } from '../machine/uart';
 import { updateDisassembly, updateMachineCode } from './disassembly';
 import { RISCV_INSTRUCTIONS_SET, editor, log, setExecLineEffect, setPipeStagesEffect, setStatus } from './editor';
 import { editorState } from './editor-state';
-import { EXAMPLE_DEPTHS, invalidateCompiledProgram } from './examples-language';
+import { exampleDepths, invalidateCompiledProgram } from './examples-language';
 import { updateMemoryView } from './memory-register-views';
 import { updateLineNumbers } from './panels';
-import { updatePeripherals } from './peripherals';
+import { setUartStatusNote, updatePeripherals } from './peripherals';
 import { pipeInitControls, pipeSetMode, pipeSyncControls } from './pipeline-controls';
 import { assembleOnly, resetAll } from './run-control';
 import { hdlDownloadTestbench, hdlDownloadVcd, hdlRefreshRegPathHint, hdlShowCycles, setHdlDetail, setHdlRegPath, setHdlSimulator } from './waveform';
+import { saveSettings } from './settings-store';
+import { forgetExamplesFolder, setExamplesWebUrl } from './example-sources';
+import { redraw } from './views.svelte';
 import { byId } from './dom';
+import { redrawToolbar, toolbar } from './toolbar-state';
 import { errorMessage } from '../errors';
 
 export function instrCycles(instr32: number) {
@@ -53,11 +57,6 @@ export function formatPC() {
 }
 
 export function updateStats() {
-  const el = byId('statsBar');
-  if (el) {
-    el.innerHTML = `Cycles: ${cpu.totalCycles} &nbsp;|&nbsp; Instr: ${cpu.instructionCount}` +
-      ` &nbsp;|&nbsp; PC: <span class="stat-pc">${formatPC()}</span>`;
-  }
   hdlUpdateStatsBar();
 }
 
@@ -148,11 +147,22 @@ export function resetCyclesConfig() {
 
 // --- Settings modal (Compiler, Linker, Simulator) ---
 // The Simulation tab shows the active engine's settings only.
+// Whether Settings is open, its tab, and whether the Simulation tab shows
+// HDL mode's settings rather than the JavaScript model's.
+export let settingsModel = { open: false, tab: 'compiler', hdl: false, wrappers: null as string[] | null };
+
+// The loaded files that declare the Wrapper, when there is not exactly one
+// (null: nothing to warn about).
+export function setWrapperWarning(files: string[] | null) {
+  if (JSON.stringify(files) === JSON.stringify(settingsModel.wrappers)) return;
+  settingsModel = { ...settingsModel, wrappers: files };
+  redraw('settings');
+}
+export let creditsModel = { open: false, visits: '' };
+
 export function refreshSimSettingsScope() {
-  const hdl = (typeof ui.engine !== 'undefined' && ui.engine === 'hdl');
-  const js = byId('simGroupJs'), hw = byId('simGroupHdl');
-  if (js) js.hidden = hdl;
-  if (hw) hw.hidden = !hdl;
+  settingsModel = { ...settingsModel, hdl: ui.engine === 'hdl' };
+  redraw('settings');
   pipeSyncControls();
 }
 
@@ -181,63 +191,56 @@ export function countVisit() {
     encodeURIComponent(location.pathname) + '&r=' + encodeURIComponent(document.referrer) + '&rnd=' + Date.now();
 }
 export function showVisitCount() {
-  const el = byId('visitCount');
-  if (!el || !visitCounterOn()) return;
+  if (!visitCounterOn()) return;
   fetch('https://' + GOATCOUNTER_SITE + '.goatcounter.com/counter/' + encodeURIComponent(location.pathname) + '.json')
     .then(r => r.ok ? r.json() : null)
-    .then((j: { count?: number } | null) => { if (j && j.count) { el.textContent = j.count + ' visits'; el.hidden = false; } })
+    .then((j: { count?: number } | null) => {
+      if (j && j.count) { creditsModel = { ...creditsModel, visits: j.count + ' visits' }; redraw('credits'); }
+    })
     .catch(() => { /* offline, or the site not set up: say nothing */ });
 }
 
 export function openCreditsModal() {
   showVisitCount();
-  const ov = byId('creditsOverlay');
-  if (ov) { ov.classList.add('open'); ov.style.display = ''; }
+  creditsModel = { ...creditsModel, open: true };
+  redraw('credits');
 }
 
+// The drawing of what is inside the Branch Predictor (BpFigure.svelte).
+export let bpFigureOpen = false;
 export function openBpFigure() {
-  const ov = byId('bpFigOverlay');
-  if (ov) ov.classList.add('open');
+  bpFigureOpen = true;
+  redraw('bpFigure');
 }
 
 export function closeBpFigure() {
-  const ov = byId('bpFigOverlay');
-  if (ov) ov.classList.remove('open');
+  bpFigureOpen = false;
+  redraw('bpFigure');
 }
 
 export function closeCreditsModal() {
-  const ov = byId('creditsOverlay');
-  if (ov) { ov.classList.remove('open'); ov.style.display = ''; }
+  creditsModel = { ...creditsModel, open: false };
+  redraw('credits');
 }
 
 export function openSettingsModal(initialTab = 'compiler') {
-  const ov = byId('settingsOverlay');
-  if (!ov) return;
   buildMemSegmentsPanel();
   buildCyclesPanel();
   refreshSimSettingsScope();
   switchSettingsTab(initialTab);
-  ov.classList.add('open');
-  ov.style.display = '';
+  settingsModel = { ...settingsModel, open: true };
+  redraw('settings');
 }
 
 export function closeSettingsModal() {
-  const ov = byId('settingsOverlay');
-  if (ov) {
-    ov.classList.remove('open');
-    ov.style.display = '';
-  }
+  settingsModel = { ...settingsModel, open: false };
+  redraw('settings');
 }
 
 export function switchSettingsTab(tabName: string) {
   ui.settingsTab = tabName;
-  document.querySelectorAll('.settings-tab-btn').forEach(btn => btn.classList.remove('active'));
-  document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
-
-  const activeBtn = document.getElementById('settingsTabBtn-' + tabName);
-  const activeContent = document.getElementById('settingsContent-' + tabName);
-  if (activeBtn) activeBtn.classList.add('active');
-  if (activeContent) activeContent.classList.add('active');
+  settingsModel = { ...settingsModel, tab: tabName };
+  redraw('settings');
 }
 
 export function parseHexAddr(str: string, fallback: number) {
@@ -265,7 +268,7 @@ export function updateLinkerStackPreview() {
 // startup shim loads follows from the data size, so selecting an example is
 // enough to set up a layout the program actually fits in.
 export function applyExampleMemoryConfig(key: string) {
-  const d = EXAMPLE_DEPTHS[key];
+  const d = exampleDepths(key);
   if (!d) return;
   const newCode = Math.pow(2, d.irom) >>> 0;
   const newData = Math.pow(2, d.dmem) >>> 0;
@@ -348,6 +351,7 @@ export function applyAndCloseSettings() {
 
   closeSettingsModal();
   if (layoutKey() !== layoutBefore) reloadAfterLayoutChange();
+  saveSettings();
   setStatus('Settings updated successfully', 'success');
 }
 
@@ -368,6 +372,10 @@ export function resetCurrentSettingsTab() {
     // watchers that retire a stale build have to be stood in for.
     if (flags() !== before) invalidateCompiledProgram('Compiler settings');
     setStatus('Compiler settings reset to defaults (Clang 20.1, -O0)', 'info');
+  } else if (ui.settingsTab === 'examples') {
+    setExamplesWebUrl('');
+    forgetExamplesFolder();
+    setStatus('Examples come from the built-in and default web sources again', 'info');
   } else if (ui.settingsTab === 'linker') {
     // Only the fields: Apply compares them against the live layout to
     // decide whether to reassemble, so it must still see the old one.
@@ -401,6 +409,7 @@ export function resetCurrentSettingsTab() {
     hdlRefreshRegPathHint();
     setStatus('HDL settings reset to defaults (sources kept)', 'info');
   }
+  saveSettings();
 }
 
 // The Settings modal itself is not exported; these two are, and are the
@@ -489,13 +498,8 @@ export const DOWNLOADS: Record<string, { ready: () => boolean; save: () => void 
 };
 
 export function refreshDownloadMenu() {
-  const sel = byId<HTMLSelectElement>('downloadSelect');
-  if (!sel) return;
-  for (const opt of sel.options) {
-    if (!opt.value) continue;
-    const d = DOWNLOADS[opt.value];
-    opt.disabled = !(d && d.ready());
-  }
+  toolbar.downloads = Object.fromEntries(Object.entries(DOWNLOADS).map(([k, d]) => [k, !!d.ready()]));
+  redrawToolbar();
 }
 
 export function handleDownloadPick(sel: { value: string; }) {
@@ -732,9 +736,11 @@ export function executeOne() {
   const addr = cpu.pc;
   const instr32 = fetchInstruction(addr);
   if (instr32 === 0) { cpu.pc += 4; return; }
-  cpu.totalCycles += pipeline.arch === 'multi' ? instrCycles(instr32) : 1;
   cpu.instructionCount++;
+  // Counted after the instruction, so one that reads CYCLECOUNT sees the
+  // cycles before it, as on the hardware: the first instruction reads 0.
   cpu.pc = decodeAndExecute(instr32, addr);
+  cpu.totalCycles += pipeline.arch === 'multi' ? instrCycles(instr32) : 1;
   cpu.lastChangedReg = cpu.lastExecutedRd;
   uartClockTick();
 }
@@ -745,15 +751,7 @@ export function uartClockTick() {
     const before = uart.pending.length;
     uartTickDelivery();
     if (uart.pending.length !== before) {
-      if (!uart.pending.length) {
-        const btn = byId<HTMLButtonElement>('uartSendBtn');
-        const statusEl = byId('uartAutoSendStatus');
-        if (btn) {
-          btn.innerText = 'Send';
-          btn.style.background = '';
-        }
-        if (statusEl) statusEl.innerText = 'Send complete';
-      }
+      if (!uart.pending.length) setUartStatusNote('Send complete');
       // A run refreshes the panels once per batch instead.
       if (!run.running) {
         updatePeripherals();

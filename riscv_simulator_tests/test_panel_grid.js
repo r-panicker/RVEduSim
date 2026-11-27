@@ -68,7 +68,9 @@ setTimeout(() => {
       doc.querySelectorAll('#panelStack .tab-content').forEach((el) => {
         Object.defineProperty(el, 'offsetHeight', {
           configurable: true, get() {
-            const h = parseFloat(el.style.flex && el.style.flex.split(' ')[2] || el.style.height);
+            // A grid row's height, or a fixed basis in the single column.
+            const h = parseFloat(el.style.height) ||
+              (el.style.flex.startsWith('0 0 ') ? parseFloat(el.style.flex.split(' ')[2]) : NaN);
             return Number.isFinite(h) ? h : 250;
           }
         });
@@ -113,10 +115,17 @@ setTimeout(() => {
     win.setPanelVisible('disassembly', true);
 
     const stack = doc.getElementById('panelStack');
-    const rows = stack.querySelectorAll('.panel-dock-row');
+    // The grid's rows: the docked panels, grouped by the row the dock put
+    // them in. Every panel stays a direct child of the stack.
+    const gridRows = () => {
+      const by = {};
+      stack.querySelectorAll(':scope > .tab-content.panel-docked[data-row]').forEach(el => (by[el.dataset.row] ||= []).push(el));
+      return Object.keys(by).sort().map(k => by[k]);
+    };
+    const rows = gridRows();
     check('Exactly 2 dock rows exist', rows.length === 2);
-    const row1Panels = rows[0] ? rows[0].querySelectorAll('.tab-content') : [];
-    const row2Panels = rows[1] ? rows[1].querySelectorAll('.tab-content') : [];
+    const row1Panels = rows[0] || [];
+    const row2Panels = rows[1] || [];
     check('Row 1 has 2 panels', row1Panels.length === 2);
     check('Row 2 has 2 panels', row2Panels.length === 2);
     check('Row 1 = [registers, memory]', JSON.stringify(panelIds(row1Panels)) === JSON.stringify(['tab-registers', 'tab-memory']));
@@ -165,22 +174,12 @@ setTimeout(() => {
     const vSplitters2 = stack.querySelectorAll('.panel-vsplitter');
     mockLayoutFor();
     const vsp = vSplitters2[0];
-    const rowAbove = vsp.previousElementSibling, rowBelow = vsp.nextElementSibling;
-    // Rows need mocked offsetHeight too (they're .panel-dock-row, not .tab-content).
-    [rowAbove, rowBelow].forEach((el) => {
-      if (el && !Object.getOwnPropertyDescriptor(el, 'offsetHeight')) {
-        Object.defineProperty(el, 'offsetHeight', {
-          configurable: true, get() {
-            const h = parseFloat(el.style.flex && el.style.flex.split(' ')[2]);
-            return Number.isFinite(h) ? h : 250;
-          }
-        });
-      }
-    });
+    // A row's height is its panels' height.
+    const rowHeights = () => gridRows().map(r => r.map(el => el.style.height));
     vsp.dispatchEvent(new win.PointerEvent('pointerdown', { pointerId: 2, clientY: 300, bubbles: true }));
     vsp.dispatchEvent(new win.PointerEvent('pointermove', { pointerId: 2, clientY: 360, bubbles: true }));
-    check('Row splitter drag sets row1 height', rowAbove.style.flex === '0 0 310px');
-    check('Row splitter drag sets row2 height', rowBelow.style.flex === '0 0 190px');
+    check('Row splitter drag sets row1 height', rowHeights()[0].every(h => h === '310px'));
+    check('Row splitter drag sets row2 height', rowHeights()[1].every(h => h === '190px'));
     vsp.dispatchEvent(new win.PointerEvent('pointerup', { pointerId: 2, clientY: 360, bubbles: true }));
     const saved2 = JSON.parse(win.localStorage.getItem('rvsim.panelDock.v1'));
     check('Row heights persisted to localStorage', Array.isArray(saved2.rowHeights) && saved2.rowHeights[0] === 310);
@@ -188,7 +187,7 @@ setTimeout(() => {
 
     win.setPanelVisible('peripherals', false);
     win.setPanelVisible('disassembly', false);
-    const rows2 = stack.querySelectorAll('.panel-dock-row');
+    const rows2 = gridRows();
     const hSpl2 = stack.querySelectorAll('.panel-hsplitter');
     const vSpl2 = stack.querySelectorAll('.panel-vsplitter');
     check('No grid rows remain when ≤2 panels', rows2.length === 0);
@@ -196,7 +195,7 @@ setTimeout(() => {
     check('One row splitter between the 2 remaining panels', vSpl2.length === 1);
     const stackChildren = Array.from(stack.children).filter(c => c.id && c.id.startsWith('tab-'));
     // After collapsing to 2 docked panels the layout is a plain vertical stack
-    // (no .panel-dock-row wrappers). The two visible panels are direct children.
+    // with no grid rows. The two visible panels are direct children.
     check('Docked panels are direct children of the stack (single column)', stackChildren.length >= 2);
 
     // Dock width should be restored to the saved (pre-grid) width. jsdom has no
@@ -207,16 +206,14 @@ setTimeout(() => {
     // --- 6. 3 visible panels → still 2×2 (2+1) grid; row-2 lone panel spans full width ---
     console.log('\n[6] Showing 3 panels → 2×2 grid; row-2 lone panel spans full width');
     win.setPanelVisible('peripherals', true);
-    const rows3 = stack.querySelectorAll('.panel-dock-row');
+    const rows3 = gridRows();
     check('3 panels → exactly 2 rows', rows3.length === 2);
-    check('Row 1 has 2 panels', rows3[0] && rows3[0].querySelectorAll('.tab-content').length === 2);
-    check('Row 2 has 1 panel', rows3[1] && rows3[1].querySelectorAll('.tab-content').length === 1);
+    check('Row 1 has 2 panels', rows3[0] && rows3[0].length === 2);
+    check('Row 2 has 1 panel', rows3[1] && rows3[1].length === 1);
     const hSpl3 = stack.querySelectorAll('.panel-hsplitter');
     check('3 panels → exactly 1 column splitter (in row 1)', hSpl3.length === 1);
     // The lone row-2 panel must stretch across the entire row (no blank 4th slot).
-    const loneRow = rows3[1];
-    const lonePanel = loneRow && loneRow.querySelector('.tab-content');
-    check('Row-2 lone panel spans full width (single-panel row class)', loneRow && loneRow.className.includes('panel-dock-row-single'));
+    const lonePanel = rows3[1] && rows3[1][0];
     check('Row-2 lone panel flex fills the row (1 1 0)', lonePanel && lonePanel.style.flex === '1 1 0px');
 
     // A persisted column width must NOT force a lone panel to stay narrow.
@@ -226,12 +223,12 @@ setTimeout(() => {
     win.localStorage.setItem('rvsim.panelDock.v1', JSON.stringify(dockState));
     win.initPanelDock();
     win.applyPanelDock();
-    const rows3b = stack.querySelectorAll('.panel-dock-row');
-    check('Saved row heights are read back on load', rows3b[0] && rows3b[0].style.flex === '0 0 333px');
-    const lonePanelB = rows3b[1] && rows3b[1].querySelector('.tab-content');
+    const rows3b = gridRows();
+    check('Saved row heights are read back on load', rows3b[0] && rows3b[0].every(el => el.style.height === '333px'));
+    const lonePanelB = rows3b[1] && rows3b[1][0];
     check('Lone panel ignores persisted wbasis (full-width flex)', lonePanelB && lonePanelB.style.flex === '1 1 0px');
     // The paired row-1 panels still honour their persisted wbasis.
-    const row1b = rows3b[0].querySelectorAll('.tab-content');
+    const row1b = rows3b[0];
     check('Paired row-1 panels still honour wbasis', row1b[0].style.flex === '0 1 540px' && row1b[1].style.flex === '0 1 420px');
     // Restore the defaults for subsequent steps (clear the saved wbasis).
     const dockState2 = JSON.parse(win.localStorage.getItem('rvsim.panelDock.v1'));
@@ -256,7 +253,7 @@ setTimeout(() => {
     console.log('\n[8] Narrow viewport (≤800px) → grid disabled, splitters hidden');
     win.innerWidth = 700;
     win.applyPanelDock();
-    const rowsM = stack.querySelectorAll('.panel-dock-row');
+    const rowsM = gridRows();
     const hSplM = stack.querySelectorAll('.panel-hsplitter');
     const vSplM = stack.querySelectorAll('.panel-vsplitter');
     check('No grid rows on mobile', rowsM.length === 0);
@@ -294,7 +291,7 @@ setTimeout(() => {
     // Going back to a wide viewport restores the 2×2 grid (all visible).
     win.innerWidth = 1400;
     win.applyPanelDock();
-    const rowsBack = stack.querySelectorAll('.panel-dock-row');
+    const rowsBack = gridRows();
     check('Wide viewport restores the 2×2 grid', rowsBack.length === 2);
     check('No .panel-mobile-active leftover on desktop', stack.querySelectorAll('.panel-mobile-active').length === 0);
 
@@ -325,7 +322,7 @@ setTimeout(() => {
     // Returning to desktop keeps the (single visible) persisted layout.
     win.innerWidth = 1400;
     win.applyPanelDock();
-    const rowsBack2 = stack.querySelectorAll('.panel-dock-row');
+    const rowsBack2 = gridRows();
     check('Desktop after mobile tap keeps 1 visible panel (no grid)', rowsBack2.length === 0);
     check('Desktop after mobile tap shows NO empty hint (memory is docked)', !stack.classList.contains('is-empty'));
 
@@ -346,7 +343,7 @@ setTimeout(() => {
     check('Main splitter far-left drag clamps dock width (≤1034px at 1400px viewport)', Number.isFinite(clampedW) && clampedW <= 1034);
     check('Main splitter clamp keeps the editor ≥360px', Number.isFinite(clampedW) && (1400 - clampedW) >= 360);
     // Resize re-clamp: simulate shrinking the window after a wide drag.
-    rightPanel.style.width = '1280px'; // stale wide value
+    win.setDockWidth(1280); // stale wide value
     win.innerWidth = 1000;
     win.dispatchEvent(new win.Event('resize'));
     const reClamped = parseFloat(rightPanel.style.width);

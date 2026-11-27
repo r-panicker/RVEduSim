@@ -3,17 +3,20 @@
 
 import { hdlDiscardTrace } from '../hdl/run';
 import { initializeState } from '../machine/reset';
-import { program, run, stepHistory } from '../machine/state';
+import { program, run, stepHistory, ui } from '../machine/state';
 import { updateDisassembly, updateMachineCode } from './disassembly';
 import { cLanguage, clearLog, editor, editorHistory, log, riscvLanguage, setStatus } from './editor';
 import { editorState } from './editor-state';
 import { applyExampleMemoryConfig, hideExecMarker, updateStats } from './execution';
 import { updateMemoryView } from './memory-register-views';
-import { escapeHtml, mobileMode, panelDock, refreshPanel, setMobileTab, setPanelVisible, updateEditor, updateLineNumbers, updateRegisters } from './panels';
+import { escapeHtml, mobileMode, panelDock, refreshPanel, setMobileTab, setPanelChipShown, setPanelVisible, updateEditor, updateLineNumbers, updateRegisters } from './panels';
 import { updatePeripherals } from './peripherals';
 import { assembleOnly, resetAll, updateToolbarButtonStates } from './run-control';
 import { waveApplyDockSize } from './waveform';
+import { saveSettings } from './settings-store';
+import { BUILTIN_EXAMPLES, exampleSources, initExampleSources, onExampleSourcesChange, readExampleSource, webSourceName, type ExampleEntry, type ExampleSourceState } from './example-sources';
 import { byId } from './dom';
+import { redrawToolbar, toolbar, type ExampleMenuGroup, type ExampleMenuItem } from './toolbar-state';
 import { errorMessage } from '../errors';
 
 // A tab-style entry point for callers that name a panel. Panels are independent,
@@ -28,134 +31,70 @@ export function switchTab(tab: string) {
   }
 }
 
-// Built-in examples. Every example is a file in examples/asm/ or
-// examples/c/, fetched by loadExample() (see EXAMPLE_FILENAMES). DIP to LED
-// is also built into the page, in both languages (BAKED_ASM_EXAMPLE,
-// BAKED_C_EXAMPLE), so its source loads with no server at all; compiling
-// the C one still needs the network for Godbolt, as every C example does.
+// The Example menu: one section per source (ui/example-sources.ts), in the
+// editor's language, and a last entry that opens their settings. DIP to
+// LED is built into the page in both languages (BAKED_ASM_EXAMPLE,
+// BAKED_C_EXAMPLE), so the menu always has a program to open.
 
-// The Example menu is read from examples/index.txt, not written out here -
-// adding a program is a row in that file plus the file itself, no source
-// edit. Plain .txt, not .md: static site generators that serve the repo
-// tend to render .md through a Markdown->HTML pipeline instead of serving
-// it verbatim, which would break this fetch - .txt is never touched.
-// Each row is `| key | lang | label | file | irom | dmem | description |`;
-// loadExampleIndex() parses it into EXAMPLE_MENU (for the dropdown),
-// EXAMPLE_FILENAMES (for the fetch path and the Save filename) and
-// EXAMPLE_DEPTHS (the memory sizes the program needs). Until that
-// fetch resolves - and permanently, over file://, where it never will -
-// all three fall back to just the one baked example in each language, so
-// the dropdown is never genuinely empty.
-export const DEFAULT_DEPTH_BITS = 9;
-// Each language's menu: [key, label, description].
-export let EXAMPLE_MENU: Record<'asm' | 'c', [string, string, string][]> = {
-  asm: [['dip_led', 'DIP to LED (start here)', 'DIP to LED — the one example baked into the page, works with no server']],
-  c: [['dip_led_c', 'DIP to LED (start here)', 'DIP switches mirrored to LEDs — the one C example baked into the page, works with no server']],
-};
-export let EXAMPLE_FILENAMES: Record<string, string> = { dip_led: 'DIP_to_LED.asm', dip_led_c: 'DIP_to_LED.c' };
-export let EXAMPLE_DEPTHS: Record<string, { irom: number; dmem: number; lang?: 'asm' | 'c' }> = {
-  dip_led: { irom: 9, dmem: 9 },
-  dip_led_c: { irom: 9, dmem: 9 },
-};
-
-// Parses the simple markdown table format above into
-// [key, lang, label, file, irom, dmem, description] rows. Only structure
-// matters, not header wording: the first all-dashes row (markdown's
-// column-alignment row) marks the start of real data, so a row before it
-// is a header regardless of its text.
-// A row: key, language, label, file, IROM bits, DMEM bits, description.
-export type ExampleRow = [string, string, string, string, number, number, string];
-
-export function parseExampleIndexMarkdown(text: string) {
-  const rows: ExampleRow[] = [];
-  let dataStarted = false;
-  for (let line of String(text || '').split('\n')) {
-    line = line.trim();
-    if (!line.startsWith('|')) continue;
-    line = line.slice(1);
-    if (line.endsWith('|')) line = line.slice(0, -1);
-    const cells = line.split('|').map(c => c.trim());
-    if (!dataStarted) {
-      if (cells.length && cells.every(c => /^:?-+:?$/.test(c))) dataStarted = true;
-      continue;
-    }
-    if (cells.length < 7 || !cells[0]) continue;
-    const bits = (c: string, fallback: number) => {
-      const n = parseInt(c, 10);
-      return (Number.isFinite(n) && n >= 2 && n <= 30) ? n : fallback;
-    };
-    rows.push([cells[0], cells[1], cells[2], cells[3],
-               bits(cells[4], DEFAULT_DEPTH_BITS), bits(cells[5], DEFAULT_DEPTH_BITS),
-               cells.slice(6).join(' | ')]);
-  }
-  return rows;
+// Every example the menu offers now.
+export function exampleEntries(): ExampleEntry[] {
+  return [...BUILTIN_EXAMPLES, ...exampleSources.web.entries, ...exampleSources.local.entries];
 }
+export function findExample(key: string) { return exampleEntries().find(e => e.key === key) ?? null; }
+// The memory depths an example declares in its index.txt, if any.
+export function exampleDepths(key: string) { return findExample(key)?.depths ?? null; }
 
-export async function loadExampleIndex() {
-  try {
-    const resp = await fetch('examples/index.txt');
-    if (!resp.ok) return;
-    const rows = parseExampleIndexMarkdown(await resp.text());
-    if (!rows.length) return;
-    const menu: typeof EXAMPLE_MENU = { asm: [], c: [] };
-    for (const [key, lang, label, file, irom, dmem, desc] of rows) {
-      const l = (lang === 'c') ? 'c' : 'asm';
-      menu[l].push([key, label, desc]);
-      EXAMPLE_FILENAMES[key] = file;
-      EXAMPLE_DEPTHS[key] = { irom: irom, dmem: dmem, lang: l };
-    }
-    for (const l of ['asm', 'c'] as const) if (menu[l].length) EXAMPLE_MENU[l] = menu[l];
-  } catch (err) { /* index.txt unreachable (e.g. file://) - stay on the fallback */ }
-  updateExampleSelectorOptions();
+export const EXAMPLE_SOURCES_VALUE = '__sources';
+
+function sourceItems(s: ExampleSourceState, lang: 'asm' | 'c'): ExampleMenuItem[] {
+  const items = s.entries.filter(e => e.lang === lang).map(e => ({ value: e.key, label: e.label, title: e.desc }));
+  if (items.length) return items;
+  const note = s.status === 'loading' || s.status === 'idle' ? 'loading…'
+    : s.status === 'error' ? 'unavailable: ' + s.error
+    : lang === 'c' ? 'no C programs' : 'no assembly programs';
+  return [{ value: '', label: note, title: note, disabled: true }];
 }
-// Captured so loadExample() can await it - a non-baked key looked up in
-// EXAMPLE_FILENAMES before this resolves would build its fetch URL from
-// the two-entry fallback and 404 on a real example, e.g. `fact` fetched
-// as `fact.asm` instead of `factorial.asm`.
-export const exampleIndexReady = loadExampleIndex();
 
 export function updateExampleSelectorOptions() {
-  const select = byId<HTMLSelectElement>('exampleSelect');
-  if (!select) return;
-  const menu = EXAMPLE_MENU[editorState.language === 'c' ? 'c' : 'asm'];
-  select.innerHTML = menu.map(([value, label, title]) =>
-    `<option value="${value}" title="${escapeHtml(title)}">${escapeHtml(label)}</option>`
-  ).join('');
+  const lang = editorState.language === 'c' ? 'c' : 'asm';
+  toolbar.lang = lang;
+  const groups: ExampleMenuGroup[] = [
+    { label: 'Built in', items: sourceItems({ status: 'ok', error: '', entries: BUILTIN_EXAMPLES }, lang) },
+    { label: webSourceName(), items: sourceItems(exampleSources.web, lang) },
+  ];
+  if (exampleSources.folder) groups.push({ label: exampleSources.folder.name, items: sourceItems(exampleSources.local, lang) });
+  toolbar.examples = groups;
+  redrawToolbar();
+}
+onExampleSourcesChange(updateExampleSelectorOptions);
+
+// Resolves once the web source has been read the first time; loading an
+// example by key waits for it, so a key from its index can be found.
+let indexReady: () => void = () => {};
+export const exampleIndexReady = new Promise<void>(resolve => { indexReady = resolve; });
+
+// At boot, after the saved settings (the web URL among them) are back.
+export function startExampleSources() {
+  initExampleSources();
+  const poll = () => (exampleSources.web.status === 'ok' || exampleSources.web.status === 'error') ? indexReady() : setTimeout(poll, 20);
+  poll();
 }
 
 // The waveform strip lives at the bottom of the window on desktop, where it
 // gets the full width a waveform needs. On mobile that puts it below the
 // panels, so reaching it scrolls the toolbar off the screen and the run
-// controls with it; there it becomes a sixth panel instead, and is moved
-// into the stack rather than duplicated so all of its wiring still applies.
+// controls with it; there it is a sixth panel instead. Where it is drawn is
+// the page's (App.svelte and Panel.svelte); this sets the in-panel styles.
 export function syncWaveformPanelHost() {
-  const dock = byId('waveDock');
-  const host = byId('tab-waveform');
-  const resizer = byId('waveResizer');
-  if (!dock || !host) return;
-  const body = host.querySelector(':scope > .panel-body') || host;
-  const wantMobile = mobileMode();
-  const isInPanel = host.contains(dock);
-  if (wantMobile && !isInPanel) {
-    body.appendChild(dock);
-  } else if (!wantMobile && isInPanel) {
-    // Back to its own place at the bottom, immediately after its resizer.
-    if (resizer && resizer.parentNode) resizer.parentNode.insertBefore(dock, resizer.nextSibling);
-  }
-  document.body.classList.toggle('wave-in-panel', wantMobile);
+  document.body.classList.toggle('wave-in-panel', mobileMode());
   if (typeof waveApplyDockSize === 'function' && document.body.dataset.booted) waveApplyDockSize();
 }
 
 // HDL mode is the only mode that produces waveforms, so the chip follows it
 // the way Locals follows C mode.
 export function updateWaveformPanelAvailability() {
-  const chip = byId<HTMLButtonElement>('panelChip-waveform');
-  // Read the engine off its toggle rather than the variable: this runs from
-  // initPanelDock(), which is called before `simEngineMode` is declared
-  // (in hdl/engine.ts).
-  const hdlBtn = byId<HTMLButtonElement>('engBtnHdl');
-  const show = mobileMode() && !!(hdlBtn && hdlBtn.classList.contains('active'));
-  if (chip) chip.style.display = show ? '' : 'none';
+  const show = mobileMode() && ui.engine === 'hdl';
+  setPanelChipShown('waveform', show);
   if (!show && panelDock.waveform && panelDock.waveform.visible) {
     setPanelVisible('waveform', false);
   }
@@ -166,9 +105,8 @@ export function updateWaveformPanelAvailability() {
 // itself, if it happened to be open) disappears in ASM mode rather than
 // sitting there just to explain that it's not applicable.
 export function updateLocalsPanelAvailability() {
-  const chip = byId<HTMLButtonElement>('panelChip-locals');
   const isC = editorState.language === 'c';
-  if (chip) chip.style.display = isC ? '' : 'none';
+  setPanelChipShown('locals', isC);
   if (!isC && panelDock.locals && panelDock.locals.visible) {
     setPanelVisible('locals', false);
   }
@@ -179,10 +117,8 @@ export function setLanguageMode(mode: 'asm' | 'c') {
   editorState.language = mode;
   updateLocalsPanelAvailability();
 
-  const btnAsm = byId<HTMLButtonElement>('langBtnAsm');
-  const btnC = byId<HTMLButtonElement>('langBtnC');
-  if (btnAsm) btnAsm.classList.toggle('active', mode === 'asm');
-  if (btnC) btnC.classList.toggle('active', mode === 'c');
+  toolbar.lang = mode;
+  redrawToolbar();
 
   if (editorState.cm && editorState.languageCompartment) {
     editorState.cm.dispatch({
@@ -421,37 +357,35 @@ export async function loadExample(name: string) {
   let source: string;
 
   if (name === 'dip_led' || name === 'dip_led_c') {
-    // Built in, so it loads with no server - see "Built-in examples" at
-    // the top of this file.
     source = name === 'dip_led' ? BAKED_ASM_EXAMPLE : BAKED_C_EXAMPLE;
   } else {
-    await exampleIndexReady; // don't build the URL off the two-entry fallback
-    const lang = editorState.language === 'c' ? 'c' : 'asm';
-    const fileName = EXAMPLE_FILENAMES[name] || (name + '.' + lang);
-    const url = 'examples/' + lang + '/' + fileName;
-    setStatus(`Loading ${fileName}\u2026`, 'info');
+    if (!findExample(name)) await exampleIndexReady;
+    const entry = findExample(name);
+    if (!entry) {
+      setStatus(`No example '${name}' in the menu`, 'error');
+      return;
+    }
+    const where = entry.source === 'local' ? 'the folder ' + (exampleSources.folder?.name ?? '') : webSourceName();
+    setStatus(`Loading ${entry.label}\u2026`, 'info');
     try {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      source = await resp.text();
+      source = await readExampleSource(entry);
     } catch (err) {
       if (myToken !== editorState.exampleLoadToken) return; // a newer selection already won
-      log(`Could not load '${url}': ${errorMessage(err)}. Every example but DIP to LED is ` +
-          `loaded from a file next to the page, which needs it served over ` +
-          `http:// (a local server, or the hosted deployment) \u2014 opening the ` +
-          `file directly (file://) blocks that fetch. DIP to LED needs no server.`, 'error');
-      setStatus(`Could not load '${name}' \u2014 see the console`, 'error');
+      log(`Could not load ${entry.file} from ${where}: ${errorMessage(err)}.` +
+          (entry.source === 'web' && !window.rvNative && location.protocol === 'file:'
+            ? ' A page opened as a file cannot fetch the examples beside it; serve it over http://, or use the hosted site. DIP to LED is built in.'
+            : ''), 'error');
+      setStatus(`Could not load '${entry.label}' \u2014 see the console`, 'error');
       updateToolbarButtonStates();
       return;
     }
   }
   if (myToken !== editorState.exampleLoadToken) return; // a newer selection already won
 
-  if (editorState.language === 'c') {
-    editorState.fileName = EXAMPLE_FILENAMES[name] || (name.endsWith('.c') ? name : name + '.c');
-  } else {
-    editorState.fileName = EXAMPLE_FILENAMES[name] || (name + '.asm');
-  }
+  const file = (findExample(name)?.file ?? '').split('/').pop();
+  editorState.fileName = file || (name + (editorState.language === 'c' ? '.c' : '.asm'));
+  toolbar.exampleKey = name;
+  toolbar.userFile = null;
   editor.value = source;
   editorState.lastAssembledCode = null;
   program.assembled = false;
@@ -464,10 +398,12 @@ export async function loadExample(name: string) {
   updateLineNumbers();
   clearLog();
   applyExampleMemoryConfig(name); // before assembling: the segment sizes gate it
+  saveSettings();
   if (editorState.language === 'asm') {
     assembleOnly(); // Auto-assemble on load so Run / Step are active immediately
   }
-  log(`Example loaded: ${name} (${editorState.fileName})`, 'info');
-  setStatus('Example loaded: ' + name + (editorState.language === 'asm' && program.assembled ? ' (auto-assembled — ready to Run/Step)' : ''));
+  const label = findExample(name)?.label ?? name;
+  log(`Example loaded: ${label} (${editorState.fileName})`, 'info');
+  setStatus('Example loaded: ' + label + (editorState.language === 'asm' && program.assembled ? ' (auto-assembled — ready to Run/Step)' : ''));
   updateToolbarButtonStates();
 }

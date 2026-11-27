@@ -65,7 +65,7 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   for (let s = 0; s < 4000; s++) win.executeOne();
 
   const term1 = win.document.getElementById('uartTerminal');
-  const uart1 = term1 ? term1.innerText : '';
+  const uart1 = term1 ? term1.textContent : '';
   console.log(`  - UART output: ${JSON.stringify(uart1)}`);
   if (!uart1.includes('Tilt in various directions to see the colour change')) {
     throw new Error(`ASM circle_accel missing UART greeting, got ${JSON.stringify(uart1)}`);
@@ -107,7 +107,7 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   for (let s = 0; s < 60000; s++) win.executeOne();
 
   const term3 = win.document.getElementById('uartTerminal');
-  const uart3 = term3 ? term3.innerText : '';
+  const uart3 = term3 ? term3.textContent : '';
   console.log(`  - UART output: ${JSON.stringify(uart3)}`);
   if (!uart3.includes('Tilt in various directions to see the colour change')) {
     throw new Error(`C circle_accel_c missing UART greeting, got ${JSON.stringify(uart3)}`);
@@ -141,7 +141,7 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   if (cImgPixels !== 6144) throw new Error(`Expected 6144 pixels, got ${cImgPixels}`);
 
   const term4 = win.document.getElementById('uartTerminal');
-  const uart4 = term4 ? term4.innerText : '';
+  const uart4 = term4 ? term4.textContent : '';
   console.log(`  - UART output: ${JSON.stringify(uart4)}`);
   if (!uart4.includes('Tilt X to observe the effect')) {
     throw new Error(`C image_display_c missing UART greeting, got ${JSON.stringify(uart4)}`);

@@ -6,67 +6,52 @@ import { cProgram } from '../c/state';
 import { readMem, readMemSigned } from '../machine/memory';
 import { cpu } from '../machine/state';
 import { editorState } from './editor-state';
-import { escapeHtml, isPanelVisible, mobileMode, panelFindMatch, setMobileTab, setPanelFindCount, setPanelVisible } from './panels';
-import { byId } from './dom';
+import { isPanelVisible, mobileMode, panelFindMatch, setMobileTab, setPanelFindCount, setPanelVisible } from './panels';
+import { redraw } from './views.svelte';
 export let localsDecSigned = true;
 
-export function updateLocalsView() {
-  const body = byId<HTMLTableSectionElement>('localsBody');
-  const notice = byId('localsNotice');
-  if (!body) return;
-  // Seeded here so the several early returns below all leave an honest
-  // count behind; the tail of the function overwrites it with the real one.
-  setPanelFindCount('locals', 0, 0);
+// Why the panel has no rows, when it has none.
+export type LocalsNotice =
+  | { k: 'notC' } | { k: 'none' } | { k: 'noFn' }
+  | { k: 'noVars'; fn: string } | { k: 'entering'; fn: string; addr: string };
+
+export type LocalsRow = { name: string; title: string; addr: string; hex: string; dec: number };
+
+// What the panel shows, rebuilt by updateLocalsView().
+export let localsModel: { notice: LocalsNotice | null; rows: LocalsRow[]; signed: boolean } =
+  { notice: null, rows: [], signed: true };
+
+function buildLocals(): { notice: LocalsNotice | null; rows: LocalsRow[] } {
   if (editorState.language !== 'c' || !cProgram.functionLocals || cProgram.functionLocals.size === 0) {
-    body.innerHTML = '';
-    if (notice) {
-      notice.style.display = '';
-      notice.innerHTML = editorState.language !== 'c'
-        ? 'Locals is a C-mode feature — switch to <b>C</b> to see variable-to-memory correspondence here.'
-        : 'No local C variables were resolved from this program (best-effort — see the panel header for how).';
-    }
-    return;
+    return { notice: { k: editorState.language !== 'c' ? 'notC' : 'none' }, rows: [] };
   }
   const curPc = (typeof cpu.pc !== 'undefined') ? (cpu.pc >>> 0) : 0;
   const fn = getCurrentCFunction(curPc);
-  if (!fn || !fn.vars.length) {
-    body.innerHTML = '';
-    if (notice) {
-      notice.style.display = '';
-      notice.innerHTML = fn
-        ? `<b>${escapeHtml(fn.name)}</b> has no locals this view could resolve.`
-        : 'PC is not currently inside a function this view has a variable table for (e.g. it is in the CRT0 startup shim or the <code>__halt</code> trap).';
-    }
-    return;
-  }
+  if (!fn || !fn.vars.length) return { notice: fn ? { k: 'noVars', fn: fn.name } : { k: 'noFn' }, rows: [] };
   if (curPc <= fn.framePtrAddr) {
-    body.innerHTML = '';
-    if (notice) {
-      notice.style.display = '';
-      notice.innerHTML = `Entering <b>${escapeHtml(fn.name)}</b>() — its locals will show correct addresses once execution reaches 0x${fn.framePtrAddr.toString(16).padStart(8, '0')}, where the frame pointer (<code>s0</code>) is set up.`;
-    }
-    return;
+    return { notice: { k: 'entering', fn: fn.name, addr: '0x' + fn.framePtrAddr.toString(16).padStart(8, '0') }, rows: [] };
   }
-  if (notice) notice.style.display = 'none';
   const s0 = (typeof cpu.regs !== 'undefined') ? (cpu.regs[8] >>> 0) : 0;
-  let html = '';
-  let shown = 0;
+  const rows: LocalsRow[] = [];
   fn.vars.forEach(v => {
     const addr = (s0 + v.offset) >>> 0;
     const uval = readMem(addr, 4, true) >>> 0;
-    const sval = readMemSigned(addr, 4, true);
-    const decVal = localsDecSigned ? sval : uval;
-    if (!panelFindMatch('locals',
-      `${v.name} 0x${addr.toString(16).padStart(8, '0')} 0x${uval.toString(16).padStart(8, '0')} ${decVal}`)) return;
-    shown++;
-    const kindLabel = v.kind === 'param' ? 'param' : 'local';
-    html += `<tr><td class="reg-name col-name" title="${kindLabel} of ${escapeHtml(fn.name)}() — s0 ${v.offset >= 0 ? '+' : '-'} ${Math.abs(v.offset)}">${escapeHtml(v.name)}</td>` +
-      `<td class="reg-name col-id">0x${addr.toString(16).padStart(8, '0')}</td>` +
-      `<td class="reg-val col-val">0x${uval.toString(16).padStart(8, '0')}</td>` +
-      `<td class="reg-val col-val">${decVal}</td></tr>`;
+    const decVal = localsDecSigned ? readMemSigned(addr, 4, true) : uval;
+    const row = {
+      name: v.name, addr: '0x' + addr.toString(16).padStart(8, '0'), hex: '0x' + uval.toString(16).padStart(8, '0'), dec: decVal,
+      title: `${v.kind === 'param' ? 'param' : 'local'} of ${fn.name}() — s0 ${v.offset >= 0 ? '+' : '-'} ${Math.abs(v.offset)}`,
+    };
+    if (panelFindMatch('locals', `${row.name} ${row.addr} ${row.hex} ${row.dec}`)) rows.push(row);
   });
-  body.innerHTML = html || '';
-  setPanelFindCount('locals', shown, fn.vars.length);
+  return { notice: null, rows };
+}
+
+export function updateLocalsView() {
+  const { notice, rows } = buildLocals();
+  localsModel = { notice, rows, signed: localsDecSigned };
+  redraw('locals');
+  const fn = notice ? null : getCurrentCFunction(cpu.pc >>> 0);
+  setPanelFindCount('locals', rows.length, fn ? fn.vars.length : 0);
 }
 
 export function setLocalsDecSigned(signed: boolean) {

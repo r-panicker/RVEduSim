@@ -17,6 +17,10 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 
+# The dropdown lists' colours (style_dropdown_lists); already in Tauri's tree.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 [features]
 # The page is served from the app itself, not a development server.
 default = ["custom-protocol"]

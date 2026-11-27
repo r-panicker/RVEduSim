@@ -77,6 +77,7 @@ export function openPipeSettings() {
 export function pipeSyncControls() {
   const arch = byId<HTMLSelectElement>('simMicroarch');
   if (arch) arch.value = pipeline.arch;
+  // The strip's own selector, put back when a switch did not happen.
   const stripArch = byId<HTMLSelectElement>('dpArch');
   if (stripArch) stripArch.value = pipeline.on ? 'pipe' : 'single';
   document.querySelectorAll<HTMLInputElement>('[data-haz]').forEach(el => {

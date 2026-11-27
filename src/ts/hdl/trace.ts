@@ -8,7 +8,7 @@ import { hdlMemFiles, hdlRequiredDepths, hdlSyncReferenceWrapperDepths } from '.
 import { hdlCutTrace, hdlTrimTrace } from './seek';
 import { hdlBuild, hdlCheckpoints, hdlConfig, hdlRec, type HdlStep, type HdlTrace, type HdlMemImages } from './state';
 import { hdlPostSynthCheck } from './synthesis';
-import { hdlFindWrapper, hdlHash, hdlHex32 } from './verilog';
+import { hdlFindWrapper, hdlHash, hdlHex32, hdlWrappers } from './verilog';
 import { RT_FOLLOW_HZ, cpuHz } from '../machine/clock';
 import { loadProgram } from '../machine/reset';
 import { clock, layout, program } from '../machine/state';
@@ -162,6 +162,11 @@ export async function hdlRunVvp(budget: number, traceLvl: number, memFiles: Reco
 export async function hdlPrepareRun(opts: BuildTraceOptions = {}) {
   const wrapper = hdlFindWrapper();
   if (!wrapper) throw new Error('No `module Wrapper` found among the loaded sources.');
+  const wrappers = hdlWrappers();
+  if (wrappers.length > 1) {
+    throw new Error(wrappers.length + ' of the loaded files declare `module Wrapper` (' + wrappers.map(w => w.name).join(', ') +
+      '). The testbench instantiates one, so remove the others (×) or take them out of the folder.');
+  }
   if (!program.machineCode || !program.machineCode.length)
     throw new Error('Assemble a program first - the Wrapper loads it via $readmemh.');
 

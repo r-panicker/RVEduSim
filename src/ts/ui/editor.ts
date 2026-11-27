@@ -14,17 +14,15 @@ import { updateMemoryView } from './memory-register-views';
 import { RISCV_AUTOCOMPLETE_DOCS, clampGridRowWidths, escapeHtml, extractEditorSymbols, getAssemblyLineContext, updateRegisters } from './panels';
 import { updateToolbarButtonStates } from './run-control';
 import { byId } from './dom';
+import { redrawToolbar, toolbar } from './toolbar-state';
+import { redraw } from './views.svelte';
+import { pageLayout, setDockWidth } from './page-layout';
 import type { StringStream, HighlightStyle } from '@codemirror/language';
 import type { EditorState, Extension, Line, RangeSet, SelectionRange, StateEffect, StateEffectType, StateField, Transaction } from '@codemirror/state';
 import type { BlockInfo, DecorationSet, EditorView, GutterMarker, Tooltip } from '@codemirror/view';
 import type { Completion, CompletionContext } from '@codemirror/autocomplete';
 
 
-export const consoleEl = byId('console');
-export const regBody = byId<HTMLTableSectionElement>('regBody');
-export const memView = byId('memView');
-export const disassemblyDisplay = byId('disassemblyDisplay');
-export const statusBar = byId('statusBar');
 
 // The editor's shared state (language, file name, Find & Replace) is
 // editorState in ui/editor-state.ts. EXAMPLE_FILENAMES and EXAMPLE_MENU are
@@ -983,21 +981,22 @@ export const editorHistory = {
 };
 
 
+// What the console shows (Console.svelte), oldest first.
+export const consoleLines: { text: string | null; cls: string }[] = [];
+
 export function log(msg: string | null, type = 'info') {
-  const div = document.createElement('div');
-  div.className = type;
-  div.textContent = msg;
-  consoleEl.appendChild(div);
-  consoleEl.scrollTop = consoleEl.scrollHeight;
+  consoleLines.push({ text: msg, cls: type });
+  redraw('console');
 }
 
 export function clearLog() {
-  consoleEl.innerHTML = '';
+  consoleLines.length = 0;
+  redraw('console');
 }
 
 export function setStatus(msg: string | null, type = '') {
-  statusBar.textContent = msg;
-  statusBar.style.color = type === 'error' ? '#f38ba8' : type === 'success' ? '#a6e3a1' : '#a6adc8';
+  toolbar.status = { text: msg, colour: type === 'error' ? '#f38ba8' : type === 'success' ? '#a6e3a1' : '#a6adc8' };
+  redrawToolbar();
 }
 
 export function resetExecutionForSourceChange() {
@@ -1022,54 +1021,47 @@ export function resetExecutionForSourceChange() {
   if (typeof updateToolbarButtonStates === 'function') updateToolbarButtonStates();
 }
 
-export function initSplitter() {
-  const splitter = byId('mainSplitter');
-  const rightPanel = document.querySelector<HTMLElement>('.right-panel');
-  if (!splitter || !rightPanel) return;
-  let dragging = false;
-  // The editor needs a usable width even when the user drags the splitter
-  // far to the left. LEFT_MIN guarantees the code editor keeps enough room;
-  // the splitter (6px) is accounted for so the dock never pushes the editor
-  // out of view / creates blank space on the right.
-  const LEFT_MIN = 360;
-  const clamp = (w: number) => Math.max(220, Math.min(w, Math.max(360, (window.innerWidth || 1200) - LEFT_MIN - 6)));
+// The main splitter, between the editor and the dock. The editor keeps a
+// usable width however far left it is dragged (LEFT_MIN, with the 6px
+// splitter), so the dock never pushes it out of view.
+export const LEFT_MIN = 360;
+export function clampDockWidth(w: number) {
+  return Math.max(220, Math.min(w, Math.max(360, (window.innerWidth || 1200) - LEFT_MIN - 6)));
+}
+let splitterDragging = false;
 
-  splitter.addEventListener('pointerdown', (e) => {
-    dragging = true;
-    splitter.setPointerCapture(e.pointerId);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  });
-  splitter.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    const mainRect = splitter.parentElement!.getBoundingClientRect();
-    const width = mainRect.right - e.clientX;
-    rightPanel.style.width = clamp(width) + 'px';
-    rightPanel.style.minWidth = '';
-    rightPanel.style.maxWidth = '';
-    // The dock just changed width — re-clamp the persisted 2×2 column
-    // bases so a paired row never keeps its old wide widths and overflows
-    // the narrower dock (blank space on the right / panels shifting left).
-    clampGridRowWidths();
-  });
-  const stop = () => {
-    if (!dragging) return;
-    dragging = false;
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-    // Persist the clamped width (not a stale un-clamped value).
-    rightPanel.style.width = clamp(parseFloat(rightPanel.style.width) || 0) + 'px';
-    // Final re-clamp after the width is committed.
-    clampGridRowWidths();
-  };
-  splitter.addEventListener('pointerup', stop);
-  splitter.addEventListener('pointercancel', stop);
-  // If the window is resized after a drag, re-clamp so a very wide dock
-  // can never starve the editor or overflow the viewport (blank space).
+export function onMainSplitterDown(e: PointerEvent) {
+  splitterDragging = true;
+  (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  e.preventDefault();
+}
+
+export function onMainSplitterMove(e: PointerEvent) {
+  if (!splitterDragging) return;
+  const mainRect = (e.currentTarget as Element).parentElement!.getBoundingClientRect();
+  setDockWidth(clampDockWidth(mainRect.right - e.clientX));
+  // The dock just changed width: re-clamp the 2×2 grid's column widths so
+  // a paired row never keeps its old wide widths and overflows it.
+  clampGridRowWidths();
+}
+
+export function onMainSplitterUp() {
+  if (!splitterDragging) return;
+  splitterDragging = false;
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  if (pageLayout.dockW !== null) setDockWidth(clampDockWidth(pageLayout.dockW));
+  clampGridRowWidths();
+}
+
+// After a window resize a dragged dock is re-clamped, so a very wide dock
+// can never starve the editor or overflow the window.
+export function initSplitter() {
   window.addEventListener('resize', () => {
-    if (rightPanel.style.width) {
-      rightPanel.style.width = clamp(parseFloat(rightPanel.style.width) || 0) + 'px';
+    if (pageLayout.dockW !== null) {
+      setDockWidth(clampDockWidth(pageLayout.dockW));
       clampGridRowWidths();
     }
   });

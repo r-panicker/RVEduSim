@@ -24,8 +24,10 @@ import { editorState } from './editor-state';
 import { executeOne, hideExecMarker, highlightCurrentLine, highlightFirstLine, prepareAssembly, refreshDownloadMenu, sourceLineForPc, updateStats } from './execution';
 import { updateMemSubTabs, updateMemoryView } from './memory-register-views';
 import { updateRegisters } from './panels';
-import { clearOledDisplay, resetPeriphFoldState, updateOledCanvas, updatePeripherals } from './peripherals';
+import { clearOledDisplay, resetPeriphFoldState, setUartStatusNote, updateOledCanvas, updatePeripherals } from './peripherals';
 import { byId } from './dom';
+import { redrawToolbar, toolbar } from './toolbar-state';
+import { redraw } from './views.svelte';
 import { errorMessage } from '../errors';
 
 export function assembleOnly() {
@@ -210,158 +212,62 @@ export function updateToolbarButtonStates() {
   const source = editor.value;   // the whole document, so read it once
   const isCodeModifiedOrUnassembled = (editorState.lastAssembledCode === null || source !== editorState.lastAssembledCode || !program.assembled);
 
-  // 1. Assemble button: enabled ONLY when a program is loaded or modified, disabled once assembled
-  const assembleBtn = byId<HTMLButtonElement>('btnAssemble');
-  if (assembleBtn) {
-    const hasCode = source.trim().length > 0;
-    const canAssemble = hasCode && isCodeModifiedOrUnassembled;
-    assembleBtn.disabled = !canAssemble;
-    assembleBtn.classList.toggle('inactive', !canAssemble);
-    if (editorState.language === 'c') {
-      assembleBtn.innerHTML = '⚙ Compile';
-      if (!hasCode) {
-        assembleBtn.title = 'No C code in editor';
-      } else if (canAssemble) {
-        assembleBtn.title = 'Compile with Godbolt Compiler Explorer & load into memory (Ctrl+Enter)';
-      } else {
-        assembleBtn.title = 'Program is already compiled and up to date';
-      }
-    } else {
-      assembleBtn.innerHTML = '⚙ Assemble';
-      if (!hasCode) {
-        assembleBtn.title = 'No assembly code in editor';
-      } else if (canAssemble) {
-        assembleBtn.title = 'Assemble and load program into memory (Ctrl+Enter)';
-      } else {
-        assembleBtn.title = 'Program is already assembled and up to date';
-      }
-    }
+  // 1. Assemble: only when there is code that has not been assembled as it stands
+  const hasCode = source.trim().length > 0;
+  const canAssemble = hasCode && isCodeModifiedOrUnassembled;
+  const c = editorState.language === 'c';
+  toolbar.assemble = {
+    on: canAssemble, label: c ? 'Compile' : 'Assemble',
+    title: !hasCode ? (c ? 'No C code in editor' : 'No assembly code in editor')
+      : canAssemble ? (c ? 'Compile with Godbolt Compiler Explorer & load into memory (Ctrl+Enter)' : 'Assemble and load program into memory (Ctrl+Enter)')
+      : (c ? 'Program is already compiled and up to date' : 'Program is already assembled and up to date'),
+  };
+
+  // 2. Undo / Redo
+  const canUndo = !!(editorHistory && editorHistory.currentIndex > 0);
+  const canRedo = !!(editorHistory && editorHistory.currentIndex < editorHistory.history.length - 1);
+  toolbar.undo = { on: canUndo, title: canUndo ? 'Undo last edit (Ctrl+Z)' : 'Nothing to undo' };
+  toolbar.redo = { on: canRedo, title: canRedo ? 'Redo last undone edit (Ctrl+Y)' : 'Nothing to redo' };
+
+  // 3. Run / Pause
+  if (run.running) {
+    toolbar.run = { on: true, dim: false, label: 'Pause', title: 'Pause program execution (F5)' };
+  } else if (!program.assembled) {
+    toolbar.run = { on: false, dim: true, label: 'Run', title: 'Please assemble the program first (⚙ Assemble or Ctrl+Enter) before running' };
+  } else if (run.finished) {
+    toolbar.run = { on: true, dim: false, label: 'Run', title: 'Run program from start (F5)' };
+  } else if (cpu.pc !== layout.baseAddress || cpu.instructionCount > 0) {
+    toolbar.run = { on: true, dim: false, label: 'Resume', title: `Resume execution from line ${run.currentLine > 0 ? run.currentLine : 'current PC'} (F5)` };
+  } else {
+    toolbar.run = { on: true, dim: false, label: 'Run', title: 'Run assembled program (F5)' };
   }
 
-  // 2. Undo / Redo buttons
-  const undoBtn = byId<HTMLButtonElement>('btnUndo');
-  const redoBtn = byId<HTMLButtonElement>('btnRedo');
-  if (undoBtn) {
-    const canUndo = !!(editorHistory && editorHistory.currentIndex > 0);
-    undoBtn.disabled = !canUndo;
-    undoBtn.classList.toggle('inactive', !canUndo);
-    undoBtn.title = canUndo ? 'Undo last edit (Ctrl+Z)' : 'Nothing to undo';
-  }
-  if (redoBtn) {
-    const canRedo = !!(editorHistory && editorHistory.currentIndex < editorHistory.history.length - 1);
-    redoBtn.disabled = !canRedo;
-    redoBtn.classList.toggle('inactive', !canRedo);
-    redoBtn.title = canRedo ? 'Redo last undone edit (Ctrl+Y)' : 'Nothing to redo';
-  }
+  // 4. Step forward
+  toolbar.step = {
+    on: program.assembled && !run.running && !run.finished,
+    title: !program.assembled ? 'Please assemble the program first (⚙ Assemble or Ctrl+Enter) to step (F8)'
+      : run.running ? 'Cannot step while program is running (pause first)'
+      : run.finished ? 'Program execution finished. Reset (⟲) or Assemble to step again.'
+      : 'Single step forward (F8)',
+  };
 
-  // 3. Run / Pause button (Standard button styling, not distinct primary color)
-  const runBtn = byId<HTMLButtonElement>('runPauseBtn');
-  if (runBtn) {
-    runBtn.classList.remove('primary');
-    runBtn.classList.remove('danger');
+  // 5. Step back
+  const n = stepHistory.entries ? stepHistory.entries.length : 0;
+  toolbar.back = {
+    on: program.assembled && !run.running && n > 0,
+    title: !program.assembled ? 'Please assemble the program first before stepping (Shift+F8)'
+      : run.running ? 'Cannot step back while program is running'
+      : n === 0 ? 'No previous execution history to step back to'
+      : `Step back 1 instruction (${n} step${n > 1 ? 's' : ''} available) (Shift+F8)`,
+  };
 
-    if (run.running) {
-      runBtn.innerHTML = '⏸ Pause';
-      runBtn.title = 'Pause program execution (F5)';
-      runBtn.disabled = false;
-      runBtn.classList.remove('inactive');
-      runBtn.style.opacity = '1';
-      runBtn.style.cursor = 'pointer';
-    } else {
-      if (!program.assembled) {
-        runBtn.innerHTML = '▶ Run';
-        runBtn.title = 'Please assemble the program first (⚙ Assemble or Ctrl+Enter) before running';
-        runBtn.disabled = true;
-        runBtn.classList.add('inactive');
-        runBtn.style.opacity = '0.45';
-        runBtn.style.cursor = 'not-allowed';
-      } else if (run.finished) {
-        runBtn.innerHTML = '▶ Run';
-        runBtn.title = 'Run program from start (F5)';
-        runBtn.disabled = false;
-        runBtn.classList.remove('inactive');
-        runBtn.style.opacity = '1';
-        runBtn.style.cursor = 'pointer';
-      } else if (cpu.pc !== layout.baseAddress || cpu.instructionCount > 0) {
-        runBtn.innerHTML = '▶ Resume';
-        runBtn.title = `Resume execution from line ${run.currentLine > 0 ? run.currentLine : 'current PC'} (F5)`;
-        runBtn.disabled = false;
-        runBtn.classList.remove('inactive');
-        runBtn.style.opacity = '1';
-        runBtn.style.cursor = 'pointer';
-      } else {
-        runBtn.innerHTML = '▶ Run';
-        runBtn.title = 'Run assembled program (F5)';
-        runBtn.disabled = false;
-        runBtn.classList.remove('inactive');
-        runBtn.style.opacity = '1';
-        runBtn.style.cursor = 'pointer';
-      }
-    }
-  }
+  // 6. Reset: active only after starting to Run or Step, or if state is dirty
+  const isDirty = (cpu.instructionCount > 0 || n > 0 || run.running || run.finished || cpu.pc !== layout.baseAddress || board.leds !== 0 || parseInt(board.sevseg, 16) !== 0 || uart.txText !== '' || uart.pending.length > 0 || uart.rxFull);
+  toolbar.reset = { on: isDirty, title: isDirty ? 'Reset CPU state, registers, memory, and peripherals to initial conditions' : 'Reset becomes active once execution begins (Run or Step)' };
+  redrawToolbar();
 
-  // 4. Step forward button
-  const stepBtn = byId<HTMLButtonElement>('btnStep');
-  if (stepBtn) {
-    const canStep = (program.assembled && !run.running && !run.finished);
-    stepBtn.disabled = !canStep;
-    stepBtn.classList.toggle('inactive', !canStep);
-    if (!program.assembled) {
-      stepBtn.title = 'Please assemble the program first (⚙ Assemble or Ctrl+Enter) to step (F8)';
-    } else if (run.running) {
-      stepBtn.title = 'Cannot step while program is running (pause first)';
-    } else if (run.finished) {
-      stepBtn.title = 'Program execution finished. Reset (⟲) or Assemble to step again.';
-    } else {
-      stepBtn.title = 'Single step forward (F8)';
-    }
-  }
-
-  // 5. Step back button
-  const backBtn = byId<HTMLButtonElement>('btnBack');
-  if (backBtn) {
-    const canBack = (program.assembled && !run.running && stepHistory.entries && stepHistory.entries.length > 0);
-    backBtn.disabled = !canBack;
-    backBtn.classList.toggle('inactive', !canBack);
-    if (!program.assembled) {
-      backBtn.title = 'Please assemble the program first before stepping (Shift+F8)';
-    } else if (run.running) {
-      backBtn.title = 'Cannot step back while program is running';
-    } else if (!stepHistory.entries || stepHistory.entries.length === 0) {
-      backBtn.title = 'No previous execution history to step back to';
-    } else {
-      backBtn.title = `Step back 1 instruction (${stepHistory.entries.length} step${stepHistory.entries.length > 1 ? 's' : ''} available) (Shift+F8)`;
-    }
-  }
-
-  // 6. Reset button: active only after starting to Run or Step, or if state is dirty
-  const resetBtn = byId<HTMLButtonElement>('btnReset');
-  if (resetBtn) {
-    const isDirty = (cpu.instructionCount > 0 || (stepHistory.entries && stepHistory.entries.length > 0) || run.running || run.finished || cpu.pc !== layout.baseAddress || (typeof board.leds !== 'undefined' && board.leds !== 0) || (typeof board.sevseg !== 'undefined' && parseInt(board.sevseg, 16) !== 0) || (typeof uart.txText !== 'undefined' && uart.txText !== '') || (typeof uart.pending !== 'undefined' && (uart.pending.length > 0 || uart.rxFull)));
-    resetBtn.disabled = !isDirty;
-    resetBtn.classList.toggle('inactive', !isDirty);
-    resetBtn.title = isDirty ? 'Reset CPU state, registers, memory, and peripherals to initial conditions' : 'Reset becomes active once execution begins (Run or Step)';
-  }
-
-  // 7. Find & Replace action buttons
-  const findPrevBtn = byId<HTMLButtonElement>('findPrevBtn');
-  const findNextBtn = byId<HTMLButtonElement>('findNextBtn');
-  const replaceBtn = byId<HTMLButtonElement>('findReplaceBtn');
-  const replaceAllBtn = byId<HTMLButtonElement>('findReplaceAllBtn');
-  const hasMatches = (typeof editorState.find.matches !== 'undefined' && editorState.find.matches.length > 0);
-  if (findPrevBtn) { findPrevBtn.disabled = !hasMatches; findPrevBtn.classList.toggle('inactive', !hasMatches); }
-  if (findNextBtn) { findNextBtn.disabled = !hasMatches; findNextBtn.classList.toggle('inactive', !hasMatches); }
-  if (replaceBtn) { replaceBtn.disabled = !hasMatches; replaceBtn.classList.toggle('inactive', !hasMatches); }
-  if (replaceAllBtn) { replaceAllBtn.disabled = !hasMatches; replaceAllBtn.classList.toggle('inactive', !hasMatches); }
-
-  // 8. UART Clear button
-  const uartClearBtn = byId<HTMLButtonElement>('uartClearBtn');
-  if (uartClearBtn) {
-    const hasUartText = !!(typeof uart.txText !== 'undefined' && uart.txText.length > 0);
-    uartClearBtn.disabled = !hasUartText;
-    uartClearBtn.classList.toggle('inactive', !hasUartText);
-    uartClearBtn.title = hasUartText ? 'Clear Terminal display output' : 'Terminal output is already empty';
-  }
+  // 7. Find & Replace: its buttons follow whether there are matches
+  redraw('find');
 
   if (typeof updateFloatSteps === 'function') updateFloatSteps();
   hdlUpdateToolbar();
@@ -652,13 +558,7 @@ export function resetState() {
   uart.rxByte = 0;
   uart.rxDropped = 0;
   uart.rxDroppedTotal = 0;
-  const btnEl = byId<HTMLButtonElement>('uartSendBtn');
-  if (btnEl) {
-    btnEl.innerText = 'Send';
-    btnEl.style.background = '';
-  }
-  const statusEl = byId('uartAutoSendStatus');
-  if (statusEl) statusEl.innerText = '';
+  setUartStatusNote('');
   oled.col = 0;
   oled.row = 0;
   oled.ctrl = 0;
@@ -670,14 +570,6 @@ export function resetState() {
   accel.z = 64;
   accel.temp = 25;
   accel.dready = 1;
-  const xS = byId<HTMLInputElement>('accelXSlider');
-  const yS = byId<HTMLInputElement>('accelYSlider');
-  const zS = byId<HTMLInputElement>('accelZSlider');
-  const tS = byId<HTMLInputElement>('accelTempSlider');
-  if (xS) xS.value = '0';
-  if (yS) yS.value = '0';
-  if (zS) zS.value = '64';
-  if (tS) tS.value = '25';
   updatePeripherals();
   updateRegisters();
   updateMemoryView();

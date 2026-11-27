@@ -9,7 +9,7 @@ import { setLanguageMode } from './examples-language';
 import { openSettingsModal } from './execution';
 import { initPanelDock, updateEditor, updateLineNumbers } from './panels';
 import { assembleOnly, resetAll, updateToolbarButtonStates } from './run-control';
-import { byId } from './dom';
+import { redrawToolbar, toolbar } from './toolbar-state';
 
 // Load file from file input
 export function loadFile(event: Event) {
@@ -57,18 +57,9 @@ export function loadFile(event: Event) {
     updateToolbarButtonStates();
 
     // Display loaded filename in example dropdown
-    const select = byId<HTMLSelectElement>('exampleSelect');
-    if (select) {
-      let opt = document.getElementById('tempFileOption') as HTMLOptionElement | null;
-      if (!opt) {
-        opt = document.createElement('option');
-        opt.id = 'tempFileOption';
-        opt.value = 'user_file';
-        select.appendChild(opt);
-      }
-      opt.textContent = `📁 ${file.name}`;
-      select.value = 'user_file';
-    }
+    toolbar.userFile = file.name;
+    toolbar.exampleKey = 'user_file';
+    redrawToolbar();
   };
   reader.onerror = function () {
     log('Error reading file: ' + file.name, 'error');

@@ -108,7 +108,7 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   }
 
   const term1 = win.document.getElementById('uartTerminal');
-  const uartText1 = term1 ? term1.innerText : '';
+  const uartText1 = term1 ? term1.textContent : '';
   console.log(`  - Circle UART terminal output: ${JSON.stringify(uartText1)}`);
   if (!uartText1.includes('Tilt in various directions to see the colour change')) {
     throw new Error(`Expected UART output to contain "Tilt in various directions to see the colour change", got: ${JSON.stringify(uartText1)}`);
@@ -172,7 +172,7 @@ const CM6_BUNDLE_SOURCE = fs.readFileSync(path.resolve(__dirname, 'cm6_bundle.mi
   }
 
   const term = win.document.getElementById('uartTerminal');
-  const uartText = term ? term.innerText : '';
+  const uartText = term ? term.textContent : '';
   console.log(`  - UART terminal output: ${JSON.stringify(uartText)}`);
   if (!uartText.includes('Tilt X to observe the effect')) {
     throw new Error(`Expected UART output to contain "Tilt X to observe the effect", got: ${JSON.stringify(uartText)}`);

@@ -37,7 +37,9 @@ A RISC-V simulator that runs in the browser with nothing to install, or as a
 - **Export** of `.mem` memory images for Vivado, and of the generated Verilog testbench and
   the VCD waveform.
 
-Most of these features, and the options that control them, are in **⚙ Settings**.
+Most of these features, and the options that control them, are in **Settings**. Settings
+and the page layout are remembered between visits, in the desktop app too; **Reset All** in
+Settings returns all of them to the defaults.
 
 ## 1. Writing and debugging programs
 
@@ -51,6 +53,13 @@ Most of these features, and the options that control them, are in **⚙ Settings
   assembling. Increase the Linker size, and for hardware the matching
   `IROM_DEPTH_BITS`/`DMEM_DEPTH_BITS` in the Wrapper. The simulator accepts sizes larger
   than the FPGA's block RAM can hold.
+- **Example sources…**, at the end of the Example menu, adds examples from a GitHub folder
+  (`https://github.com/<owner>/<repo>/tree/<branch>/<folder>`) laid out like
+  [the simulator's own](https://github.com/r-panicker/RVEduSim/tree/main/examples):
+  `index.txt`, `asm/` and `c/`. A folder on your computer can be added as well. It needs no
+  `index.txt`: without one, every `.asm`, `.s` and `.c` file in it is listed, and selecting one
+  leaves the Linker sizes as they are. Examples are read afresh each time, so edits show up
+  immediately.
 - **The M extension is off by default.** Without it, `*`, `/` and `%` in C compile to calls
   to libgcc helper functions (`__mulsi3`, ...), which are not linked in. Enable the M
   extension, or use a higher `-O` level, where multiplication by a constant often becomes
@@ -252,6 +261,8 @@ RVEduSim is also a desktop app for Linux, Windows and macOS (Apple silicon), dow
 [Releases page](https://github.com/r-panicker/RVEduSim/releases/latest). It looks and behaves
 like the page, with these differences:
 
+- The example programs other than DIP to LED are read from the RVEduSim website, so they
+  need the network; a folder of your own (Example sources…) does not.
 - Icarus Verilog runs as a native program, so HDL mode works offline. It is about one and a
   half times as fast as in the browser. The exception is post-synthesis simulation: the app
   does not include Yosys, so turning it on for the first time downloads it, as in the browser.

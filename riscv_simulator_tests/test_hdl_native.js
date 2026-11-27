@@ -168,6 +168,11 @@ setTimeout(async () => {
         .test(nat.doc.getElementById('hdlSourcesNote').textContent));
     check('Picking a folder switches to HDL mode', nat.win.getSimEngineMode() === 'hdl');
     check('The folder button is offered', nat.doc.getElementById('hdlFolderBtn').style.display !== 'none');
+    // The same reader, for an examples folder: programs and the index, no Verilog.
+    const exFiles = (await readFolder(path.join(ROOT, 'examples'), 'examples')).map(f => f.path);
+    check('An examples folder is read for its programs and index.txt (' + exFiles.length + ' files)',
+      exFiles.includes('index.txt') && exFiles.includes('asm/fibonacci.asm') && exFiles.includes('c/fibonacci.c') &&
+      !exFiles.some(f => /\.v$/.test(f)));
 
     // --- 2. The same run, both engines --------------------------------
     console.log('\n[2] A run records the same thing on both engines');
@@ -202,7 +207,7 @@ setTimeout(async () => {
     // save and restore exactly as the WASM one does.
     console.log('\n[3] An input change replays from a checkpoint');
     const at = Math.floor(tn.steps.length * 0.9);
-    for (const p of [nat, wasm]) { p.win.hdlSeek(at); p.doc.getElementById('console').innerHTML = ''; }
+    for (const p of [nat, wasm]) { p.win.hdlSeek(at); p.win.clearLog(); }
     const t2 = Date.now();
     nat.win.setDipSwitches(0x0072);
     // The replay is joined onto the recording in place; it is done once the
@@ -226,7 +231,7 @@ setTimeout(async () => {
 
     // --- 4. Editing a file in the folder -------------------------------
     console.log('\n[4] The folder is read again when the window regains focus');
-    nat.doc.getElementById('console').innerHTML = '';
+    nat.win.clearLog();
     nat.win.dispatchEvent(new nat.win.Event('focus'));
     check('Nothing changed, so nothing is reloaded and the recording stays',
       (await nat.win.hdlReadFolder()) === false && nat.win.getHdlTrace() === rn &&
@@ -245,7 +250,7 @@ setTimeout(async () => {
         return !!m && m[1].split(', ').sort().join() === [EDIT, 'old/' + BACKUP].sort().join(); }));
     check('The recording of the old sources is discarded', nat.win.getHdlTrace() === null);
     nat.win.hdlRemoveFile(BACKUP);
-    nat.doc.getElementById('console').innerHTML = '';
+    nat.win.clearLog();
     nat.win.dispatchEvent(new nat.win.Event('focus'));
     await nat.win.hdlReadFolder();
     check('A file removed with × stays out when the folder is read again',
@@ -253,7 +258,7 @@ setTimeout(async () => {
 
     // --- 5. Errors and cancellation -----------------------------------
     console.log('\n[5] Compile errors and Reset');
-    nat.doc.getElementById('console').innerHTML = '';
+    nat.win.clearLog();
     fs.writeFileSync(path.join(dir, EDIT), fs.readFileSync(path.join(RV, EDIT), 'utf8').replace(/endmodule/, 'endmodul'));
     const bad = await nat.win.hdlStartTrace(2000);
     check('A syntax error is reported with its file and line, and nothing runs',
@@ -294,8 +299,8 @@ setTimeout(async () => {
           ['CLK', 'dut.PC', 'dut.Instr', 'LED_OUT', 'x5_t0'].every(s => vars.some(v => v === s || v.endsWith('.' + s))));
         check('…and nothing inside RV', !vars.some(v => /\.RV1\./.test(v)));
       }
-      p.doc.getElementById('console').innerHTML = '';
-      p.doc.getElementById('statusBar').textContent = '';
+      p.win.clearLog();
+      p.win.setStatus('');
       const calls = [];
       const orig = p.win.rvNative.hdlRun;
       p.win.rvNative.hdlRun = (...a) => { calls.push(a); return orig(...a); };

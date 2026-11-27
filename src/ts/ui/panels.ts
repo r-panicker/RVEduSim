@@ -1,5 +1,6 @@
-// The right-side panels: docking, floating, the 2×2 grid and the mobile
-// tab view, splitters, intra-panel column widths and the per-panel row
+// The right-side panels: where each is (docked, floating, the 2×2 grid,
+// the mobile tab view) and the splitters between them, as the model
+// PanelDock.svelte draws; intra-panel column widths and the per-panel row
 // filter. Also the shared escapeHtml(), the editor's autocomplete data and
 // symbol scan, and the Registers table.
 //
@@ -8,12 +9,14 @@
 // or detached to a floating window. Layout persists to localStorage.
 
 import { assemble } from '../asm/assembler';
-import { hdlMarkUnknownRegisters } from '../hdl/shared-ui';
+import { hdlRec } from '../hdl/state';
 import { ABI_NAMES, INSTRUCTIONS, PSEUDO_INSTRUCTIONS } from '../isa/instructions';
 import { cpu, layout, program, run, ui } from '../machine/state';
 import { dpOnStateChange, syncDatapathPanelHost, updateDatapathPanelAvailability, updateFloatSteps } from './datapath';
 import { updateDisassembly, updateMachineCode } from './disassembly';
-import { disassemblyDisplay, editor, log, regBody, resetExecutionForSourceChange, setBreakpointsEffect } from './editor';
+import { editor, log, resetExecutionForSourceChange, setBreakpointsEffect } from './editor';
+import { redraw } from './views.svelte';
+import { pageLayout, setDockWidth } from './page-layout';
 import { editorState } from './editor-state';
 import { syncWaveformPanelHost, updateLocalsPanelAvailability, updateWaveformPanelAvailability } from './examples-language';
 import { updateLocalsView } from './locals';
@@ -139,21 +142,16 @@ export function setMobileTab(name: string | null) {
   if (typeof updateFloatSteps === 'function') updateFloatSteps();
 }
 
-export function updateMobileFindBtn() {
-  const b = byId<HTMLButtonElement>('mobileFindBtn');
-  if (b) b.hidden = !(mobileMode() && !!mobileTab && PANEL_FIND.has(mobileTab));
-}
-
 export function currentDockWidth() {
   const rp = document.querySelector<HTMLElement>('.right-panel');
   if (!rp) return 0;
   const rectW = rp.getBoundingClientRect().width;
   if (rectW > 0) return rectW;
   // jsdom (and layouts where getBoundingClientRect is stubbed) returns 0 for
-  // the rendered width; fall back to the inline width so `updateDockWidthForGrid`
-  // still computes a sensible target instead of collapsing the dock.
-  const inlineW = parseFloat(rp.style.width);
-  return Number.isFinite(inlineW) ? inlineW : 0;
+  // the rendered width; fall back to the width it was given so
+  // `updateDockWidthForGrid` still computes a sensible target instead of
+  // collapsing the dock.
+  return pageLayout.dockW ?? 0;
 }
 
 // When the 2×2 grid is active the dock expands to half of the window
@@ -163,17 +161,13 @@ export function currentDockWidth() {
 // area jump left, leaving blank space on the right, whenever a relayout
 // follows a main-splitter drag narrower than 50%.
 export function updateDockWidthForGrid() {
-  const rp = document.querySelector<HTMLElement>('.right-panel');
-  if (!rp) return;
   if (dockUsesTwoColumns()) {
     const target = Math.round((window.innerWidth || 1200) * DOCK_TWO_COL_WIDTH_PCT);
     if (dockSavedWidth === null) dockSavedWidth = currentDockWidth();
-    rp.style.width = Math.max(target, 220) + 'px';
-  } else {
-    if (dockSavedWidth !== null) {
-      rp.style.width = Math.max(220, dockSavedWidth) + 'px';
-      dockSavedWidth = null;
-    }
+    setDockWidth(Math.max(target, 220));
+  } else if (dockSavedWidth !== null) {
+    setDockWidth(Math.max(220, dockSavedWidth));
+    dockSavedWidth = null;
   }
 }
 
@@ -384,7 +378,7 @@ export function applyPanelColLayout(panel: string) {
   }
   const tbl = (panel === 'registers')
     ? byId<HTMLTableElement>('regTable')
-    : (disassemblyDisplay && disassemblyDisplay.querySelector<HTMLElement>('.code-list'));
+    : document.querySelector<HTMLElement>('#disassemblyDisplay .code-list');
   if (!tbl) return;
   const colEls = tbl.querySelectorAll<HTMLElement>('colgroup > col');
   if (colEls.length !== w.length) return;
@@ -524,57 +518,29 @@ export const PANEL_FIND_PLACEHOLDER: Record<string, string> = {
 // Not persisted: a filter that silently survived a reload would look like
 // missing data rather than a filter.
 export const panelFindText: Record<string, string> = {};
-
-export function buildPanelFindBar(name: string) {
-  const bar = document.createElement('div');
-  bar.className = 'panel-find';
-  bar.id = 'panelFind-' + name;
-  bar.hidden = true;
-  bar.innerHTML =
-    '<input type="text" spellcheck="false" placeholder="' + PANEL_FIND_PLACEHOLDER[name] + '">' +
-    '<span class="panel-find-count"></span>' +
-    '<button class="find-btn find-close" type="button" title="Clear (Esc)">&times;</button>';
-
-  const input = bar.querySelector('input')!;
-  input.addEventListener('input', () => setPanelFind(name, input.value));
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { e.stopPropagation(); closePanelFind(name); }
-  });
-  bar.querySelector('button')!.addEventListener('click', () => closePanelFind(name));
-  return bar;
-}
-
-export function panelFindBar(name: string) { return document.getElementById('panelFind-' + name); }
-
-export function panelFindBtn(name: string) {
-  const el = panelEl(name);
-  return el && el.querySelector<HTMLElement>(':scope > .panel-hdr [data-panel-act="find"]');
-}
+// Which panels' filter bars are open, and each one's "n of m".
+export const panelFindOpen: Record<string, boolean> = {};
+export const panelFindCount: Record<string, string> = {};
 
 export function setPanelFind(name: string, text: string) {
   panelFindText[name] = text || '';
-  const btn = panelFindBtn(name);
-  if (btn) btn.classList.toggle('active', !!panelFindText[name]);
+  redraw('dock');
   refreshPanel(name);
 }
 
 export function togglePanelFind(name: string) {
-  const bar = panelFindBar(name);
-  if (!bar) return;
-  if (bar.hidden) {
-    bar.hidden = false;
-    bar.querySelector('input')!.focus();
+  if (!PANEL_FIND.has(name)) return;
+  if (!panelFindOpen[name]) {
+    panelFindOpen[name] = true;
+    redraw('dock');
+    document.querySelector<HTMLInputElement>('#panelFind-' + name + ' input')?.focus();
   } else {
     closePanelFind(name);
   }
 }
 
 export function closePanelFind(name: string) {
-  const bar = panelFindBar(name);
-  if (!bar) return;
-  bar.hidden = true;
-  const input = bar.querySelector('input');
-  if (input) input.value = '';
+  panelFindOpen[name] = false;
   setPanelFind(name, '');
 }
 
@@ -588,118 +554,63 @@ export function panelFindMatch(name: string, haystack: string) {
 export function panelFindActive(name: string) { return !!panelFindText[name]; }
 
 export function setPanelFindCount(name: string, shown: number, total: number) {
-  const bar = panelFindBar(name);
-  if (!bar) return;
-  const el = bar.querySelector<HTMLElement>('.panel-find-count');
-  if (el) el.textContent = panelFindText[name] ? shown + ' of ' + total : '';
+  const text = panelFindText[name] ? shown + ' of ' + total : '';
+  if (panelFindCount[name] === text) return;
+  panelFindCount[name] = text;
+  redraw('dock');
 }
 
-// Wrap each panel's existing content in a scrollable body and prepend a header bar.
-export function ensurePanelChrome() {
-  PANEL_DEFS.forEach(({ name, label }) => {
-    const el = panelEl(name);
-    if (!el || el.querySelector<HTMLElement>(':scope > .panel-hdr')) return;
+// What the dock shows (PanelDock.svelte): every panel in dock order, each
+// with its place, and the splitters between them. Panels never change
+// parent: the 2×2 grid is the stack wrapping, a full-width row splitter
+// being the line break, so relaying out moves no panel's contents.
+export type DockPanel = {
+  kind: 'panel'; key: string; name: string; label: string; findable: boolean;
+  mode: 'hidden' | 'docked' | 'floating' | 'mobile' | 'mobile-hidden';
+  row: number; flex: string | null; height: string | null;
+  rect: { x: number; y: number; w: number; h: number } | null;
+};
+export type DockSplitter =
+  | { kind: 'hsplit'; key: string; left: string; right: string }
+  | { kind: 'vsplit'; key: string; above: string[]; below: string[]; grid: boolean };
+// Until the dock is laid out at boot, every panel is there and hidden, so
+// that its elements exist from load on.
+export let dockView = {
+  items: PANEL_DEFS.map((d): DockPanel | DockSplitter => ({
+    kind: 'panel', key: d.name, name: d.name, label: d.label, findable: PANEL_FIND.has(d.name),
+    mode: mobileMode() ? 'mobile-hidden' : 'hidden',
+    row: 0, flex: null, height: null, rect: null,
+  })),
+  grid: false, mobile: mobileMode(), empty: false,
+  mobileTab: null as string | null,
+  focusedFloat: null as string | null,
+  // Each panel shown or not, and floating or not, for its chip.
+  shown: {} as Record<string, { visible: boolean; floating: boolean }>,
+  // The chips of panels that only exist in some modes (Locals in C, the
+  // waveform and datapath tabs on a phone).
+  chipShown: {} as Record<string, boolean>,
+};
 
-    const body = document.createElement('div');
-    body.className = 'panel-body';
-    while (el.firstChild) body.appendChild(el.firstChild);
-
-    const findable = PANEL_FIND.has(name);
-    const hdr = document.createElement('div');
-    hdr.className = 'panel-hdr';
-    hdr.innerHTML =
-      '<span class="panel-hdr-title">' + label + '</span>' +
-      '<span class="panel-hdr-actions">' +
-      (findable
-        ? '<button class="panel-hdr-btn" type="button" data-panel-act="find" title="Filter rows">🔍</button>'
-        : '') +
-      '<button class="panel-hdr-btn" type="button" data-panel-act="float">⧉</button>' +
-      '<button class="panel-hdr-btn" type="button" data-panel-act="hide" title="Hide this panel">✕</button>' +
-      '</span>';
-
-    el.appendChild(hdr);
-    if (findable) el.appendChild(buildPanelFindBar(name));
-    el.appendChild(body);
-
-    hdr.addEventListener('pointerdown', (e) => onFloatDragStart(e, name));
-    hdr.querySelector<HTMLElement>('[data-panel-act="float"]')!.addEventListener('click', (e) => {
-      e.stopPropagation();
-      togglePanelFloat(name);
-    });
-    hdr.querySelector<HTMLElement>('[data-panel-act="hide"]')!.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setPanelVisible(name, false);
-    });
-    if (findable) {
-      hdr.querySelector<HTMLElement>('[data-panel-act="find"]')!.addEventListener('click', (e) => {
-        e.stopPropagation();
-        togglePanelFind(name);
-      });
-    }
-
-    observeFloatResize(name);
-  });
-}
-
-// The floating panels whose size is watched, and the pending save.
-const floatObserved = new WeakSet<Element>();
-let floatSaveTimer: ReturnType<typeof setTimeout> | undefined;
-
-export function observeFloatResize(name: string) {
-  const el = panelEl(name);
-  if (!el || floatObserved.has(el) || typeof ResizeObserver === 'undefined') return;
-  floatObserved.add(el);
-  const ro = new ResizeObserver(() => {
-    const st = panelDock[name];
-    if (st && st.floating && el.classList.contains('panel-floating')) {
-      st.w = el.offsetWidth;
-      st.h = el.offsetHeight;
-      clearTimeout(floatSaveTimer);
-      floatSaveTimer = setTimeout(savePanelDock, 300);
-    }
-  });
-  ro.observe(el);
+export function setPanelChipShown(name: string, shown: boolean) {
+  if (dockView.chipShown[name] === shown) return;
+  dockView = { ...dockView, chipShown: { ...dockView.chipShown, [name]: shown } };
+  redraw('dock');
 }
 
 export function applyPanelDock() {
-  const stack = byId('panelStack');
-  if (!stack || !panelDock) return;
+  if (!panelDock) return;
 
-  // Preserve focus + caret across the relayout below. Re-appending panel
-  // nodes inside #panelStack (or refreshing a panel's innerHTML) can make
-  // the browser drop focus — which on mobile closes the soft keyboard in
-  // the middle of typing into the UART console (or any other form field).
+  // Keep the focus and the caret where they are: a relayout that moves a
+  // panel can drop the focus, which on a phone closes the soft keyboard in
+  // the middle of typing into the UART console or any other field.
   const activeEl = document.activeElement as HTMLInputElement | null;
   let restoreFocus: { el: HTMLInputElement; selStart: number | null; selEnd: number | null } | null = null;
   if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' || activeEl.isContentEditable)) {
-    restoreFocus = {
-      el: activeEl,
-      selStart: (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') ? activeEl.selectionStart : null,
-      selEnd: (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') ? activeEl.selectionEnd : null
-    };
+    const text = activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA';
+    restoreFocus = { el: activeEl, selStart: text ? activeEl.selectionStart : null, selEnd: text ? activeEl.selectionEnd : null };
   }
-  const restoreFocusNow = () => {
-    if (!restoreFocus || !restoreFocus.el.isConnected) return;
-    try {
-      restoreFocus.el.focus();
-      if (restoreFocus.selStart !== null && restoreFocus.selEnd !== null) {
-        restoreFocus.el.setSelectionRange(restoreFocus.selStart, restoreFocus.selEnd);
-      }
-    } catch (e) { /* element not focusable — ignore */ }
-  };
-
-  // Remove every dynamically inserted splitter and grid row from a
-  // previous apply, moving any panels that live inside dock rows back
-  // into the stack first (removing the rows would detach the panels, and
-  // getElementById cannot find detached nodes).
-  stack.querySelectorAll<HTMLElement>('.panel-dock-row').forEach(row => {
-    while (row.firstChild) stack.appendChild(row.firstChild);
-    row.remove();
-  });
-  stack.querySelectorAll<HTMLElement>('.panel-vsplitter, .panel-hsplitter').forEach(s => s.remove());
 
   const dockedNames = panelDock.order.filter(n => panelDock[n].visible && !panelDock[n].floating);
-  const floatingNames = panelDock.order.filter(n => panelDock[n].visible && panelDock[n].floating);
   const twoCols = dockUsesTwoColumns();
   const mobile = mobileMode();
   syncWaveformPanelHost();
@@ -707,145 +618,71 @@ export function applyPanelDock() {
   if (mobile) ensureMobileTab();
 
   // Set the dock width before laying out the grid: the row-fit clamp below
-  // reads the actual available width, and the panel loop below uses it.
+  // reads the actual available width.
   updateDockWidthForGrid();
   clampGridRowWidths();
 
-  // Reorder every panel node to match panelDock.order (direct children of
-  // the stack in the single-column layout), then set docked/floating state.
+  const mid = Math.ceil(dockedNames.length / 2);
+  const rowOf = (n: string) => !twoCols ? 0 : dockedNames.indexOf(n) < mid ? 1 : 2;
+  const labels = Object.fromEntries(PANEL_DEFS.map(d => [d.name, d.label]));
+  const items: (DockPanel | DockSplitter)[] = [];
+  const lastDocked = dockedNames[dockedNames.length - 1];
   panelDock.order.forEach(name => {
-    const el = panelEl(name);
-    if (!el) return;
-    stack.appendChild(el);
     const st = panelDock[name];
-    el.classList.remove('panel-docked', 'panel-floating', 'focused', 'panel-mobile-active');
-    el.style.flex = '';
-    el.style.left = el.style.top = el.style.width = el.style.height = '';
-
-    // In the tabbed mobile view only the active tab is displayed — even if
-    // its persisted desktop visibility is off (the tabbed view always shows
-    // exactly one panel; visibility is only re-persisted if the user taps a
-    // chip, which calls setPanelVisible(true)).
-    if (mobile && name === mobileTab) el.classList.add('panel-mobile-active');
-
-    if (!st.visible) return;
-
-    // Mobile tabbed view: the CSS rule `.panel-mobile-active` fully controls
-    // the layout (flex: 0 0 auto; height: auto; overflow: visible) so the
-    // active tab expands to its natural content height and the page scrolls.
-    // Do not apply desktop docked flex-basis/height logic here.
-    if (mobile) return;
-
-    if (st.floating && !mobile) {
-      el.classList.add('panel-floating');
-      el.style.left = st.x + 'px';
-      el.style.top = st.y + 'px';
-      el.style.width = st.w + 'px';
-      el.style.height = st.h + 'px';
-    } else if (twoCols) {
-      el.classList.add('panel-docked');
-      // Column widths are driven by flex-basis: default (wbasis 0) is an
-      // even 1:1 split; a dragged width is a basis (`0 1 Npx`) so the flex
-      // layout honours it while the panel can still shrink when the dock
-      // gets narrower than the dragged total. (A fixed `0 0 Npx` basis
-      // cannot shrink, so a narrow main splitter would make the row
-      // overflow the dock and leave blank space on the right.) A panel that is the
-      // ONLY panel in its grid row (e.g. the 3rd of 3 visible panels) must
-      // always span the full row width — a persisted column width would
-      // otherwise leave a blank space where a 4th panel would sit.
-      const rowHasPair = !(dockedNames.length % 2 === 1 && dockedNames.indexOf(name) === dockedNames.length - 1);
-      el.style.flex = (rowHasPair && st.wbasis && st.wbasis > 0) ? ('0 1 ' + st.wbasis + 'px') : '1 1 0';
-    } else {
-      el.classList.add('panel-docked');
-      el.style.flex = (st.basis && st.basis > 0) ? ('0 0 ' + st.basis + 'px') : '1 1 0';
-    }
-  });
-
-  if (dockedNames.length > 0) {
-    if (twoCols) {
-      // 2×2 grid: row 1 holds the first ceil(n/2) panels, row 2 the rest.
-      const mid = Math.ceil(dockedNames.length / 2);
-      const row1 = dockedNames.slice(0, mid);
-      const row2 = dockedNames.slice(mid);
-      [row1, row2].forEach((rowNames, rowIdx) => {
-        const row = document.createElement('div');
-        row.className = 'panel-dock-row' + (rowNames.length < 2 ? ' panel-dock-row-single' : '');
-        // Restore persisted row heights (from dragging the row splitter).
-        if (dockRowHeights && dockRowHeights[rowIdx]) {
-          row.style.flex = '0 0 ' + dockRowHeights[rowIdx] + 'px';
-        }
-        const first = rowNames[0];
-        if (first) {
-          row.appendChild(panelEl(first)!);
-          // Horizontal splitter between the two columns of the row.
-          for (let i = 1; i < rowNames.length; i++) {
-            const sp = document.createElement('div');
-            sp.className = 'panel-hsplitter';
-            sp.title = 'Drag to resize · double-click to even out';
-            row.appendChild(sp);
-            row.appendChild(panelEl(rowNames[i])!);
-          }
-        }
-        stack.appendChild(row);
-        // Vertical splitter between row 1 and row 2.
-        if (rowIdx === 0) {
-          const sp = document.createElement('div');
-          sp.className = 'panel-vsplitter';
-          sp.title = 'Drag to resize · double-click to even out';
-          stack.appendChild(sp);
-        }
-      });
-      // Wire up splitters after the DOM is built.
-      stack.querySelectorAll<HTMLElement>('.panel-hsplitter').forEach(sp => attachHSplitter(sp));
-      stack.querySelectorAll<HTMLElement>('.panel-vsplitter').forEach(sp => attachVSplitter(sp));
-    } else {
-      // Single column: plain vertical stack with row splitters.
-      for (let i = 0; i < dockedNames.length - 1; i++) {
-        const sp = document.createElement('div');
-        sp.className = 'panel-vsplitter';
-        sp.title = 'Drag to resize · double-click to even out';
-        panelEl(dockedNames[i])!.after(sp);
-        attachVSplitter(sp);
-      }
-    }
-  }
-
-  const emptyHint = stack.querySelector<HTMLElement>('.panel-stack-empty');
-  if (emptyHint) stack.appendChild(emptyHint);
-  // On desktop the empty hint shows when no docked panel is visible. In the
-  // tabbed mobile view a tab is ALWAYS shown (panel-mobile-active), so the
-  // "All panels are hidden" hint never applies there.
-  stack.classList.toggle('is-empty', !mobile && dockedNames.length === 0);
-
-  // Toolbar chip + float-button state.
-  PANEL_DEFS.forEach(({ name }) => {
-    const st = panelDock[name];
-    const chip = document.getElementById('panelChip-' + name);
-    if (chip) {
-      if (mobile) {
-        // On mobile the chips behave like a classic tab strip: exactly one
-        // is active (the currently shown tab), never "floating".
-        chip.classList.toggle('active', name === mobileTab);
-        chip.classList.remove('floating');
+    const docked = st.visible && !st.floating;
+    let flex: string | null = null, height: string | null = null;
+    if (!mobile && docked) {
+      if (twoCols) {
+        // A dragged width is a shrinkable basis (`0 1 Npx`), so the row
+        // still fits a dock narrower than the dragged total. A panel alone
+        // in its row (the 3rd of 3) always spans the row.
+        const row = rowOf(name);
+        const rowHasPair = (row === 1 ? mid : dockedNames.length - mid) > 1;
+        flex = (rowHasPair && st.wbasis && st.wbasis > 0) ? '0 1 ' + st.wbasis + 'px' : '1 1 0px';
+        height = dockRowHeights && dockRowHeights[row - 1] ? dockRowHeights[row - 1] + 'px' : 'calc(50% - 3px)';
       } else {
-        chip.classList.toggle('active', st.visible);
-        chip.classList.toggle('floating', st.visible && st.floating);
+        flex = (st.basis && st.basis > 0) ? '0 0 ' + st.basis + 'px' : '1 1 0px';
       }
     }
-    const fb = panelEl(name)?.querySelector<HTMLElement>('[data-panel-act="float"]');
-    if (fb) {
-      fb.textContent = st.floating ? '▣' : '⧉';
-      fb.title = st.floating ? 'Dock back into the side panel' : 'Detach to a floating window';
+    // In the tabbed mobile view only the active tab is shown, even when its
+    // desktop visibility is off; that is only changed by tapping a chip.
+    const mode: DockPanel['mode'] = mobile ? (name === mobileTab ? 'mobile' : 'mobile-hidden')
+      : !st.visible ? 'hidden' : st.floating ? 'floating' : 'docked';
+    items.push({
+      kind: 'panel', key: name, name, label: labels[name], findable: PANEL_FIND.has(name), mode,
+      row: docked ? rowOf(name) : 0, flex, height,
+      rect: mode === 'floating' ? { x: st.x, y: st.y, w: st.w, h: st.h } : null,
+    });
+    if (!docked || name === lastDocked) return;
+    const i = dockedNames.indexOf(name);
+    const next = dockedNames[i + 1];
+    if (twoCols && !mobile) {
+      // Between two panels of a row a column splitter; after the first
+      // row the row splitter, which also breaks the line.
+      if (rowOf(next) === rowOf(name)) items.push({ kind: 'hsplit', key: 'h:' + name, left: name, right: next });
+      else items.push({ kind: 'vsplit', key: 'v:grid', above: dockedNames.slice(0, mid), below: dockedNames.slice(mid), grid: true });
+    } else {
+      items.push({ kind: 'vsplit', key: 'v:' + name, above: [name], below: [next], grid: false });
     }
   });
+  dockView = {
+    ...dockView, items, grid: twoCols && !mobile, mobile, mobileTab,
+    shown: Object.fromEntries(panelDock.order.map(n => [n, { visible: panelDock[n].visible, floating: panelDock[n].floating }])),
+    // On a phone a tab is always shown, so the "all hidden" hint never applies.
+    empty: !mobile && dockedNames.length === 0,
+  };
+  redraw('dock');
 
-  floatingNames.forEach((name: string) => keepFloatInView(name));
+  panelDock.order.filter(n => panelDock[n].visible && panelDock[n].floating).forEach(keepFloatInView);
   savePanelDock();
-  // Bring focus back to the field that was being typed in (e.g. the UART
-  // console) now that the panels have been moved/re-appended, so the mobile
-  // soft keyboard is not dismissed by the relayout.
-  restoreFocusNow();
-  updateMobileFindBtn();
+  if (restoreFocus && restoreFocus.el.isConnected && document.activeElement !== restoreFocus.el) {
+    try {
+      restoreFocus.el.focus();
+      if (restoreFocus.selStart !== null && restoreFocus.selEnd !== null) {
+        restoreFocus.el.setSelectionRange(restoreFocus.selStart, restoreFocus.selEnd);
+      }
+    } catch (e) { /* not focusable any more */ }
+  }
 }
 
 export function keepFloatInView(name: string) {
@@ -854,12 +691,31 @@ export function keepFloatInView(name: string) {
   if (!st || !el) return;
   const maxX = window.innerWidth - 60;
   const maxY = window.innerHeight - 32;
+  const x0 = st.x, y0 = st.y;
   if (st.x > maxX) st.x = Math.max(0, maxX);
   if (st.y > maxY) st.y = Math.max(0, maxY);
   if (st.x < -el.offsetWidth + 60) st.x = 0;
   if (st.y < 0) st.y = 0;
-  el.style.left = st.x + 'px';
-  el.style.top = st.y + 'px';
+  if (st.x !== x0 || st.y !== y0) moveFloat(name);
+}
+
+// A floating panel's rectangle changed: redraw just that.
+function moveFloat(name: string) {
+  const st = panelDock[name];
+  dockView = { ...dockView, items: dockView.items.map(it => it.kind === 'panel' && it.name === name && it.rect
+    ? { ...it, rect: { x: st.x, y: st.y, w: st.w, h: st.h } } : it) };
+  redraw('dock');
+}
+
+// The browser's own resize handle sized a floating panel.
+let floatSaveTimer: ReturnType<typeof setTimeout> | undefined;
+export function noteFloatResized(name: string, w: number, h: number) {
+  const st = panelDock[name];
+  if (!st || !st.floating || (st.w === w && st.h === h)) return;
+  st.w = w;
+  st.h = h;
+  clearTimeout(floatSaveTimer);
+  floatSaveTimer = setTimeout(savePanelDock, 300);
 }
 
 export function setPanelVisible(name: string, vis: boolean) {
@@ -887,194 +743,126 @@ export function togglePanelFloat(name: string) {
   refreshPanel(name);
 }
 
+// Dragging a floating panel by its header.
 export function onFloatDragStart(e: PointerEvent, name: string) {
   const st = panelDock[name];
   if (!st || !st.floating) return;
   if (targetEl(e)?.closest('.panel-hdr-btn')) return;
-  const el = panelEl(name);
-  if (!el) return;
   floatDrag = { name, startX: e.clientX, startY: e.clientY, origX: st.x, origY: st.y };
-  document.querySelectorAll<HTMLElement>('.tab-content.panel-floating').forEach(p => p.classList.remove('focused'));
-  el.classList.add('focused');
-  if (el.setPointerCapture) el.setPointerCapture(e.pointerId);
-  el.addEventListener('pointermove', onFloatDragMove);
-  el.addEventListener('pointerup', onFloatDragEnd);
-  el.addEventListener('pointercancel', onFloatDragEnd);
+  dockView = { ...dockView, focusedFloat: name };
+  redraw('dock');
+  (e.currentTarget as Element | null)?.setPointerCapture?.(e.pointerId);
   e.preventDefault();
 }
 
-export function onFloatDragMove(e: MouseEvent) {
+export function onFloatDragMove(e: PointerEvent) {
   if (!floatDrag) return;
   const st = panelDock[floatDrag.name];
   const el = panelEl(floatDrag.name);
   if (!el) return;
-  let nx = floatDrag.origX + (e.clientX - floatDrag.startX);
-  let ny = floatDrag.origY + (e.clientY - floatDrag.startY);
-  nx = Math.max(-el.offsetWidth + 60, Math.min(nx, window.innerWidth - 60));
-  ny = Math.max(0, Math.min(ny, window.innerHeight - 32));
-  st.x = nx; st.y = ny;
-  el.style.left = nx + 'px';
-  el.style.top = ny + 'px';
+  st.x = Math.max(-el.offsetWidth + 60, Math.min(floatDrag.origX + (e.clientX - floatDrag.startX), window.innerWidth - 60));
+  st.y = Math.max(0, Math.min(floatDrag.origY + (e.clientY - floatDrag.startY), window.innerHeight - 32));
+  moveFloat(floatDrag.name);
 }
 
 export function onFloatDragEnd() {
   if (!floatDrag) return;
-  const el = panelEl(floatDrag.name);
-  el?.removeEventListener('pointermove', onFloatDragMove);
-  el?.removeEventListener('pointerup', onFloatDragEnd);
-  el?.removeEventListener('pointercancel', onFloatDragEnd);
   floatDrag = null;
   savePanelDock();
 }
 
-// Row splitter: drags to redistribute the height of the two docked panels
-// (or dock rows in the 2×2 grid) above and below it.
-export function attachVSplitter(sp: HTMLElement) {
-  let dragging = false, startY = 0, aboveEl: HTMLElement | null = null, belowEl: HTMLElement | null = null, aboveH = 0, belowH = 0;
-  sp.addEventListener('pointerdown', (e: PointerEvent) => {
-    aboveEl = sp.previousElementSibling as HTMLElement | null;
-    belowEl = sp.nextElementSibling as HTMLElement | null;
-    if (!aboveEl || !belowEl) return;
-    dragging = true;
-    startY = e.clientY;
-    aboveH = aboveEl.offsetHeight;
-    belowH = belowEl.offsetHeight;
-    sp.setPointerCapture(e.pointerId);
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  });
-  sp.addEventListener('pointermove', (e: MouseEvent) => {
-    if (!dragging || !aboveEl || !belowEl) return;
-    const dy = e.clientY - startY;
-    aboveEl.style.flex = '0 0 ' + Math.max(90, aboveH + dy) + 'px';
-    belowEl.style.flex = '0 0 ' + Math.max(90, belowH - dy) + 'px';
-  });
-  const stop = () => {
-    if (!dragging) return;
-    dragging = false;
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-    // Persist the heights of the two dock rows (2×2 grid) or the two
-    // docked panels (single column).
-    const pair = [aboveEl, belowEl].filter((el): el is HTMLElement => !!el && el.classList.contains('panel-dock-row'));
-    if (pair.length === 2) {
-      dockRowHeights = pair.map(el => el.offsetHeight);
-    } else {
-      panelDock.order.forEach(n => {
-        const el = panelEl(n);
-        if (el && el.classList.contains('panel-docked')) panelDock[n].basis = el.offsetHeight;
-      });
-    }
-    savePanelDock();
-  };
-  sp.addEventListener('pointerup', stop);
-  sp.addEventListener('pointercancel', stop);
-  sp.addEventListener('dblclick', () => {
-    dockRowHeights = null;
-    panelDock.order.forEach(n => { panelDock[n].basis = 0; });
-    applyPanelDock();
-  });
+// A splitter being dragged: which, where the pointer started, and the
+// sizes it started from. A dragged size is always the start size plus the
+// whole distance moved, never accumulated move by move, so a small drag
+// cannot run away.
+let splitDrag: { sp: DockSplitter; start: number; a: number; b: number } | null = null;
+
+function dragCursor(cursor: string) {
+  document.body.style.cursor = cursor;
+  document.body.style.userSelect = cursor ? 'none' : '';
 }
 
-// Column splitter: drags to redistribute the width of the two columns
-// within one row of the 2×2 grid.
-export function attachHSplitter(sp: HTMLElement) {
-  let dragging = false, startX = 0, lastX = 0, leftEl: HTMLElement | null = null, rightEl: HTMLElement | null = null;
-  // The flex-basis values at pointerdown. Tracked explicitly because a
-  // shrinkable basis (`0 1 Npx`) means `offsetWidth` reflects the RENDERED
-  // (possibly shrunk) width, not the value we want to persist. They are
-  // snapshots — never mutated during the drag. The dragged width is always
-  // computed as `snapshot + (clientX − startX)` (absolute from pointerdown),
-  // mirroring the row splitter; accumulating the delta into the snapshot
-  // would compound on every move and make a small drag shoot to the extreme.
-  let leftBasis = 0, rightBasis = 0;
-  sp.addEventListener('pointerdown', (e: PointerEvent) => {
-    leftEl = sp.previousElementSibling as HTMLElement | null;
-    rightEl = sp.nextElementSibling as HTMLElement | null;
-    if (!leftEl || !rightEl) return;
-    dragging = true;
-    startX = e.clientX;
-    lastX = startX;
-    leftBasis = leftEl.offsetWidth;
-    rightBasis = rightEl.offsetWidth;
-    sp.setPointerCapture(e.pointerId);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  });
-  sp.addEventListener('pointermove', (e: MouseEvent) => {
-    if (!dragging || !leftEl || !rightEl) return;
-    lastX = e.clientX;
-    const dx = lastX - startX;
-    // Set flex-basis (`0 1 Npx`) so the flex row honours the widths while
-    // the panels can still shrink if the dock is narrower than the dragged
-    // total. A fixed `0 0 Npx` basis cannot shrink, so it would overflow
-    // the dock, shifting the panels area left with blank space on the right.
-    const wl = Math.max(MIN_COL_W, leftBasis + dx);
-    const wr = Math.max(MIN_COL_W, rightBasis - dx);
-    leftEl.style.flex = '0 1 ' + wl + 'px';
-    rightEl.style.flex = '0 1 ' + wr + 'px';
-  });
-  const stop = () => {
-    if (!dragging) return;
-    dragging = false;
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-    // Persist the widths of the two docked panels in this row. Clamp the
-    // dragged bases to the row's available space so an over-wide drag can
-    // never persist an overflowing state: when the two bases + the 6px
-    // splitter exceed the row width, scale them down proportionally.
-    const pair = [leftEl, rightEl].map(el => {
-      if (!el) return null;
-      const n = el.id && el.id.replace(/^tab-/, '');
-      return n && panelDock[n] ? n : null;
-    });
-    const dx = lastX - startX;
-    let wl = Math.max(MIN_COL_W, leftBasis + dx);
-    let wr = Math.max(MIN_COL_W, rightBasis - dx);
-    const row = sp.parentElement;
-    const available = row ? row.clientWidth : 0;
-    const total = wl + wr;
-    if (available > 0 && total + 6 > available && total > 0) {
-      // Scale the pair down to fit the row while keeping each column at
-      // least MIN_COL_W: give each its minimum, then split the remaining
-      // space in the dragged ratio. (A plain proportional scale with a
-      // per-column floor can still overflow — e.g. one column pinned at its
-      // floor plus a large other column would exceed the row.)
-      const extra = Math.max(0, available - 6 - 2 * MIN_COL_W);
-      wl = MIN_COL_W + Math.round((wl / total) * extra);
-      wr = available - 6 - wl; // exact fit, no rounding overflow
+export function onSplitterDown(e: PointerEvent, sp: DockSplitter) {
+  const h = (n: string) => panelEl(n)?.offsetHeight ?? 0;
+  const w = (n: string) => panelEl(n)?.offsetWidth ?? 0;
+  if (sp.kind === 'hsplit') {
+    splitDrag = { sp, start: e.clientX, a: w(sp.left), b: w(sp.right) };
+  } else {
+    splitDrag = { sp, start: e.clientY, a: h(sp.above[0]), b: h(sp.below[0]) };
+  }
+  (e.currentTarget as Element | null)?.setPointerCapture?.(e.pointerId);
+  dragCursor(sp.kind === 'hsplit' ? 'col-resize' : 'row-resize');
+  e.preventDefault();
+}
+
+export function onSplitterMove(e: PointerEvent) {
+  if (!splitDrag) return;
+  const { sp, start, a, b } = splitDrag;
+  if (sp.kind === 'hsplit') {
+    const dx = e.clientX - start;
+    panelDock[sp.left].wbasis = Math.max(MIN_COL_W, a + dx);
+    panelDock[sp.right].wbasis = Math.max(MIN_COL_W, b - dx);
+  } else {
+    const dy = e.clientY - start;
+    if (sp.grid) dockRowHeights = [Math.max(90, a + dy), Math.max(90, b - dy)];
+    else {
+      panelDock[sp.above[0]].basis = Math.max(90, a + dy);
+      panelDock[sp.below[0]].basis = Math.max(90, b - dy);
     }
-    if (pair[0]) panelDock[pair[0]].wbasis = Math.max(MIN_COL_W, wl);
-    if (pair[1]) panelDock[pair[1]].wbasis = Math.max(MIN_COL_W, wr);
-    savePanelDock();
-  };
-  sp.addEventListener('pointerup', stop);
-  sp.addEventListener('pointercancel', stop);
-  sp.addEventListener('dblclick', () => {
-    panelDock.order.forEach(n => { panelDock[n].wbasis = 0; });
-    applyPanelDock();
-  });
+  }
+  applyPanelDock();
+}
+
+export function onSplitterUp() {
+  if (!splitDrag) return;
+  const { sp } = splitDrag;
+  splitDrag = null;
+  dragCursor('');
+  if (sp.kind === 'hsplit') {
+    // Never persist a pair wider than its row: scale it down to fit, each
+    // column keeping at least MIN_COL_W and the pair its dragged ratio.
+    const available = byId('panelStack')?.clientWidth ?? 0;
+    const l = panelDock[sp.left], r = panelDock[sp.right];
+    const total = l.wbasis + r.wbasis;
+    if (available > 0 && total + 6 > available) {
+      const extra = Math.max(0, available - 6 - 2 * MIN_COL_W);
+      l.wbasis = MIN_COL_W + Math.round((l.wbasis / total) * extra);
+      r.wbasis = Math.max(MIN_COL_W, available - 6 - l.wbasis);
+    }
+  } else if (!sp.grid) {
+    // The single column: every docked panel keeps the height it now has.
+    panelDock.order.forEach(n => {
+      const st = panelDock[n];
+      const el = panelEl(n);
+      if (el && st.visible && !st.floating) st.basis = el.offsetHeight;
+    });
+  }
+  applyPanelDock();
+}
+
+// A double click evens out what the splitter divides.
+export function onSplitterReset(sp: DockSplitter) {
+  if (sp.kind === 'hsplit') panelDock.order.forEach(n => { panelDock[n].wbasis = 0; });
+  else {
+    dockRowHeights = null;
+    panelDock.order.forEach(n => { panelDock[n].basis = 0; });
+  }
+  applyPanelDock();
+}
+
+// A chip in the tab strip: on a phone it shows that one panel, as a tab;
+// otherwise it shows or hides it.
+export function onPanelChip(name: string) {
+  if (mobileMode()) {
+    if (!panelDock[name].visible) setPanelVisible(name, true);
+    setMobileTab(name);
+  } else {
+    togglePanel(name);
+  }
 }
 
 export function initPanelDock() {
   panelDock = loadPanelDock();
-  ensurePanelChrome();
-  PANEL_DEFS.forEach(({ name }) => {
-    const chip = document.getElementById('panelChip-' + name);
-    if (chip) chip.addEventListener('click', () => {
-      if (mobileMode()) {
-        // Mobile tabs behave like the classic tab strip: tapping a tab
-        // shows that panel (even if it is currently hidden), and exactly
-        // one panel is displayed at a time.
-        if (!panelDock[name].visible) setPanelVisible(name, true);
-        setMobileTab(name);
-      } else {
-        togglePanel(name);
-      }
-    });
-  });
   applyPanelDock();
   panelDock.order.forEach((name: string) => { if (isPanelVisible(name)) refreshPanel(name); });
   updateLocalsPanelAvailability();
@@ -1466,9 +1254,20 @@ export const TEXT_RO_TITLE =
 // rendered before the engine switched can still reach one.
 export function stateIsReplayed() { return ui.engine === 'hdl'; }
 
+export type RegRow = { i: number; name: string; hex: string; dec: string; changed: boolean; unknown: boolean };
+
+// What the Registers panel shows, rebuilt by updateRegisters(). `editGen`
+// changes when an inline edit ends, so the rows are drawn afresh.
+export let regModel = { rows: [] as RegRow[], signed: true, readOnly: false, regMissing: false, editGen: 0 };
+export let regEditGen = 0;
+export function bumpRegEditGen() { regEditGen++; }
+
 export function updateRegisters() {
-  let html = '';
-  let shown = 0;
+  const rows: RegRow[] = [];
+  // Hardware registers power up undefined. The functional model can afford
+  // to show them as zero; the RTL cannot, and papering over that would hide
+  // exactly the kind of bug HDL mode exists to find.
+  const known = ui.engine === 'hdl' && hdlRec.trace ? hdlRec.regKnown : null;
   for (let i = 0; i < 32; i++) {
     const name = ABI_NAMES[i];
     const val = cpu.regs[i];
@@ -1476,31 +1275,26 @@ export function updateRegisters() {
     const decVal = ui.regDecSigned ? val : uval;
     if (!panelFindMatch('registers',
       `x${i} ${name} ${uval.toString(16).padStart(8, '0')} ${decVal}`)) continue;
-    shown++;
-    const isChanged = i === cpu.lastChangedReg;
-    const valClass = 'reg-val' + (isChanged ? ' reg-changed' : '');
-    const hexTxt = uval.toString(16).padStart(8, '0');
-    if (stateIsReplayed()) {
-      html += `<tr><td class="reg-name col-id">x${i}</td><td class="reg-name col-name">${name}</td>
-      <td class="${valClass} readonly-code col-val" title="${REPLAYED_STATE_TITLE}">${hexTxt}</td>
-      <td class="${valClass} readonly-code col-val" title="${REPLAYED_STATE_TITLE}">${decVal}</td></tr>`;
-      continue;
-    }
-    html += `<tr><td class="reg-name col-id">x${i}</td><td class="reg-name col-name">${name}</td>
-      <td class="${valClass} reg-editable col-val" data-idx="${i}" data-val="${hexTxt}" data-type="hex" onclick="startRegEdit(this)" ondblclick="popRegEditModal(event,this)" onblur="commitRegEdit(this)" onkeydown="handleRegEditKey(event,this)" title="Single-click: edit inline | Double-click: open edit window">${hexTxt}</td>
-      <td class="${valClass} reg-editable col-val" data-idx="${i}" data-val="${decVal.toString().padStart(11, ' ')}" data-type="dec" onclick="startRegEdit(this)" ondblclick="popRegEditModal(event,this)" onblur="commitRegEdit(this)" onkeydown="handleRegEditKey(event,this)" title="Single-click: edit inline | Double-click: open edit window">${decVal}</td></tr>`;
+    const unknown = !!known && i > 0 && !known[i];
+    rows.push({
+      i, name, changed: i === cpu.lastChangedReg, unknown,
+      hex: unknown ? 'xxxxxxxx' : uval.toString(16).padStart(8, '0'), dec: unknown ? '?' : String(decVal),
+    });
   }
-  regBody.innerHTML = html;
-  setPanelFindCount('registers', shown, 32);
-  // The <thead> (and its column widths) survives this rebuild untouched
-  // since only the <tbody> is replaced — nothing to reapply here.
+  // If the register file could not be reached inside the uploaded design,
+  // every value here would be a guess, and the panel says so instead.
+  regModel = {
+    rows, signed: ui.regDecSigned, readOnly: stateIsReplayed(), editGen: regEditGen,
+    regMissing: !!(ui.engine === 'hdl' && hdlRec.trace && !hdlRec.trace.regBank),
+  };
+  redraw('registers');
+  setPanelFindCount('registers', rows.length, 32);
   // Also update peripherals (PC LEDs, etc.) when registers are refreshed
   updatePeripherals();
   // Locals changes at the same moments as Registers, so refreshing it here
   // keeps it live from every updateRegisters() call site (step, run, reset,
   // edit...).
   if (typeof updateLocalsView === 'function') updateLocalsView();
-  hdlMarkUnknownRegisters();
   dpOnStateChange();
 }
 

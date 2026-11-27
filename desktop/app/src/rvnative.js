@@ -39,6 +39,7 @@
     icarus: !!info.icarus, icarusVersion: info.icarusVersion || null, platform: info.platform,
     verilator: !!info.verilator, verilatorVersion: info.verilatorVersion || null,
     rememberedFolder: info.folder || null,
+    rememberedExamplesFolder: info.examplesFolder || null,
     hdlRun: async (id, tool, files, args, opts) => unframe(await invoke('hdl_run', { id, tool, files: wire(files), args, opts })),
     hdlKill: id => invoke('hdl_kill', { id }),
     vlBuild: (id, files, opts) => invoke('vl_build', { id, files, opts, onProgress: channel(e => progressCbs.forEach(cb => cb(id, e))) }),
@@ -56,9 +57,10 @@
       return r.files.data ? { size: r.size, data: r.files.data } : { size: r.size };
     },
     onVlLiveData: cb => { liveCbs.push(cb); },
-    pickFolder: () => invoke('folder_pick'),
-    readFolder: dir => invoke('folder_read', { dir }),
-    forgetFolder: () => invoke('folder_forget'),
+    // kind: 'hdl' (the default) or 'examples'; each remembers its own folder.
+    pickFolder: kind => invoke('folder_pick', { kind: kind || null }),
+    readFolder: (dir, kind) => invoke('folder_read', { dir, kind: kind || null }),
+    forgetFolder: kind => invoke('folder_forget', { kind: kind || null }),
   };
 
   // Links to the web open in the browser rather than in the app's window.

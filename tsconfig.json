@@ -11,7 +11,7 @@
     "noEmit": true,
     "strict": true,
     "skipLibCheck": true,
-    "types": []
+    "types": ["svelte"]
   },
   "include": [
     "src/ts"

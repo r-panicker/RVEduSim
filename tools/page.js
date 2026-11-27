@@ -1,23 +1,23 @@
 // Builds the page from src/: the markup in src/index.html, the styles in
 // src/styles (in the order of order.json) and the scripts in src/ts.
 //
-// The scripts are ES modules, bundled by esbuild from src/ts/main.ts into
-// one script; minified, the names inside it are shortened, and main.ts puts
-// every module's exports on window under their own names.
+// The scripts are ES modules and Svelte components, bundled by esbuild from
+// src/ts/main.ts into one script (tools/bundle.js); minified, the names
+// inside it are shortened, and main.ts puts every module's exports on window
+// under their own names.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { buildSync, transformSync } = require('esbuild');
+const { execFileSync } = require('child_process');
+const { transformSync } = require('esbuild');
 
 const ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
 const read = f => fs.readFileSync(f, 'utf8');
 
 function buildPage({ minify = true } = {}) {
-  const TS = path.join(SRC, 'ts');
-  const js = buildSync({
-    entryPoints: [path.join(TS, 'main.ts')], bundle: true, format: 'iife', minify, legalComments: 'none', write: false
-  }).outputFiles[0].text;
+  const js = execFileSync(process.execPath, [path.join(__dirname, 'bundle.js')].concat(minify ? ['--minify'] : []),
+    { encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'inherit'] });
   const order = JSON.parse(read(path.join(SRC, 'styles', 'order.json')));
   const cssSrc = order.map(f => read(path.join(SRC, 'styles', f))).join('\n');
   const css = minify ? transformSync(cssSrc, { loader: 'css', minify: true }).code : cssSrc;

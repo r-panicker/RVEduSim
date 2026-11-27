@@ -44,15 +44,7 @@ PERIPHERALS UI
   flex-wrap: wrap;
 }
 
-.uart-controls select {
-  background: #313244;
-  border: 1px solid #45475a;
-  color: #cdd6f4;
-  padding: 3px 6px;
-  font-size: 12px;
-  border-radius: 4px;
-  height: 26px;
-}
+.uart-controls select { --sel-h: 26px; }
 
 .uart-controls input[type="text"] {
   flex: 1;

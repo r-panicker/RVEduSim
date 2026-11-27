@@ -39,6 +39,12 @@ export function hdlFindWrapper(files: HdlSource[] = hdlSources.files): HdlSource
   return files.find(f => /^\s*module\s+Wrapper\b/m.test(f.src)) || null;
 }
 
+// Every loaded file that declares the Wrapper. The testbench instantiates
+// it by name, so a run needs exactly one.
+export function hdlWrappers(files: HdlSource[] = hdlSources.files): HdlSource[] {
+  return files.filter(f => /^\s*module\s+Wrapper\b/m.test(f.src));
+}
+
 export function hdlHex32(v: number): string { return (v >>> 0).toString(16).padStart(8, '0'); }
 
 // FNV-1a, for cache keys.

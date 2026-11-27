@@ -46,8 +46,10 @@ import * as uiCm6Loader from './ui/cm6-loader';
 import * as uiDatapath from './ui/datapath';
 import * as uiDisassembly from './ui/disassembly';
 import * as uiEditorState from './ui/editor-state';
+import * as uiEditPopup from './ui/edit-popup';
 import * as uiEditor from './ui/editor';
 import * as uiEngineMode from './ui/engine-mode';
+import * as uiExampleSources from './ui/example-sources';
 import * as uiExamplesLanguage from './ui/examples-language';
 import * as uiExecution from './ui/execution';
 import * as uiFileIo from './ui/file-io';
@@ -55,12 +57,15 @@ import * as uiFindReplace from './ui/find-replace';
 import * as uiLocals from './ui/locals';
 import * as uiMachineHost from './ui/machine-host';
 import * as uiMemoryRegisterViews from './ui/memory-register-views';
+import * as uiPageLayout from './ui/page-layout';
 import * as uiPanels from './ui/panels';
 import * as uiPeripherals from './ui/peripherals';
 import * as uiPipelineControls from './ui/pipeline-controls';
 import * as uiRunControl from './ui/run-control';
-import * as uiUartControls from './ui/uart-controls';
+import * as uiSettingsStore from './ui/settings-store';
+import * as uiToolbarState from './ui/toolbar-state';
 import * as uiWaveform from './ui/waveform';
+import { mountComponents } from './ui/mount';
 
 const modules: Record<string, unknown>[] = [
   asmAssembler,
@@ -105,8 +110,10 @@ const modules: Record<string, unknown>[] = [
   uiDatapath,
   uiDisassembly,
   uiEditorState,
+  uiEditPopup,
   uiEditor,
   uiEngineMode,
+  uiExampleSources,
   uiExamplesLanguage,
   uiExecution,
   uiFileIo,
@@ -114,11 +121,13 @@ const modules: Record<string, unknown>[] = [
   uiLocals,
   uiMachineHost,
   uiMemoryRegisterViews,
+  uiPageLayout,
   uiPanels,
   uiPeripherals,
   uiPipelineControls,
   uiRunControl,
-  uiUartControls,
+  uiSettingsStore,
+  uiToolbarState,
   uiWaveform,
 ];
 
@@ -130,6 +139,7 @@ for (const mod of modules) {
   }
 }
 
+mountComponents();
 uiCm6Loader.onCm6LoaderLoad();
 uiMachineHost.onMachineHostLoad();
 uiEditor.onEditorLoad();
