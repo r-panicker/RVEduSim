@@ -22,7 +22,6 @@ import { hdlPlusargs } from './trace';
 import { hdlFindWrapper, hdlHash } from './verilog';
 import { layout } from '../machine/state';
 import { setStatus } from '../ui/editor';
-import { byId } from '../ui/dom';
 import { errorMessage } from '../errors';
 export const HDL_YOSYS_VERSION = '0.68.1207';
 // The CDN first, then the vendored copy beside the page. The bundle
@@ -161,7 +160,7 @@ export async function hdlNetlistBinary() {
   const wrapper = hdlFindWrapper();
   if (!wrapper) throw new Error('No Wrapper among the sources.');
   const tb = hdlBuildTestbench({ regBankPath: null });
-  const gen = (byId<HTMLSelectElement>('hdlGeneration') || {}).value || '2005';
+  const gen = hdlConfig.generation || '2005';
   const key = hdlHash(gen + '|' + netlist + '|' + wrapper.src + '|' + tb);
   if (hdlNetlistVvp && hdlNetlistVvp.key === key) return hdlNetlistVvp.vvp;
 

@@ -3,7 +3,7 @@
 
 import { DATA_DIRECTIVE_WIDTH, DATA_SECTION_DIRECTIVES, assemble, parseStringLiteral, setSection } from '../asm/assembler';
 import { parseImm } from '../asm/operands';
-import { cProgram, type CLocalVar } from './state';
+import { compilerConfig, cProgram, type CLocalVar } from './state';
 import { loadProgram } from '../machine/reset';
 import { layout, program, run, type MachineLine } from '../machine/state';
 import { updateDisassembly, updateMachineCode } from '../ui/disassembly';
@@ -13,7 +13,6 @@ import { highlightCurrentLine, updateStats } from '../ui/execution';
 import { updateMemSubTabs, updateMemoryView } from '../ui/memory-register-views';
 import { resetPeriphFoldState } from '../ui/peripherals';
 import { updateToolbarButtonStates } from '../ui/run-control';
-import { byId } from '../ui/dom';
 import { errorMessage } from '../errors';
 
 /* ============================================================
@@ -232,9 +231,7 @@ export function warnAboutLibgccHelpers(asm: GodboltAsmLine[] | undefined, optLev
   }
   if (!names.size) return;
   const list = Array.from(names).sort().join(', ');
-  const mBox = byId<HTMLInputElement>('godboltUseM');
-  const mOn = mBox ? mBox.checked : false;
-  if (mOn) return;   // the helpers would only appear without M, but be safe
+  if (compilerConfig.useM) return;   // the helpers would only appear without M, but be safe
   log(`\u26a0\ufe0f This program multiplies or divides, but "Include M extension" is off, ` +
       `so the compiler emitted calls to the libgcc helper(s) ${list} instead of a ` +
       `mul/div instruction. Those helpers are library code that is not part of this ` +
@@ -255,13 +252,7 @@ export async function compileAndAssembleC(cSourceText?: string) {
     return null;
   }
 
-  const compilerSelect = byId<HTMLSelectElement>('godboltCompilerSelect');
-  const optSelect = byId<HTMLSelectElement>('godboltOptSelect');
-  const archInput = byId<HTMLInputElement>('godboltArchFlags');
-
-  const compilerId = compilerSelect ? compilerSelect.value : 'rv32-cclang2010';
-  const optLevel = optSelect ? optSelect.value : '-O0';
-  const archFlags = archInput ? archInput.value : '-march=rv32im -mabi=ilp32';
+  const { compiler: compilerId, opt: optLevel, archFlags } = compilerConfig;
 
   setStatus(`Compiling C with Godbolt (${compilerId}, ${optLevel})...`, 'info');
   log(`Compiling C code via Godbolt Compiler Explorer (${compilerId}, ${optLevel}, ${archFlags})...`, 'info');

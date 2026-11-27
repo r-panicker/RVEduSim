@@ -16,7 +16,7 @@
     class="dp-stage-name" style:color={h.phase.colour}>{h.phase.stage + ' · '}</span>{h.phase.title}{:else}<span
     style:color={h.phase.colour}>{h.phase.stage}</span>{/if}{/if}</span>
   <span class="wave-hdr-actions dp-hdr-actions">
-    <select class="dp-speed" id="dpArch" value={h.pipe ? 'pipe' : 'single'} onchange={e => pipeSetMode(e.currentTarget.value === 'pipe')}
+    <select class="dp-speed" id="dpArch" value={h.pipe ? 'pipe' : 'single'} onchange={e => { const el = e.currentTarget; pipeSetMode(el.value === 'pipe'); el.value = h.pipe ? 'pipe' : 'single'; }}
       title="Microarchitecture. Switching resets the program">
       <option value="single">Single-cycle</option>
       <option value="pipe">Pipelined</option>

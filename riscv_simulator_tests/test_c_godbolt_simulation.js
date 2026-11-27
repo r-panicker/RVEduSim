@@ -306,11 +306,10 @@ setTimeout(async () => {
     // 12. Testing Settable Segment Sizes & Dynamic Stack Top
     console.log('\n[12] Testing Settable Segment Sizes & Dynamic CRT0 Stack Pointer...');
     win.switchSettingsTab('linker');
-    win.document.getElementById('ms-code').value = '0x10000';
-    win.document.getElementById('ms-codesize').value = '0x400';
-    win.document.getElementById('ms-data').value = '0x20000';
-    win.document.getElementById('ms-datasize').value = '0x400';
-    win.updateLinkerStackPreview();
+    { const el = win.document.getElementById('ms-code'); el.value = '0x10000'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
+    { const el = win.document.getElementById('ms-codesize'); el.value = '0x400'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
+    { const el = win.document.getElementById('ms-data'); el.value = '0x20000'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
+    { const el = win.document.getElementById('ms-datasize'); el.value = '0x400'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
 
     const stackPreviewVal = win.document.getElementById('ms-stack').value;
     console.log('Calculated Stack Top Preview (0x20000 + 0x400):', stackPreviewVal);
@@ -329,11 +328,10 @@ setTimeout(async () => {
     win.setLanguageMode('c');
     await win.loadExample('fibonacci_c');
     win.openSettingsModal('linker');
-    win.document.getElementById('ms-code').value = '0x10000';
-    win.document.getElementById('ms-codesize').value = '0x400';
-    win.document.getElementById('ms-data').value = '0x20000';
-    win.document.getElementById('ms-datasize').value = '0x400';
-    win.updateLinkerStackPreview();
+    { const el = win.document.getElementById('ms-code'); el.value = '0x10000'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
+    { const el = win.document.getElementById('ms-codesize'); el.value = '0x400'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
+    { const el = win.document.getElementById('ms-data'); el.value = '0x20000'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
+    { const el = win.document.getElementById('ms-datasize'); el.value = '0x400'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
     win.applyAndCloseSettings();
     await win.assembleOnly();
 
@@ -348,7 +346,7 @@ setTimeout(async () => {
 
     // Also test user override of Stack Top to a custom address (e.g. 0x80000)
     win.openSettingsModal('linker');
-    win.document.getElementById('ms-stack').value = '0x80000';
+    { const el = win.document.getElementById('ms-stack'); el.value = '0x80000'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
     win.applyAndCloseSettings();
 
     await win.loadExample('fibonacci_c');

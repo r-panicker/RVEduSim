@@ -22,6 +22,8 @@ export const viewRev = $state({
   console: 0,
   page: 0,
   bpFigure: 0,
+  immPopover: 0,
+  dpPanel: 0,
 });
 
 export type ViewName = keyof typeof viewRev;

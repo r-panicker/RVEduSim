@@ -547,7 +547,7 @@ setTimeout(async () => {
     // Selecting circle_accel sets the code segment from its row in
     // examples/index.txt, so it fits; the overflow is forced by shrinking it.
     await win.loadExample('circle_accel');
-    doc.getElementById('ms-codesize').value = '0x100';
+    { const el = doc.getElementById('ms-codesize'); el.value = '0x100'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
     win.eval('applyAndCloseSettings()');
     win.clearLog();
     win.assembleOnly();

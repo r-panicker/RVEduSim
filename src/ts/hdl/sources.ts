@@ -11,11 +11,11 @@ import { hdlFindWrapper, hdlStripNoise, hdlWrappers } from './verilog';
 import { ui } from '../machine/state';
 import { setSimEngineMode } from '../ui/engine-mode';
 import { refreshDownloadMenu, setWrapperWarning } from '../ui/execution';
-import { escapeHtml } from '../ui/panels';
 import { updateToolbarButtonStates } from '../ui/run-control';
 import { hdlRefreshRegPathHint } from '../ui/waveform';
 import { byId } from '../ui/dom';
 import { redrawToolbar, toolbar } from '../ui/toolbar-state';
+import { redraw } from '../ui/views.svelte';
 import { errorMessage } from '../errors';
 export function hdlAddFiles(fileList: ArrayLike<File>) {
   const pending: Promise<HdlSource>[] = [];
@@ -32,7 +32,7 @@ export function hdlAddFiles(fileList: ArrayLike<File>) {
       const existing = hdlSources.files.findIndex(x => x.name === f.name);
       if (existing >= 0) hdlSources.files[existing] = f; else hdlSources.files.push(f);
     }
-    renderHdlFileList();
+    hdlSourcesChanged();
     hdlLog('Loaded ' + loaded.length + ' file(s): ' + loaded.map(f => f.name).join(', '), 'sys');
   });
 }
@@ -45,8 +45,8 @@ export function hdlAddFiles(fileList: ArrayLike<File>) {
 export const HDL_PREBUILT_FILES = ['Wrapper.v', 'RV_reference.v'];
 
 export async function hdlLoadPrebuiltProcessor() {
-  const btn = byId<HTMLButtonElement>('hdlPrebuiltBtn');
-  if (btn) btn.disabled = true;
+  hdlSources.loadingPrebuilt = true;
+  redraw('settings');
   try {
     hdlStatus('fetching the prebuilt processor …', 'busy');
     const loaded = await Promise.all(HDL_PREBUILT_FILES.map(async name => {
@@ -58,7 +58,7 @@ export async function hdlLoadPrebuiltProcessor() {
     for (const f of loaded) if (/^\s*module\s+Wrapper\b/m.test(f.src)) f.isPrebuilt = true;
     hdlForgetFolder();
     hdlSources.files = loaded;
-    renderHdlFileList();
+    hdlSourcesChanged();
     hdlSyncReferenceWrapperDepths();
     hdlLog('Loaded the prebuilt processor: ' + loaded.map(f => f.name).join(', ') +
       '. It is pre-synthesised, so it will not tell you anything about how a ' +
@@ -70,7 +70,8 @@ export async function hdlLoadPrebuiltProcessor() {
       'opened as a file.', 'err');
     hdlStatus('prebuilt processor unavailable', 'err');
   } finally {
-    if (btn) btn.disabled = false;
+    hdlSources.loadingPrebuilt = false;
+    redraw('settings');
   }
 }
 
@@ -78,13 +79,13 @@ export function hdlRemoveFile(name: string) {
   const gone = hdlSources.files.find(f => f.name === name);
   if (gone && gone.folderPath && hdlSources.folder) hdlSources.folder.excluded.add(gone.folderPath);
   hdlSources.files = hdlSources.files.filter(f => f.name !== name);
-  renderHdlFileList();
+  hdlSourcesChanged();
 }
 
 export function hdlClearFiles() {
   hdlForgetFolder();
   hdlSources.files = [];
-  renderHdlFileList();
+  hdlSourcesChanged();
   hdlLog('Cleared all Verilog sources.', 'sys');
 }
 
@@ -199,7 +200,7 @@ export function hdlApplyFolderFiles(list: FolderFile[], first: boolean) {
     before.every((x, i) => x.name === incoming[i].name && x.src === incoming[i].src);
   if (same && !first) return false;
   hdlSources.files = own.concat(incoming);
-  renderHdlFileList();
+  hdlSourcesChanged();
   if (first) {
     hdlLog('Loaded ' + incoming.length + ' file(s) from the folder ' + f.name + ': ' +
       incoming.map(x => x.name).join(', '), 'sys');
@@ -242,7 +243,7 @@ export function hdlReadFolder(first = false): Promise<boolean> {
         if (!handle) return false;
         if ((await handle.queryPermission({ mode: 'read' })) !== 'granted') {
           f.pending = true;
-          renderHdlFileList();
+          hdlSourcesChanged();
           return false;
         }
         list = await hdlWalkHandle(handle, '', []);
@@ -295,24 +296,9 @@ export function hdlForgetFolder() {
   for (const f of hdlSources.files) delete f.folderPath;
 }
 
-export function hdlRenderFolderButton() {
-  const btn = byId<HTMLButtonElement>('hdlFolderBtn');
-  if (!btn) return;
-  const input = byId<HTMLInputElement>('hdlFolderInput');
-  const can = window.rvNative || window.showDirectoryPicker || (input && 'webkitdirectory' in input);
-  btn.style.display = can ? '' : 'none';
-  if (hdlSources.folder && hdlSources.folder.pending) {
-    btn.textContent = '↻ ' + hdlSources.folder.name;
-    btn.title = 'Read the folder ' + hdlSources.folder.name + ' again. The browser asks for permission first.';
-  } else {
-    btn.textContent = 'folder…';
-    btn.title = (window.rvNative || window.showDirectoryPicker)
-      ? 'Load every Verilog file in a folder and its subfolders that sits under Wrapper. ' +
-        'The folder is read again before each run, so edits made in another editor are picked up.'
-      : 'Load every Verilog file in a folder and its subfolders that sits under Wrapper. ' +
-        'This browser hands over a copy, so pick the folder again after editing.';
-  }
-}
+// Whether a folder can be picked here at all, and how it is read.
+export const hdlFolderPickable = !!(window.rvNative || window.showDirectoryPicker || 'webkitdirectory' in document.createElement('input'));
+export const hdlFolderLive = !!(window.rvNative || window.showDirectoryPicker);
 
 // IndexedDB holds the browser's folder handles, which localStorage cannot
 // store: the HDL sources' under hdlFolder, the examples' under examplesFolder.
@@ -332,28 +318,27 @@ export function hdlFolderStore(op: 'get' | 'put' | 'delete', value?: unknown, ke
   });
 }
 
+// A folder as <input webkitdirectory> hands it over: a copy, read once.
+export function hdlFolderInputPicked(files: ArrayLike<File>) {
+  const picked = Array.from(files);
+  if (!picked.length) return Promise.resolve();
+  const root = (picked[0].webkitRelativePath || '').split('/')[0] || 'folder';
+  return Promise.all(picked
+    .filter(f => HDL_SOURCE_RE.test(f.name))
+    .slice(0, HDL_FOLDER_MAX)
+    .map(f => f.text().then(src => ({ path: (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name, src }))))
+    .then(list => {
+      hdlForgetFolder();
+      hdlSources.folder = hdlFolderMakeState('snapshot', root);
+      hdlApplyFolderFiles(list, true);
+      if (ui.engine !== 'hdl') setSimEngineMode('hdl');
+    });
+}
+
 export function hdlInitFolder() {
-  const input = byId<HTMLInputElement>('hdlFolderInput');
-  if (input) input.addEventListener('change', () => {
-    const picked = Array.from(input.files || []);
-    input.value = '';
-    if (!picked.length) return;
-    const root = (picked[0].webkitRelativePath || '').split('/')[0] || 'folder';
-    Promise.all(picked
-      .filter(f => HDL_SOURCE_RE.test(f.name))
-      .slice(0, HDL_FOLDER_MAX)
-      .map(f => f.text().then(src => ({ path: (f.webkitRelativePath || f.name).split('/').slice(1).join('/') || f.name, src }))))
-      .then(list => {
-        hdlForgetFolder();
-        hdlSources.folder = hdlFolderMakeState('snapshot', root);
-        hdlApplyFolderFiles(list, true);
-        if (ui.engine !== 'hdl') setSimEngineMode('hdl');
-      });
-  });
   window.addEventListener('focus', () => {
     if (hdlSources.folder && !hdlActivity.running) hdlReadFolder();
   });
-  hdlRenderFolderButton();
   if (window.rvNative) {
     if (window.rvNative.rememberedFolder) {
       const dir = window.rvNative.rememberedFolder;
@@ -370,25 +355,9 @@ export function hdlInitFolder() {
   }
 }
 
-export function renderHdlFileList() {
-  const el = byId('hdlFileList');
-  if (!el) return;
-  if (!hdlSources.files.length) {
-    el.innerHTML = '<div class="hdl-empty">No files loaded yet.</div>';
-  } else {
-    const wrapper = hdlFindWrapper();
-    el.innerHTML = hdlSources.files.map(f => {
-      const isWrap = wrapper && f.name === wrapper.name;
-      const kb = (f.src.length / 1024).toFixed(1);
-      return '<div class="hdl-file' + (isWrap ? ' hdl-file-wrapper' : '') + '">' +
-        '<span class="hdl-file-name">' + escapeHtml(f.name) + '</span>' +
-        (isWrap ? '<span class="hdl-file-tag">Wrapper</span>' : '') +
-        '<span class="hdl-file-size">' + kb + ' kB</span>' +
-        '<button type="button" class="hdl-file-x" title="Remove this file" ' +
-        'data-name="' + escapeHtml(f.name) + '" onclick="hdlRemoveFile(this.dataset.name)">&times;</button>' +
-        '</div>';
-    }).join('');
-  }
+// After any change to the loaded files: Settings lists them (Settings.svelte).
+export function hdlSourcesChanged() {
+  redraw('settings');
   // The sources define both the compiled binary and where the register
   // file lives, so any change to them retires the current recording.
   hdlDiscardTrace();
@@ -419,12 +388,6 @@ export function updateHdlReadiness() {
     : { show, long: n + ' files', short: n + ' files', warn: false,
         title: 'Loaded: ' + hdlSources.files.map(f => f.name).join(', ') + ' - click to manage them' };
   redrawToolbar();
-  const note = byId('hdlSourcesNote');
-  if (note) note.textContent = hdlSources.files.length
-    ? hdlSources.files.length + ' loaded' + (hdlSources.folder && !hdlSources.folder.pending ? ' from ' + hdlSources.folder.name : '') +
-      (wrapper ? ', Wrapper found' : ', no Wrapper')
-    : 'none loaded';
-  hdlRenderFolderButton();
   // The toolbar's Run/Step buttons gate on the same conditions, so they
   // have to be refreshed here too - loading the sources is exactly the
   // moment they become usable.

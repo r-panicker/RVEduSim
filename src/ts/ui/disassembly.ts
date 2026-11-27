@@ -8,7 +8,7 @@ import { cpu, MachineLine, program, run, ui } from '../machine/state';
 import { PDP_COLOUR } from './datapath';
 import { editor, setStatus } from './editor';
 import { editorState } from './editor-state';
-import { applyPanelColLayout, escapeHtml, panelFindActive, panelFindMatch, setPanelFindCount } from './panels';
+import { applyPanelColLayout, panelFindActive, panelFindMatch, setPanelFindCount } from './panels';
 import { redraw } from './views.svelte';
 import { byId, targetEl } from './dom';
 export function updateMachineCode() {
@@ -227,46 +227,24 @@ export function updateDisassembly() {
 // The tap is bound to click rather than touchstart: a scroll gesture does
 // not fire click, so dragging the disassembly still scrolls it instead of
 // opening a bubble every time.
+// The popover itself is ImmPopover.svelte.
 export let immPopoverFor: HTMLElement | null = null;
-
-export function immPopover() {
-  let el = document.getElementById('immPopover');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'immPopover';
-    el.hidden = true;
-    document.body.appendChild(el);
-  }
-  return el;
-}
+export let immPopoverView = { readings: [] as [string, string][], anchor: null as DOMRect | null };
 
 export function hideImmPopover() {
+  if (!immPopoverFor) return;
   immPopoverFor = null;
-  const el = document.getElementById('immPopover');
-  if (el) el.hidden = true;
+  immPopoverView = { readings: [], anchor: null };
+  redraw('immPopover');
 }
 
 export function showImmPopover(span: HTMLElement) {
   let readings: [string, string][];
   try { readings = JSON.parse(decodeURIComponent(span.dataset.imm || '')) || []; } catch (e) { return; }
   if (!readings.length) return;
-  const el = immPopover();
-  el.innerHTML = readings
-    .map(r => `<div class="imm-row"><span class="imm-key">${escapeHtml(r[0])}</span> <span class="imm-val">${escapeHtml(r[1])}</span></div>`)
-    .join('');
-  el.hidden = false;
   immPopoverFor = span;
-
-  // Measured after it is visible, then clamped so it stays on screen at
-  // phone width, where the panel is nearly as wide as the viewport.
-  const r = span.getBoundingClientRect();
-  const w = el.offsetWidth, h = el.offsetHeight;
-  let left = r.left;
-  let top = r.bottom + 6;
-  if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
-  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
-  el.style.left = left + 'px';
-  el.style.top = top + 'px';
+  immPopoverView = { readings, anchor: span.getBoundingClientRect() };
+  redraw('immPopover');
 }
 
 // Run once the page has loaded every module (main.ts), in page order.
@@ -274,7 +252,7 @@ export function onDisassemblyLoad() {
   document.addEventListener('mouseover', e => {
     const t = targetEl(e);
     const span = t?.closest<HTMLElement>('.disasm-imm');
-    if (span) showImmPopover(span);
+    if (span) { if (span !== immPopoverFor) showImmPopover(span); }
     else if (immPopoverFor && !t?.closest('#immPopover')) hideImmPopover();
   });
   document.addEventListener('click', e => {

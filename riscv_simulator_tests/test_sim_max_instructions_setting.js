@@ -69,12 +69,14 @@ setTimeout(async () => {
       throw new Error('Simulator settings tab should be visible');
     }
     if (parseInt(maxInstrInput.value, 10) !== 100000000) {
-      throw new Error(`Expected buildCyclesPanel to set input value to 100000000, got ${maxInstrInput.value}`);
+      throw new Error(`Expected the field to show 100000000, got ${maxInstrInput.value}`);
     }
     console.log('✅ openSettingsModal("simulator") properly synchronizes field value');
 
     // 4. Update the input value and apply settings
+    // Typed, then Apply: leaving the field to click Apply raises its change event.
     maxInstrInput.value = '50000000';
+    maxInstrInput.dispatchEvent(new win.Event('change', { bubbles: true }));
     win.applyAndCloseSettings();
     if (win.run.maxInstructions !== 50000000) {
       throw new Error(`Expected maxInstructionsPerRun to update to 50000000, got ${win.run.maxInstructions}`);
@@ -88,7 +90,7 @@ setTimeout(async () => {
     }
     console.log('✅ Re-opening modal retains updated value 50,000,000');
 
-    // 6. Test Reset Defaults
+    // 6. Test Reset Tab
     win.switchSettingsTab('simulator');
     win.resetCurrentSettingsTab();
     if (win.run.maxInstructions !== 100000000) {

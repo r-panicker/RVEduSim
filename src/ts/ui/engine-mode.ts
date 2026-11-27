@@ -3,14 +3,14 @@
 
 import { hdlLog, loadHdlEngine } from '../hdl/engine';
 import { hdlSeek } from '../hdl/seek';
-import { hdlAddFiles, hdlInitFolder, renderHdlFileList, updateHdlReadiness } from '../hdl/sources';
+import { hdlAddFiles, hdlInitFolder, hdlSourcesChanged, updateHdlReadiness } from '../hdl/sources';
 import { hdlActivity, hdlRec, hdlSources } from '../hdl/state';
 import { cpu, program, run, ui } from '../machine/state';
 import { log, setStatus } from './editor';
 import { openSettingsModal, refreshSimSettingsScope, updateStats } from './execution';
 import { updateRegisters } from './panels';
 import { resetAll, updateToolbarButtonStates } from './run-control';
-import { hdlInitSimulator, hdlRefreshRegPathHint, hdlSimulatorName, initWaveDock, initWavePicker, updateWaveAvailability } from './waveform';
+import { hdlInitSimulator, hdlSimulatorName, initWaveDock, initWavePicker, updateWaveAvailability } from './waveform';
 import { byId } from './dom';
 import { setConsoleH } from './page-layout';
 import { redrawToolbar, toolbar } from './toolbar-state';
@@ -134,29 +134,9 @@ export function initGlobalVerilogDrop() {
 }
 
 export function hdlInitSources() {
-  const drop = byId('hdlDropZone');
-  const input = byId<HTMLInputElement>('hdlFileInput');
-  if (input) input.addEventListener('change', e => {
-    hdlAddFiles(input.files ?? []);
-    input.value = '';
-  });
   hdlInitFolder();
   hdlInitSimulator();
-  if (drop) {
-    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => {
-      e.preventDefault(); e.stopPropagation();
-      drop.classList.add('hdl-drop-active');
-    }));
-    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
-      e.preventDefault(); e.stopPropagation();
-      drop.classList.remove('hdl-drop-active');
-    }));
-    drop.addEventListener('drop', e => {
-      if (e.dataTransfer && e.dataTransfer.files) hdlAddFiles(e.dataTransfer.files);
-    });
-  }
-  renderHdlFileList();
-  hdlRefreshRegPathHint();
+  hdlSourcesChanged();
   initConsoleResizer();
   initWaveDock();
   initWavePicker();

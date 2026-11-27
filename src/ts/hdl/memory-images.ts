@@ -3,14 +3,13 @@
 
 import { hdlLog } from './engine';
 import { hdlDiscardTrace } from './run';
-import { renderHdlFileList } from './sources';
-import { hdlSources } from './state';
+import { hdlSourcesChanged } from './sources';
+import { hdlConfig, hdlSources } from './state';
 import { hdlFindWrapper, hdlModuleBody } from './verilog';
 import { getMemByte } from '../machine/memory';
 import { layout, program, type MachineLine, type PlacedLine } from '../machine/state';
 import { setStatus } from '../ui/editor';
 import { DEFAULT_DEPTH_BITS } from '../ui/example-sources';
-import { byId } from '../ui/dom';
 
 // ================================================================
 // Memory images for the Wrapper's $readmemh
@@ -100,7 +99,7 @@ export function hdlSyncReferenceWrapperDepths() {
     'localparams in your own Wrapper.', 'sys');
   setStatus('Prebuilt Wrapper sized for this program: IROM ' + need.irom +
     ', DMEM ' + need.dmem, 'info');
-  renderHdlFileList();
+  hdlSourcesChanged();
   return true;
 }
 
@@ -164,8 +163,7 @@ export function hdlDiscoverRegBank() {
 // What the testbench should actually use: an explicit override from the
 // panel wins, otherwise whatever discovery found.
 export function hdlRegBankPath() {
-  const el = byId<HTMLInputElement>('hdlRegPath');
-  const manual = el && el.value.trim();
+  const manual = hdlConfig.regPath.trim();
   if (manual) return manual;
   return hdlDiscoverRegBank();
 }

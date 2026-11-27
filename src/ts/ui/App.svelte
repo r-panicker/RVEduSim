@@ -14,6 +14,7 @@
   import FloatSteps from './FloatSteps.svelte';
   import BpFigure from './BpFigure.svelte';
   import Credits from './Credits.svelte';
+  import ImmPopover from './ImmPopover.svelte';
   import Toolbar from './Toolbar.svelte';
   import FindReplace from './FindReplace.svelte';
   import Console from './Console.svelte';
@@ -30,6 +31,7 @@
   <FloatSteps />
   <BpFigure />
   <Credits />
+  <ImmPopover />
   <div class="main">
     <div class="left-panel">
       <Toolbar />

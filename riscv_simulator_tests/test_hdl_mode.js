@@ -442,7 +442,7 @@ setTimeout(async () => {
     // bar, not only in the console where the success message would follow it.
     // Selecting an example sizes the segment to fit it, so the overflow is forced.
     await win.loadExample('circle_accel');
-    doc.getElementById('ms-codesize').value = '0x100';
+    { const el = doc.getElementById('ms-codesize'); el.value = '0x100'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
     win.eval('applyAndCloseSettings()');
     win.assembleOnly();
     check('A code-segment overflow survives on the status bar',

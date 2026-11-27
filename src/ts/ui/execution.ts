@@ -3,7 +3,7 @@
 // breakpoints, assembly and single-instruction execution.
 
 import { assemble } from '../asm/assembler';
-import { cProgram } from '../c/state';
+import { COMPILER_DEFAULT, compilerConfig, cProgram } from '../c/state';
 import { hdlCyclesFor } from '../hdl/engine';
 import { hdlSyncReferenceWrapperDepths } from '../hdl/memory-images';
 import { hdlUpdateStatsBar } from '../hdl/shared-ui';
@@ -23,9 +23,9 @@ import { exampleDepths, invalidateCompiledProgram } from './examples-language';
 import { updateMemoryView } from './memory-register-views';
 import { updateLineNumbers } from './panels';
 import { setUartStatusNote, updatePeripherals } from './peripherals';
-import { pipeInitControls, pipeSetMode, pipeSyncControls } from './pipeline-controls';
+import { pipeSetMode } from './pipeline-controls';
 import { assembleOnly, resetAll } from './run-control';
-import { hdlDownloadTestbench, hdlDownloadVcd, hdlRefreshRegPathHint, hdlShowCycles, setHdlDetail, setHdlRegPath, setHdlSimulator } from './waveform';
+import { hdlDownloadTestbench, hdlDownloadVcd, hdlPickCycleBudget, setHdlDetail, setHdlGeneration, setHdlRegPath, setHdlSimulator } from './waveform';
 import { saveSettings } from './settings-store';
 import { forgetExamplesFolder, setExamplesWebUrl } from './example-sources';
 import { redraw } from './views.svelte';
@@ -81,50 +81,23 @@ export const CYCLE_FIELD_DEFS: [keyof CycleConfig, string][] = [
   ['system', 'System (ECALL / EBREAK)']
 ];
 
-// Statement Stepping reaches both engines, so it is offered on both tabs.
-// The two checkboxes are the same setting, and are kept identical.
-export const STMT_STEP_IDS = ['simStatementStep'];
-export function syncStatementStepBoxes() {
-  STMT_STEP_IDS.forEach(id => {
-    const el = byId<HTMLInputElement>(id);
-    if (el) el.checked = !!run.statementStepping;
-  });
+// The Simulation tab's settings for the JavaScript model, set as they are
+// changed.
+export function setStatementStepping(on: boolean) {
+  run.statementStepping = on;
+  redraw('settings');
 }
 
-export function buildCyclesPanel() {
-  pipeInitControls();
-  STMT_STEP_IDS.forEach(id => {
-    const el = byId<HTMLInputElement>(id);
-    if (!el) return;
-    el.checked = !!run.statementStepping;
-    el.onchange = () => { run.statementStepping = el.checked; syncStatementStepBoxes(); };
-  });
+export function setMaxInstructions(v: string) {
+  const n = parseInt(v, 10);
+  run.maxInstructions = n > 0 ? n : 100000000;
+  redraw('settings');
+}
 
-  const maxInstrEl = byId<HTMLInputElement>('simMaxInstrPerRun');
-  if (maxInstrEl) {
-    maxInstrEl.value = String((typeof run.maxInstructions === 'number' && run.maxInstructions > 0) ? run.maxInstructions : 100000000);
-    maxInstrEl.onchange = () => {
-      const v = parseInt(maxInstrEl.value, 10);
-      run.maxInstructions = (v > 0) ? v : 100000000;
-      maxInstrEl.value = String(run.maxInstructions);
-    };
-  }
-
-  const body = byId('cyclesConfigBody');
-  let html = '';
-  for (const [key, label] of CYCLE_FIELD_DEFS) {
-    html += '<div class="cycle-field"><label for="cf-' + key + '">' + label + '</label>' +
-      '<input id="cf-' + key + '" type="number" min="1" max="1000" value="' + run.cycleConfig[key] + '"></div>';
-  }
-  body.innerHTML = html;
-  for (const [key] of CYCLE_FIELD_DEFS) {
-    const input = byId<HTMLInputElement>('cf-' + key);
-    input.addEventListener('change', () => {
-      const v = parseInt(input.value, 10);
-      run.cycleConfig[key] = (v > 0 && v <= 1000) ? v : 1;
-      input.value = String(run.cycleConfig[key]);
-    });
-  }
+export function setCycleCount(key: keyof CycleConfig, v: string) {
+  const n = parseInt(v, 10);
+  run.cycleConfig[key] = n > 0 && n <= 1000 ? n : 1;
+  redraw('settings');
 }
 
 export function resetCyclesConfig() {
@@ -141,7 +114,7 @@ export function resetCyclesConfig() {
   pipeline.hazards = Object.assign({}, PIPE_HAZ_DEFAULT);
   pipeline.predictor = Object.assign({}, PIPE_BP_DEFAULT);
   pipeSetMode(false);
-  buildCyclesPanel();
+  redraw('settings');
   setStatus('Simulator settings reset to defaults', 'success');
 }
 
@@ -149,7 +122,14 @@ export function resetCyclesConfig() {
 // The Simulation tab shows the active engine's settings only.
 // Whether Settings is open, its tab, and whether the Simulation tab shows
 // HDL mode's settings rather than the JavaScript model's.
-export let settingsModel = { open: false, tab: 'compiler', hdl: false, wrappers: null as string[] | null };
+// linker: the Linker tab's fields as typed, applied by Apply & Close.
+// regFound: the register file's path as detected in the sources.
+export type LinkerField = 'code' | 'codesize' | 'data' | 'datasize' | 'stack' | 'mmio';
+export let settingsModel = {
+  open: false, tab: 'compiler', hdl: false, wrappers: null as string[] | null,
+  linker: { code: '', codesize: '', data: '', datasize: '', stack: '', mmio: '' } as Record<LinkerField, string>,
+  regFound: null as string | null,
+};
 
 // The loaded files that declare the Wrapper, when there is not exactly one
 // (null: nothing to warn about).
@@ -158,12 +138,16 @@ export function setWrapperWarning(files: string[] | null) {
   settingsModel = { ...settingsModel, wrappers: files };
   redraw('settings');
 }
+export function setSettingsRegFound(path: string | null) {
+  if (path === settingsModel.regFound) return;
+  settingsModel = { ...settingsModel, regFound: path };
+  redraw('settings');
+}
 export let creditsModel = { open: false, visits: '' };
 
 export function refreshSimSettingsScope() {
   settingsModel = { ...settingsModel, hdl: ui.engine === 'hdl' };
   redraw('settings');
-  pipeSyncControls();
 }
 
 // Assembled here rather than written into the page, so the address is not
@@ -225,7 +209,6 @@ export function closeCreditsModal() {
 
 export function openSettingsModal(initialTab = 'compiler') {
   buildMemSegmentsPanel();
-  buildCyclesPanel();
   refreshSimSettingsScope();
   switchSettingsTab(initialTab);
   settingsModel = { ...settingsModel, open: true };
@@ -249,18 +232,15 @@ export function parseHexAddr(str: string, fallback: number) {
   return v & ~3; // word align
 }
 
-export function updateLinkerStackPreview() {
-  const g = (id: string) => {
-    const el = byId<HTMLInputElement>(id);
-    return el ? el.value : '';
-  };
-  const dBase = parseHexAddr(g('ms-data'), layout.dataBase);
-  const dSize = parseHexAddr(g('ms-datasize'), layout.dataSize);
-  const stackTop = (dBase + dSize) >>> 0;
-  const stackInput = byId<HTMLInputElement>('ms-stack');
-  if (stackInput) {
-    stackInput.value = '0x' + stackTop.toString(16);
+// The stack top follows the data segment while the other fields are typed.
+export function setLinkerField(key: LinkerField, value: string) {
+  const linker = { ...settingsModel.linker, [key]: value };
+  if (key !== 'stack' && key !== 'mmio') {
+    const top = (parseHexAddr(linker.data, layout.dataBase) + parseHexAddr(linker.datasize, layout.dataSize)) >>> 0;
+    linker.stack = '0x' + top.toString(16);
   }
+  settingsModel = { ...settingsModel, linker };
+  redraw('settings');
 }
 
 // An example declares the two memory depths it needs in examples/index.txt.
@@ -285,69 +265,35 @@ export function applyExampleMemoryConfig(key: string) {
       '. Change these in Settings → Linker, and in Wrapper, if you change the program.', 'info');
 }
 
+// The Linker tab's fields, from the layout in use.
 export function buildMemSegmentsPanel() {
-  const codeEl = byId<HTMLInputElement>('ms-code');
-  const codeSizeEl = byId<HTMLInputElement>('ms-codesize');
-  const dataEl = byId<HTMLInputElement>('ms-data');
-  const dataSizeEl = byId<HTMLInputElement>('ms-datasize');
-  const stackEl = byId<HTMLInputElement>('ms-stack');
-  const mmioEl = byId<HTMLInputElement>('ms-mmio');
-
-  if (codeEl) codeEl.value = '0x' + (layout.baseAddress >>> 0).toString(16);
-  if (codeSizeEl) codeSizeEl.value = '0x' + (layout.codeSize >>> 0).toString(16);
-  if (dataEl) dataEl.value = '0x' + (layout.dataBase >>> 0).toString(16);
-  if (dataSizeEl) dataSizeEl.value = '0x' + (layout.dataSize >>> 0).toString(16);
-  if (stackEl) stackEl.value = '0x' + (layout.stackBase >>> 0).toString(16);
-  if (mmioEl) mmioEl.value = '0x' + (layout.mmioBase >>> 0).toString(16);
-}
-
-export function getCyclesFromPanel() {
-  for (const [key] of CYCLE_FIELD_DEFS) {
-    const el = byId<HTMLInputElement>('cf-' + key);
-    if (el) {
-      const v = parseInt(el.value, 10);
-      run.cycleConfig[key] = (v > 0 && v <= 1000) ? v : 1;
-    }
-  }
+  const hex = (v: number) => '0x' + (v >>> 0).toString(16);
+  settingsModel = { ...settingsModel, linker: {
+    code: hex(layout.baseAddress), codesize: hex(layout.codeSize), data: hex(layout.dataBase),
+    datasize: hex(layout.dataSize), stack: hex(layout.stackBase), mmio: hex(layout.mmioBase),
+  } };
+  redraw('settings');
 }
 
 export function applyAndCloseSettings() {
-  // 1. Apply Linker / Memory Segments
-  const g = (id: string) => {
-    const el = byId<HTMLInputElement>(id);
-    return el ? el.value : '';
-  };
   // Only a changed memory layout needs the program reassembled;
   // reloading otherwise would discard an HDL recording for nothing.
   // Compared unsigned: the word-align mask turns an address at or above
   // 0x80000000 (the MMIO base) negative.
+  const f = settingsModel.linker;
   const layoutKey = () => [layout.baseAddress, layout.codeSize, layout.dataBase, layout.dataSize, layout.stackBase, layout.mmioBase]
     .map(v => v >>> 0).join(',');
   const layoutBefore = layoutKey();
-  layout.baseAddress = parseHexAddr(g('ms-code'), layout.baseAddress);
-  layout.codeSize = parseHexAddr(g('ms-codesize'), layout.codeSize);
-  layout.dataBase = parseHexAddr(g('ms-data'), layout.dataBase);
-  layout.dataSize = parseHexAddr(g('ms-datasize'), layout.dataSize);
+  layout.baseAddress = parseHexAddr(f.code, layout.baseAddress);
+  layout.codeSize = parseHexAddr(f.codesize, layout.codeSize);
+  layout.dataBase = parseHexAddr(f.data, layout.dataBase);
+  layout.dataSize = parseHexAddr(f.datasize, layout.dataSize);
   const defaultStack = (layout.dataBase + layout.dataSize) >>> 0;
-  layout.stackBase = parseHexAddr(g('ms-stack'), defaultStack);
-  layout.mmioBase = parseHexAddr(g('ms-mmio'), layout.mmioBase);
+  layout.stackBase = parseHexAddr(f.stack, defaultStack);
+  layout.mmioBase = parseHexAddr(f.mmio, layout.mmioBase);
 
   const memAddrEl = byId<HTMLInputElement>('memAddr');
   if (memAddrEl) memAddrEl.value = '0x' + (layout.baseAddress >>> 0).toString(16);
-
-  // 2. Apply Simulator CPI, Statement Stepping & Max Instructions
-  getCyclesFromPanel();
-  // Either copy is authoritative; they are mirrored on change.
-  const stmtEl = byId<HTMLInputElement>('simStatementStep');
-  if (stmtEl) run.statementStepping = stmtEl.checked;
-  syncStatementStepBoxes();
-
-  const maxInstrEl = byId<HTMLInputElement>('simMaxInstrPerRun');
-  if (maxInstrEl) {
-    const v = parseInt(maxInstrEl.value, 10);
-    run.maxInstructions = (v > 0) ? v : 100000000;
-    maxInstrEl.value = String(run.maxInstructions);
-  }
 
   closeSettingsModal();
   if (layoutKey() !== layoutBefore) reloadAfterLayoutChange();
@@ -357,20 +303,11 @@ export function applyAndCloseSettings() {
 
 export function resetCurrentSettingsTab() {
   if (ui.settingsTab === 'compiler') {
-    const compSelect = byId<HTMLSelectElement>('godboltCompilerSelect');
-    const optSelect = byId<HTMLSelectElement>('godboltOptSelect');
-    const archInput = byId<HTMLInputElement>('godboltArchFlags');
-    const useMCheck = byId<HTMLInputElement>('godboltUseM');
-    const flags = () => [compSelect, optSelect, archInput].map(el => el ? el.value : '').join('|') +
-      (useMCheck && useMCheck.checked ? '|M' : '');
-    const before = flags();
-    if (compSelect) compSelect.value = 'rv32-cclang2010';
-    if (optSelect) optSelect.value = '-O0';
-    if (useMCheck) useMCheck.checked = false;
-    if (archInput) archInput.value = '-march=rv32i -mabi=ilp32';
-    // Setting a value from script raises no change event, so the
-    // watchers that retire a stale build have to be stood in for.
-    if (flags() !== before) invalidateCompiledProgram('Compiler settings');
+    const changed = (Object.keys(COMPILER_DEFAULT) as (keyof typeof compilerConfig)[])
+      .some(k => compilerConfig[k] !== COMPILER_DEFAULT[k]);
+    Object.assign(compilerConfig, COMPILER_DEFAULT);
+    redraw('settings');
+    if (changed) invalidateCompiledProgram('Compiler settings');
     setStatus('Compiler settings reset to defaults (Clang 20.1, -O0)', 'info');
   } else if (ui.settingsTab === 'examples') {
     setExamplesWebUrl('');
@@ -379,34 +316,24 @@ export function resetCurrentSettingsTab() {
   } else if (ui.settingsTab === 'linker') {
     // Only the fields: Apply compares them against the live layout to
     // decide whether to reassemble, so it must still see the old one.
-    const set = (id: string, v: number) => {
-      const el = byId<HTMLInputElement>(id);
-      if (el) el.value = '0x' + (v >>> 0).toString(16);
-    };
-    set('ms-code', DEFAULT_BASE);
-    set('ms-codesize', 0x200);
-    set('ms-data', DEFAULT_DATA_BASE);
-    set('ms-datasize', 0x200);
-    set('ms-stack', DEFAULT_DATA_BASE + 0x200);
-    set('ms-mmio', 0xFFFF0000);
+    const hex = (v: number) => '0x' + (v >>> 0).toString(16);
+    settingsModel = { ...settingsModel, linker: {
+      code: hex(DEFAULT_BASE), codesize: hex(0x200), data: hex(DEFAULT_DATA_BASE), datasize: hex(0x200),
+      stack: hex(DEFAULT_DATA_BASE + 0x200), mmio: hex(0xFFFF0000),
+    } };
+    redraw('settings');
     setStatus('Linker defaults filled in - Apply to use them', 'info');
   } else if (ui.settingsTab === 'simulator' && ui.engine !== 'hdl') {
     resetCyclesConfig();
   } else if (ui.settingsTab === 'simulator') {
     // Settings only - the loaded sources are the user's work, and Clear
     // files is right there for them.
-    const set = (id: string, v: string) => {
-      const el = byId<HTMLInputElement | HTMLSelectElement>(id);
-      if (el) el.value = v;
-    };
     Object.assign(hdlCyclesFor, HDL_CYCLES_DEFAULT);
-    set('hdlGeneration', '2005');
-    set('hdlRegPath', '');
+    setHdlGeneration('2005');
+    setHdlRegPath('');
     setHdlSimulator('icarus');
     setHdlDetail('full', true);
-    hdlShowCycles();
-    setHdlRegPath();
-    hdlRefreshRegPathHint();
+    hdlPickCycleBudget();
     setStatus('HDL settings reset to defaults (sources kept)', 'info');
   }
   saveSettings();

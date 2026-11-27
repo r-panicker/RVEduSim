@@ -13,7 +13,7 @@ import { hdlLiveSend } from './live';
 import { hdlDiscoverRegBank, hdlMemFiles, hdlRegBankPath, hdlRequiredDepths, hdlSyncReferenceWrapperDepths } from './memory-images';
 import { hdlBreakAt } from './run';
 import { hdlCurrentCycle, hdlSeek } from './seek';
-import { hdlClearFiles, hdlLoadPrebuiltProcessor, hdlRemoveFile, renderHdlFileList } from './sources';
+import { hdlClearFiles, hdlLoadPrebuiltProcessor, hdlRemoveFile, hdlSourcesChanged } from './sources';
 import { hdlActivity, hdlBuild, hdlConfig, hdlRec, hdlSources, TimedByte, TimedInput } from './state';
 import { hdlAddParamShim, hdlCoreFiles, hdlFirstDifference, hdlModeLabel, hdlObservable, hdlSynthesise } from './synthesis';
 import { hdlBuildTestbench, hdlHasDoubleBuffer } from './testbench';
@@ -180,7 +180,7 @@ export function onSharedUiLoad() {
     getUartRxState: () => ({ byte: uart.rxByte, full: uart.rxFull, dropped: uart.rxDroppedTotal }),
     hdlSetSources: (list: { name: string; src: string }[]) => {
       hdlSources.files = list.map(f => ({ name: f.name, src: f.src }));
-      renderHdlFileList();
+      hdlSourcesChanged();
     },
   });
 }

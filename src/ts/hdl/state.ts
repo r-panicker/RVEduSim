@@ -22,7 +22,13 @@ export const hdlConfig = {
   liveWave: 'live' as 'pause' | 'live',   // when a live run's waveform is built
   compareEnabled: false,   // cross-check against the JS functional model
   synthEnabled: false,     // synthesise with Yosys and simulate the netlist
+  generation: '2005',      // the Verilog standard the sources are compiled as
+  regPath: '',             // the register file's path, when detection is overridden
 };
+
+export const HDL_GENERATIONS: [value: string, label: string][] = [
+  ['2005', 'Verilog-2005'], ['2001', 'Verilog-2001'], ['1995', 'Verilog-1995'], ['2005-sv', 'SystemVerilog'],
+];
 
 // isPrebuilt: the shipped reference core, whose Wrapper sizes are adjusted to the program.
 // folderPath: where a file loaded from a source folder sits in it.
@@ -42,6 +48,7 @@ export const hdlSources = {
   files: [] as HdlSource[],
   folder: null as HdlFolder | null,
   folderReading: null as Promise<boolean> | null,
+  loadingPrebuilt: false,
 };
 
 export interface TimedInput { cycle: number; code: number; value: number }

@@ -72,10 +72,10 @@ Instead each view has a revision counter in `ui/views.svelte.ts` (`viewRev`), an
 `redraw(view)` raises it and calls `flushSync()`, so the view is drawn before the call
 returns, for the caller and for a test reading the DOM next. A view's model is built in its
 `.ts` module, where `tsc` checks it, and assigned afresh as a new object (`disasmModel`,
-`memModel`, `regModel`, `localsModel`, `periphDisplay()`, `toolbar`, `dpHeader`, `waveView`,
-`settingsModel`, `findView`, `floatView`, `dockView`, `consoleLines`, and the dragged sizes in
-`ui/page-layout.ts`); the component derives from it on the counter, and holds markup and event
-bindings only. Called from inside Svelte's own update (a component's effect), `redraw()` only
+`memModel`, `regModel`, `localsModel`, `periphDisplay()`, `toolbar`, `dpHeader`, `dpPanel`,
+`waveView`, `settingsModel`, `immPopoverView`, `findView`, `floatView`, `dockView`, `consoleLines`,
+and the dragged sizes in `ui/page-layout.ts`); the component derives from it on the counter, and
+holds markup and event bindings only. Called from inside Svelte's own update (a component's effect), `redraw()` only
 marks the view, which that update then draws. The toolbar's model (`ui/toolbar-state.ts`) has several
 owners: `run-control.ts` sets the buttons, `hdl/shared-ui.ts` HDL mode's overrides of them,
 `datapath.ts` the Datapath/Waveform button, `hdl/sources.ts` the Verilog chip, `editor.ts` the
@@ -83,15 +83,20 @@ status message and `shared-ui.ts` the metrics.
 
 A control's state comes from the model (the Send button's label from `uart.pending`, a slider
 from `accel`, a button's `disabled` and `title` from the toolbar's), so code that changes the
-state does not also write to the control. Text boxes the user types into (an address, a
-filter, the UART input) are left uncontrolled and read by id. A cell edited in place
+state does not also write to the control. Settings is the same: every control shows the state
+object that holds its setting (`compilerConfig` in `c/state.ts`, `pipeline`, `run`, `clock`,
+`hdlConfig`, `hdlSources`) and sets it through that setting's function, which redraws Settings;
+only the Linker fields are a draft, `settingsModel.linker`, applied by Apply & Close. A setter
+that refuses or clamps a value has the control show the setting again, since Svelte rewrites a
+value only when it changed. Other text boxes the user types into (an address, a filter, the
+UART input) are left uncontrolled and read by id. A cell edited in place
 (`contenteditable`: a register value, a memory byte) holds what was typed rather than the text
 the view drew, so ending an edit redraws it afresh: the Registers body and a Memory row are
 keyed on an edit counter. The register and memory-word popup is one component,
 `EditPopup.svelte`, mounted on `<body>` by `edit-popup.ts` while open. Canvas drawing (the
-OLED, the waveform) and the datapath's animation of its diagrams stay imperative, by id, as
-does the markup some modules generate as text: the datapath's caption, encodings and timeline,
-and in Settings the HDL file list, the cycles table and the linker fields.
+OLED, the waveform) and the datapath's animation of its diagrams stay imperative, as do
+CodeMirror's tooltips and gutter, which CodeMirror builds as DOM nodes it owns. The datapath's
+captions are authored as markup in `datapath.ts` and drawn with `{@html}`.
 
 The waveform and datapath strips are at the bottom of the page on desktop and in their panel
 tabs on a phone, and a component is not moved between parents: crossing the breakpoint mounts
@@ -1063,7 +1068,7 @@ The **Settings** button opens a modal with three tabs: Compiler, Linker and Simu
 |                     [ ] Post-synthesis functional simulation (Icarus)                      |
 |  REGISTER FILE      [ dut.RV1.RegFile1.RegBank ]  detected automatically                   |
 +--------------------------------------------------------------------------------------------+
-| [ Reset Defaults ] [ Reset All ]                                          [ Apply & Close ] |
+| [ Reset Tab ] [ Reset All ]                                              [ Apply & Close ] |
 +--------------------------------------------------------------------------------------------+
 ```
 
@@ -1116,7 +1121,7 @@ compile again to continue.
   optimisation level, which often replaces a multiply or divide by a constant with shifts and
   adds.
 
-**Reset Defaults** resets the current tab only (`resetCurrentSettingsTab()`). On the Compiler tab it
+**Reset Tab** resets the current tab only (`resetCurrentSettingsTab()`). On the Compiler tab it
 restores Clang 20.1.0, `-O0` and RV32I, clearing the compiled program if anything changed. On the
 Linker tab it fills in the default layout, which takes effect on Apply. On the Simulation tab in
 HDL mode it restores the cycle counts, Verilog-2005, automatic register-file detection, Icarus
@@ -1128,7 +1133,7 @@ predictor, cycles table, statement stepping and batch limit, the clock divider a
 UART send mode and gaps, and in HDL mode the Detail options, *Cycles per Run* for each simulator,
 the Verilog standard and the register-file path. The simulator choice keeps its own key,
 `rvsim.hdlSimulator`, and the layout keys are listed in §2.5 and §2.7. A snapshot is written after
-any `change` event in the page, on Apply, Reset Defaults, selecting an example (which sets the
+any `change` event in the page, on Apply, Reset Tab, selecting an example (which sets the
 layout) and `pagehide`; it is read once in `bootSimulator()`, before the first assembly, and
 nothing is written before that. A saved value of the wrong type or out of range is ignored.
 The editor's language, the engine, the program and the HDL sources are not settings and are
@@ -1276,7 +1281,7 @@ There are 13 examples, 7 in assembly and 6 in C. `dip_led` and `dip_led_c` are b
 - *Web*: a folder laid out as `examples/` is, read from its `index.txt`. By default it is the page's own `examples/`; the desktop app carries no example programs and reads `https://r-panicker.github.io/RVEduSim/examples/`. **Settings → Examples** takes another: a `github.com` folder (`/tree/<branch>/<path>`, or a repository, read at `HEAD`) is read through `raw.githubusercontent.com` (`examplesBaseUrl()`), any other http(s) URL as the folder itself. The section is then headed `GitHub: owner/repo/path` or the host. Rows of the default index whose keys are built in are left out; another folder's are listed under `web:<key>`.
 - A folder on this computer, picked in the same tab: through the desktop app (`pickFolder('examples')`, remembered as `examplesFolder` in its settings), a File System Access handle (IndexedDB `kv` / `examplesFolder`), or an `<input webkitdirectory>` copy that is not remembered. With an `index.txt` its rows are the menu; without one, every `.asm`, `.s` and `.c` file is listed by its path, with no memory depths. Keys are `local:<key or path>`. It is read again when the window regains focus and before an example is loaded from it.
 
-Nothing is cached: an index and an example are fetched with `cache: 'no-cache'` when the page starts, when the source changes and when the example is selected. A source that cannot be read, or has nothing in the current language, shows one disabled entry saying why (`unavailable: HTTP 404`, `unavailable: offline`, `no C programs`), and Settings shows each source's state. The last entry, *Example sources…*, opens Settings → Examples. The web URL is a setting (§6); Reset Defaults on the tab returns to the default and forgets the folder.
+Nothing is cached: an index and an example are fetched with `cache: 'no-cache'` when the page starts, when the source changes and when the example is selected. A source that cannot be read, or has nothing in the current language, shows one disabled entry saying why (`unavailable: HTTP 404`, `unavailable: offline`, `no C programs`), and Settings shows each source's state. The last entry, *Example sources…*, opens Settings → Examples. The web URL is a setting (§6); Reset Tab returns to the default and forgets the folder.
 
 **`index.txt`.** The file is plain text so that static site generators serve it verbatim. Its table has one row per example:
 
@@ -1426,7 +1431,7 @@ Shared infrastructure, not suites: `godbolt_cache.js` with `godbolt_cache*.json`
 | `test_new_c_simulation.js` | Compiles and runs `Circle_delay_accel.c` and `ImageDisplay_autoadvance_accel.c`. |
 | `test_baked_examples_full.js` | Compiles and runs the four heaviest examples, two assembly and two C, checking rendered pixels and UART output. |
 | `test_statement_stepping.js` | Statement Stepping in C and assembly, and stepping back over a statement. |
-| `test_example_sources.js` | The Example menu's sections: built in, the site's examples (without a second DIP to LED), a GitHub folder through `raw.githubusercontent.com` (URL forms, its own DIP to LED, a 404 shown as a disabled entry, Reset Defaults), and a local folder with and without `index.txt`, loading from each. |
+| `test_example_sources.js` | The Example menu's sections: built in, the site's examples (without a second DIP to LED), a GitHub folder through `raw.githubusercontent.com` (URL forms, its own DIP to LED, a 404 shown as a disabled entry, Reset Tab), and a local folder with and without `index.txt`, loading from each. |
 | `test_settings_persistence.js` | Settings changed through the controls come back in a second page started with the first one's `localStorage`, the first program assembled into the saved layout; malformed values are ignored; Reset All takes two clicks and removes every `rvsim.*` key. |
 | `test_sim_max_instructions_setting.js` | The run-limit setting and execution-loop throttling. |
 | `test_reset_and_image_display.js` | OLED auto-advance mode 5 rendering, assembly/C pixel parity, peripheral reset. |

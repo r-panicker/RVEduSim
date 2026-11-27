@@ -77,7 +77,7 @@ const settle = () => new Promise(r => setTimeout(r, 30));
   change(a, 'godboltOptSelect', '-O2');
   change(a, 'godboltUseM', true);
   a.openSettingsModal('linker');
-  a.document.getElementById('ms-codesize').value = '0x800';
+  { const el = a.document.getElementById('ms-codesize'); el.value = '0x800'; el.dispatchEvent(new el.ownerDocument.defaultView.Event('input', { bubbles: true })); }
   a.applyAndCloseSettings();
   a.openSettingsModal('simulator');
   change(a, 'simMicroarch', 'multi');

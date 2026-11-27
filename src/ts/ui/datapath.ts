@@ -20,12 +20,11 @@ import { ALU_OP_NAMES, DECODER_TABLE, IMM_SRC_NAMES, aluCompute, ctlBit, extendI
 import { getMemByte, readMem, setMemByte, writeMem } from '../machine/memory';
 import { pipeBhtIndex, pipeEvaluate, pipeline } from '../machine/pipeline';
 import { cpu, layout, oled, program, run, stepHistory, ui } from '../machine/state';
-import { clockInitControls } from './clock-controls';
 import { setDisasmViewMode } from './disassembly';
 import { editor, formatActiveInstructionSignature, riscvAutocomplete } from './editor';
 import { editorState } from './editor-state';
 import { hdlInitSources } from './engine-mode';
-import { initCompilerSettingWatchers, loadExample, setLanguageMode, startExampleSources, syncGodboltArchFlags, updateExampleSelectorOptions } from './examples-language';
+import { loadExample, setLanguageMode, startExampleSources, updateExampleSelectorOptions } from './examples-language';
 import { closeCompilerConfigPanel, countVisit, findNextValidInstructionLine, openBpFigure, toggleBreakpoint, toggleCompilerConfigPanel } from './execution';
 import { closeFindReplace, findNext, findPrev, handleFindKey, heldAxisKeys, initCodeMirrorEditor, openFindReplace, replaceAll, replaceCurrent, toggleFindCase, updateFindMatches } from './find-replace';
 import { setLocalsDecSigned } from './locals';
@@ -33,7 +32,6 @@ import { memViewMode, openMemWordOverlay, setMemDecSigned, setMemViewMode, start
 import { RISCV_AUTOCOMPLETE_DOCS, escapeHtml, extractEditorSymbols, getAssemblyLineContext, mobileMode, mobileTab, panelDock, setMobileTab, setPanelChipShown, setPanelVisible, setRegDecSigned } from './panels';
 import { bumpAccelAxis, clearOledDisplay, initPeripherals, updateAccelValues } from './peripherals';
 import { restoreSettings } from './settings-store';
-import { pipeInitControls } from './pipeline-controls';
 import { assembleOnly, resetAll, runProgram, stepBack, stepOnce, toggleRunPause, updateToolbarButtonStates } from './run-control';
 import { toggleWaveDock } from './waveform';
 import { byId, targetEl } from './dom';
@@ -689,63 +687,52 @@ export function dpFieldMeaning(m: DpEval, fmt: string | null, name: string) {
 
 // The Decoder's truth table as the lecture gives it, with the row this
 // instruction selects picked out.
-export const DP_ALUCTL_TEXT: Record<string, string> = {
-  'DP Reg': '{funct3, funct7[5]}', 'DP Imm': "{funct3, 1'b0 /<br>imm[10]#}", branch: '0001 (sub)',
+export const DP_ALUCTL_TEXT: Record<string, string[]> = {
+  'DP Reg': ['{funct3, funct7[5]}'], 'DP Imm': ["{funct3, 1'b0 /", 'imm[10]#}'], branch: ['0001 (sub)'],
 };
 // The lecture's row order; an object's numeric keys would come out sorted.
 export const DP_CONTROL_ORDER = [0x33, 0x13, 0x03, 0x23, 0x63, 0x6F, 0x17, 0x37, 0x67];
-export function dpControlTable(m: DpEval) {
+export interface DpCtlRow { op: string; name: string; cells: string[]; imm: string; alu: string[]; on: boolean }
+export function dpControlTable(m: DpEval): DpCtlRow[] {
   const ctrl = m.unsupported === null ? m.ctrl : null;
   const cur = ctrl && ctrl.row;
-  let rows = '';
-  for (const op of DP_CONTROL_ORDER) {
+  return DP_CONTROL_ORDER.map(op => {
     const c = DECODER_TABLE[op];
     const on = c.row === cur;
-    let alu = DP_ALUCTL_TEXT[c.row] || '0000 (add)';
+    const alu = (DP_ALUCTL_TEXT[c.row] || ['0000 (add)']).slice();
     if (ctrl && on && (c.row === 'DP Reg' || c.row === 'DP Imm')) {
-      alu += `<br>= ${ctrl.ALUControl.toString(2).padStart(4, '0')} (${ALU_OP_NAMES[ctrl.ALUControl] || '?'})`;
+      alu.push(`= ${ctrl.ALUControl.toString(2).padStart(4, '0')} (${ALU_OP_NAMES[ctrl.ALUControl] || '?'})`);
     }
-    const imm = c.ImmSrc + ' (' + (IMM_SRC_NAMES[c.ImmSrc] || 'R') + ')';
-    rows += `<tr${on ? ' class="dp-ctl-on"' : ''}><td>${op.toString(16).toUpperCase().padStart(2, '0')}</td>` +
-      `<td class="dp-ctl-name">${c.row}</td><td>${c.PCS}</td><td>${c.MemtoReg}</td><td>${c.RegWrite}</td>` +
-      `<td>${c.MemWrite}</td><td>${c.ALUSrcA}</td><td>${c.ALUSrcB}</td><td>${imm}</td><td>${alu}</td></tr>`;
-  }
-  return '<table class="dp-ctl-table"><thead><tr><th>Op</th><th>Instr</th><th>PCS</th><th>Memto<br>Reg</th>' +
-    '<th>Reg<br>Write</th><th>Mem<br>Write</th><th>ALU<br>SrcA</th><th>ALU<br>SrcB</th><th>ImmSrc</th><th>ALUControl</th>' +
-    `</tr></thead><tbody>${rows}</tbody></table>` +
-    '<div class="dp-ctl-note"># ALUControl[0] = (funct3 == 0x5) ? imm[10] : 1\'b0</div>';
+    return {
+      op: op.toString(16).toUpperCase().padStart(2, '0'), name: c.row, on, alu,
+      cells: [c.PCS, c.MemtoReg, c.RegWrite, c.MemWrite, c.ALUSrcA, c.ALUSrcB].map(String),
+      imm: c.ImmSrc + ' (' + (IMM_SRC_NAMES[c.ImmSrc] || 'R') + ')',
+    };
+  });
 }
 
+// What the encoding column shows (DpEncoding.svelte): one instruction's
+// fields, its immediate and the Decoder's table when single-cycle; the
+// five stages' fields and the branch predictor's table when pipelined.
+export interface DpEncField { hi: number; lo: number; name: string; kind: string; meaning?: string }
+export interface DpBhtRow { index: number; f: boolean; e: boolean; pr: string; bta: string }
+export type DpEncView =
+  | { pipe: false; format: string; text: string; instr: number; fields: DpEncField[];
+      imm: { src: string; hex: string; dec: number } | null; control: DpCtlRow[] }
+  | { pipe: true; stages: { stage: string; colour: string; text: string | null; instr: number; fields: DpEncField[] }[];
+      bht: { entries: number; bits: number; k: number; inUse: boolean; rows: DpBhtRow[] } | null };
+
 export function dpDrawEncoding(m: DpEval | null) {
-  const el = byId('dpEnc');
-  if (!el) return;
-  if (!m) { el.hidden = true; return; }
-  el.hidden = false;
+  if (!m) { setDpPanel({ enc: null }); return; }
   const fmt = dpFormatOf(m.op, m.f3);
-  const fields = DP_FORMATS[fmt || 'raw'];
-  const bit = (i: number) => (m.instr >>> i) & 1;
-  const bitsOf = (hi: number, lo: number) => { let str = ''; for (let i = hi; i >= lo; i--) str += bit(i); return str; };
-  let names = '', cells = '', ends = '', rows = '';
-  for (const [hi, lo, name, kind] of fields) {
-    const span = `grid-column: span ${hi - lo + 1}`;
-    names += `<span class="dp-enc-name dp-enc-${kind}" style="${span}" title="${escapeHtml(name)}">${escapeHtml(name)}</span>`;
-    for (let i = hi; i >= lo; i--) {
-      cells += `<span class="dp-enc-bit dp-enc-${kind}${i === hi ? ' dp-enc-first' : ''}${i === 0 ? ' dp-enc-lsb' : ''}" title="bit ${i}">${bit(i)}</span>`;
-    }
-    ends += `<span class="dp-enc-ends" style="${span}"><span>${hi}</span><span>${hi === lo ? '' : lo}</span></span>`;
-    rows += `<tr><td class="dp-enc-range">${hi}:${lo}</td><td class="dp-enc-bin">${bitsOf(hi, lo)}</td>` +
-      `<td class="dp-enc-${kind}">${escapeHtml(name)}</td><td>${escapeHtml(dpFieldMeaning(m, fmt, name))}</td></tr>`;
-  }
   const immSrc = !fmt || fmt === 'Ish' ? null : DP_FORMAT_IMMSRC[fmt];
   const imm = immSrc ? extendImm(m.instr, immSrc) : null;
-  el.innerHTML =
-    `<div class="dp-enc-title"><b>${fmt ? (fmt === 'Ish' ? 'I' : fmt) + '-type' : 'Encoding'}</b> ` +
-    `<code>${escapeHtml(m.text || dpHex(m.instr))}</code></div>` +
-    `<div class="dp-enc-grid">${names}${cells}${ends}</div>` +
-    `<table class="dp-enc-table">${rows}</table>` +
-    (imm === null ? '' : `<div class="dp-enc-imm">Extend (ImmSrc ${immSrc}) gathers the imm bits: ` +
-      `<code>${dpHex(imm)}</code> = ${imm | 0}</div>`) +
-    dpControlTable(m);
+  setDpPanel({ enc: {
+    pipe: false, format: fmt ? (fmt === 'Ish' ? 'I' : fmt) + '-type' : 'Encoding', text: m.text || dpHex(m.instr), instr: m.instr >>> 0,
+    fields: DP_FORMATS[fmt || 'raw'].map(([hi, lo, name, kind]) => ({ hi, lo, name, kind, meaning: dpFieldMeaning(m, fmt, name) })),
+    imm: imm === null || !immSrc ? null : { src: immSrc, hex: dpHex(imm), dec: imm | 0 },
+    control: dpControlTable(m),
+  } });
   dpPlaceEncoding();
 }
 
@@ -753,9 +740,8 @@ export function dpDrawEncoding(m: DpEval | null) {
 // own: beside the drawing where the strip is wide, below it where not,
 // since the drawing matters more.
 export function dpPlaceEncoding() {
-  const el = byId('dpEnc');
   const body = byId('dpBody');
-  if (!el || !body || el.hidden || !dpActive()) return;
+  if (!body || !dpPanel.enc || !dpActive()) return;
   body.classList.remove('dp-enc-below', 'dp-enc-side');
   body.classList.add(body.clientWidth >= 900 ? 'dp-enc-side' : 'dp-enc-below');
 }
@@ -815,13 +801,20 @@ export let dpHeader = {
   // the stylesheet.
   dockFlex: null as string | null,
 };
+// The caption (authored markup), the encoding column and the timeline
+// (DatapathDock.svelte and its parts).
+export let dpPanel = { caption: '', enc: null as DpEncView | null, tl: null as DpTlView | null };
+function setDpPanel(part: Partial<typeof dpPanel>) {
+  dpPanel = { ...dpPanel, ...part };
+  redraw('dpPanel');
+}
+
 function setDpHeader(part: Partial<typeof dpHeader>) {
   dpHeader = { ...dpHeader, ...part };
   redraw('datapath');
 }
 
 export function dpRender(animate: boolean) {
-  const capEl = byId('dpCaption');
   const total = dpPhaseList.length;
   if (pipeline.on) {
     pdpRenderTimeline();
@@ -832,9 +825,9 @@ export function dpRender(animate: boolean) {
   if (!dpModel) {
     dpClear();
     setDpHeader({ instr: null, phase: null });
-    if (capEl) capEl.innerHTML = program.assembled
+    setDpPanel({ caption: program.assembled
       ? 'The program has finished.'
-      : 'Assemble a program to follow its instructions through the datapath.';
+      : 'Assemble a program to follow its instructions through the datapath.' });
     dpUpdateButtons();
     return;
   }
@@ -842,7 +835,7 @@ export function dpRender(animate: boolean) {
     // The cycle count is the status line's and the log's, which number
     // the cycle just clocked; this header would be one ahead of them.
     setDpHeader({ instr: null, phase: null });
-    if (capEl) capEl.innerHTML = pdpCaption(dpModel);
+    setDpPanel({ caption: pdpCaption(dpModel) });
     pdpDraw(dpModel);
     dpUpdateButtons();
     return;
@@ -856,7 +849,7 @@ export function dpRender(animate: boolean) {
       colour: PDP_COLOUR[ph.stage ?? ''], title: ph.title } : null,
   });
   dpClockUpdate();
-  if (capEl) capEl.innerHTML = dpPhase ? dpPhaseList[dpPhase - 1].caption : '';
+  setDpPanel({ caption: dpPhase ? dpPhaseList[dpPhase - 1].caption : '' });
   if (!animate || !dpPhase) { dpDrawStatic(dpPhase); dpUpdateButtons(); return; }
   dpAnimatePhase(dpPhase);
 }
@@ -1350,31 +1343,15 @@ export function pdpDraw(m: PdpModel) {
 // The five instructions' encodings beside the drawing, in program order:
 // the oldest, in Writeback, first.
 export function pdpDrawEncodings(m: PdpModel | null) {
-  const el = byId('dpEnc');
-  if (!el) return;
-  if (!m) { el.hidden = true; return; }
-  el.hidden = false;
-  let html = '';
-  for (const k of ['W', 'M', 'E', 'D', 'F'] as const) {
+  if (!m) { setDpPanel({ enc: null }); return; }
+  const stages = (['W', 'M', 'E', 'D', 'F'] as const).map(k => {
     const r = m.st[k];
-    html += `<div class="pdp-enc-row"><div class="pdp-enc-head"><b style="color:${PDP_COLOUR[k]}">${k}</b> ` +
-      (r ? `<code>${escapeHtml(pdpText(r.pc))}</code>` : '<i>bubble</i>') + '</div>';
-    if (r) {
-      const i = r.instr >>> 0, op = i & 0x7F, f3 = (i >>> 12) & 7;
-      const fmt = dpFormatOf(op, f3);
-      let names = '', cells = '';
-      for (const [hi, lo, name, kind] of DP_FORMATS[fmt || 'raw']) {
-        names += `<span class="dp-enc-name dp-enc-${kind}" style="grid-column: span ${hi - lo + 1}" title="${escapeHtml(name)}">${escapeHtml(name)}</span>`;
-        for (let b = hi; b >= lo; b--) {
-          cells += `<span class="dp-enc-bit dp-enc-${kind}${b === hi ? ' dp-enc-first' : ''}${b === 0 ? ' dp-enc-lsb' : ''}" title="bit ${b}">${(i >>> b) & 1}</span>`;
-        }
-      }
-      html += `<div class="dp-enc-grid pdp-enc-grid">${names}${cells}</div>`;
-    }
-    html += '</div>';
-  }
-  if (pipeline.predictor.on) html += pdpBhtTable(m);
-  el.innerHTML = html;
+    const instr = r ? r.instr >>> 0 : 0;
+    const fmt = dpFormatOf(instr & 0x7F, (instr >>> 12) & 7);
+    return { stage: k, colour: PDP_COLOUR[k], text: r ? pdpText(r.pc) : null, instr,
+             fields: r ? DP_FORMATS[fmt || 'raw'].map(([hi, lo, name, kind]) => ({ hi, lo, name, kind })) : [] };
+  });
+  setDpPanel({ enc: { pipe: true, stages, bht: pipeline.predictor.on ? pdpBhtTable(m) : null } });
   dpPlaceEncoding();
 }
 
@@ -1383,19 +1360,13 @@ export function pdpDrawEncodings(m: PdpModel | null) {
 export function pdpBhtTable(m: PdpModel) {
   const s = m.s, n = pipeline.predictor.entries, bht = pipeline.regs.bht;
   const iF = pipeBhtIndex(s.pcF), iE = m.st.E ? pipeBhtIndex(m.st.E.pc) : -1;
-  const rows: string[] = [];
+  const rows: DpBhtRow[] = [];
   for (let i = 0; i < n; i++) {
     if (n > 16 && i !== iF && i !== iE && !bht.pr[i] && !bht.bta[i]) continue;
-    const marks = (i === iF ? `<b style="color:${PDP_COLOUR.F}">F</b>` : '') + (i === iE ? `<b style="color:${PDP_COLOUR.E}">E</b>` : '');
     const pr = pipeline.predictor.bits === 2 ? bht.pr[i].toString(2).padStart(2, '0') : String(bht.pr[i]);
-    rows.push(`<tr${i === iF || i === iE ? ' class="dp-ctl-on"' : ''}><td>${marks}</td><td>${i}</td><td>${pr}</td><td>${dpHex(bht.bta[i])}</td></tr>`);
+    rows.push({ index: i, f: i === iF, e: i === iE, pr, bta: dpHex(bht.bta[i]) });
   }
-  const k = Math.log2(n) + 1;
-  return `<div class="pdp-enc-row pdp-bht"><div class="pdp-enc-head"><b>BHT</b> ${n} × ${pipeline.predictor.bits}-bit, index PC[${k}:2]` +
-    (n > 16 ? ', entries in use' : '') + '</div>' +
-    '<table class="dp-ctl-table"><thead><tr><th></th><th>Index</th><th>PrTaken</th><th>PrBTA</th></tr></thead>' +
-    `<tbody>${rows.join('')}</tbody></table>` +
-    '<div class="dp-ctl-note">Mispredict = (PrTakenE ⊕ TakenE) + TakenE · (PrBTAE ≠ PCNextE)</div></div>';
+  return { entries: n, bits: pipeline.predictor.bits, k: Math.log2(n) + 1, inUse: n > 16, rows };
 }
 
 // ▶▶ when pipelined: clock one cycle after another until paused.
@@ -1437,10 +1408,19 @@ export interface TlCol { cyc: number; live?: boolean; st: (TlRec | null)[]; stal
 export interface TlCell { k: number; bub?: boolean; stall?: boolean; flush?: boolean; miss?: boolean }
 export interface TlRow { pc: number; nop: boolean; quashed?: boolean; cells: Record<number, TlCell> }
 
+// What the timeline shows (DpTimeline.svelte): the cycles across, and an
+// instruction per row with the stage it was in at each.
+export interface DpTlCell { L: string; cls: string; tip: string; colour: string | null }
+export interface DpTlView {
+  empty: boolean;
+  cols: { label: string; live: boolean }[];
+  rows: { gone: boolean; nop: boolean; addr: string | null; text: string; quashed: boolean; cells: (DpTlCell | null)[] }[];
+}
+
 export function pdpRenderTimeline() {
   const host = byId('dpTimeline');
   if (!host || dpView !== 'timeline') return;
-  if (!program.assembled || !pipeline.regs) { host.innerHTML = '<p class="pdp-tl-empty">Assemble a program to chart it.</p>'; return; }
+  if (!program.assembled || !pipeline.regs) { setDpPanel({ tl: { empty: true, cols: [], rows: [] } }); return; }
   // A few columns before the window, so bubbles already in flight at its
   // left edge are known.
   const all: TlCol[] = [];
@@ -1516,33 +1496,28 @@ export function pdpRenderTimeline() {
       shown = shown.filter(([key]) => live.has(key));
       if (shown.length) first = Math.min(...shown.map(([, row]) => Math.min(...Object.keys(row.cells).map(Number))));
     }
-    let html = '<table class="pdp-tl"><thead><tr><th class="pdp-tl-ins">Instruction</th>' +
-      cols.slice(first).map(c => c.live ? '<th class="pdp-tl-live" title="The cycle the next Step clocks">next</th>' : `<th>${c.cyc + 1}</th>`).join('') +
-      '</tr></thead><tbody>';
+    const view: DpTlView = { empty: false, cols: cols.slice(first).map(c => ({ label: c.live ? 'next' : String(c.cyc + 1), live: !!c.live })), rows: [] };
     for (const [key, row] of shown) {
-      const label = row.nop ? '<i class="pdp-tl-nop">bubble (nop)</i>'
-        : (phone ? '' : `<span class="pdp-tl-addr">${(row.pc >>> 0).toString(16).padStart(8, '0')}</span> `) +
-          escapeHtml(pdpText(row.pc)) + (row.quashed ? ' <i class="pdp-tl-nop">→ bubble (nop)</i>' : '');
-      html += `<tr${live && !live.has(key) ? ' class="pdp-tl-gone"' : ''}><td class="pdp-tl-ins">${label}</td>`;
-      cols.forEach((c, ci) => {
-        if (ci < first) return;
-        const cell = row.cells[ci];
-        const liveCls = c.live ? ' pdp-tl-live' : '';
-        if (!cell) { html += '<td></td>'; return; }
-        const L = letters[cell.k];
-        if (cell.bub) {
-          html += `<td class="pdp-tl-cell pdp-tl-bub${liveCls}" title="${PDP_STAGE_NAMES[L]}, a bubble (nop)">${L}</td>`;
-          return;
-        }
-        const cls = 'pdp-tl-cell' + liveCls + (cell.stall ? ' pdp-tl-stall' : '') + (cell.flush ? ' pdp-tl-flush' : '') +
-          (cell.miss ? ' pdp-tl-miss' : '');
-        const tip = PDP_STAGE_NAMES[L] + (cell.stall ? ', stalled' : '') + (cell.flush ? ', flushed at the end of this cycle' : '') +
-          (cell.miss ? ', mispredicted' : '');
-        html += `<td class="${cls}" style="--pc:${PDP_COLOUR[L]}" title="${tip}">${L}</td>`;
+      view.rows.push({
+        gone: !!live && !live.has(key), nop: row.nop, quashed: !!row.quashed,
+        addr: row.nop || phone ? null : (row.pc >>> 0).toString(16).padStart(8, '0'),
+        text: row.nop ? '' : pdpText(row.pc),
+        cells: cols.slice(first).map((c, i) => {
+          const cell = row.cells[first + i];
+          if (!cell) return null;
+          const L = letters[cell.k];
+          const liveCls = c.live ? ' pdp-tl-live' : '';
+          if (cell.bub) return { L, cls: 'pdp-tl-cell pdp-tl-bub' + liveCls, tip: PDP_STAGE_NAMES[L] + ', a bubble (nop)', colour: null };
+          return {
+            L, colour: PDP_COLOUR[L],
+            cls: 'pdp-tl-cell' + liveCls + (cell.stall ? ' pdp-tl-stall' : '') + (cell.flush ? ' pdp-tl-flush' : '') + (cell.miss ? ' pdp-tl-miss' : ''),
+            tip: PDP_STAGE_NAMES[L] + (cell.stall ? ', stalled' : '') + (cell.flush ? ', flushed at the end of this cycle' : '') +
+              (cell.miss ? ', mispredicted' : ''),
+          };
+        }),
       });
-      html += '</tr>';
     }
-    host.innerHTML = html + '</tbody></table>';
+    setDpPanel({ tl: view });
     return cols.length - first;
   };
   // Only as many cycles as fit across, so nothing needs scrolling sideways.
@@ -1804,8 +1779,6 @@ export function onDpBodyClick(e: MouseEvent) {
 export function initDatapath() {
   try { dpWanted = localStorage.getItem(DP_OPEN_KEY) === '1'; } catch (e) { dpWanted = false; }
   initFloatSteps();
-  pipeInitControls();
-  clockInitControls();
   updateDatapathPanelAvailability();
   dpApplyOpen();
   dpSync(true);
@@ -1865,7 +1838,6 @@ export function bootSimulator() {
   updateToolbarButtonStates();
   hdlInitSources();
   initDatapath();
-  initCompilerSettingWatchers();
   countVisit();
   // Marks the point after which the waveform and datapath state is safe to
   // touch: the panel relayout in ui/panels.ts and ui/examples-language.ts

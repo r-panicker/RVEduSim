@@ -4,6 +4,8 @@
 import { hdlDiscardTrace } from '../hdl/run';
 import { initializeState } from '../machine/reset';
 import { program, run, stepHistory, ui } from '../machine/state';
+import { compilerConfig } from '../c/state';
+import { redraw } from './views.svelte';
 import { updateDisassembly, updateMachineCode } from './disassembly';
 import { cLanguage, clearLog, editor, editorHistory, log, riscvLanguage, setStatus } from './editor';
 import { editorState } from './editor-state';
@@ -170,38 +172,17 @@ export function invalidateCompiledProgram(what: string) {
   }
 }
 
-// Wire every toolchain control to that. Doing it here rather than with
-// inline handlers keeps the markup free of duplicated calls.
-export function initCompilerSettingWatchers() {
-  const watch = (id: string, ev: string, label: string) => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener(ev, () => invalidateCompiledProgram(label));
-  };
-  watch('godboltCompilerSelect', 'change', 'Compiler');
-  watch('godboltOptSelect', 'change', 'Optimization level');
-  watch('godboltUseM', 'change', 'M extension');
-  watch('godboltArchFlags', 'change', 'Architecture flags');
-}
-
-export function syncGodboltArchFlags() {
-  const cb = byId<HTMLInputElement>('godboltUseM');
-  const input = byId<HTMLInputElement>('godboltArchFlags');
-  if (!input) return;
-  const useM = cb ? cb.checked : false;
-  const march = useM ? '-march=rv32im' : '-march=rv32i';
-  input.value = march + ' -mabi=ilp32';
-}
-
-export function resetCompilerConfig() {
-  const selComp = byId<HTMLSelectElement>('godboltCompilerSelect');
-  const selOpt = byId<HTMLSelectElement>('godboltOptSelect');
-  const inputArch = byId<HTMLInputElement>('godboltArchFlags');
-  const useMCheck = byId<HTMLInputElement>('godboltUseM');
-  if (selComp) selComp.value = 'rv32-cclang2010';
-  if (selOpt) selOpt.value = '-O0';
-  if (useMCheck) useMCheck.checked = true;
-  if (inputArch) inputArch.value = '-march=rv32im -mabi=ilp32';
-  setStatus('Reset Godbolt compiler settings to default (Clang 20.1, -O0)', 'info');
+// A Compiler tab setting. The build on hand was made with the old value,
+// so it is dropped. The M extension decides the -march flag.
+const COMPILER_LABELS: Record<keyof typeof compilerConfig, string> = {
+  compiler: 'Compiler', opt: 'Optimization level', archFlags: 'Architecture flags', useM: 'M extension',
+};
+export function setCompilerSetting<K extends keyof typeof compilerConfig>(key: K, value: (typeof compilerConfig)[K]) {
+  if (compilerConfig[key] === value) return;
+  compilerConfig[key] = value;
+  if (key === 'useM') compilerConfig.archFlags = (value ? '-march=rv32im' : '-march=rv32i') + ' -mabi=ilp32';
+  redraw('settings');
+  invalidateCompiledProgram(COMPILER_LABELS[key]);
 }
 
 // DIP to LED, built into the page - see "Built-in examples" above.

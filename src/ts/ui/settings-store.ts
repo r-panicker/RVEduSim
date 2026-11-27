@@ -1,46 +1,34 @@
 // Every setting, kept in localStorage so that the next visit (or the next
 // start of the desktop app) begins where this one left off. The settings
-// live in their state objects and a few controls; a snapshot of all of
-// them is written whenever one may have changed, and read back once at
-// boot, before the first program is assembled.
+// live in their state objects; a snapshot of all of them is written
+// whenever one may have changed, and read back once at boot, before the
+// first program is assembled.
 //
 // The page layout (panels, docks, the waveform's signals) is saved by the
 // modules that own it under their own rvsim.* keys. Reset All clears all
 // of those keys too.
 
 import { hdlCyclesFor } from '../hdl/engine';
-import { hdlConfig } from '../hdl/state';
+import { HDL_GENERATIONS, hdlConfig } from '../hdl/state';
+import { COMPILERS, OPT_LEVELS, compilerConfig } from '../c/state';
 import { pipeline } from '../machine/pipeline';
 import { clock, layout, run, uart } from '../machine/state';
 import { uartCharCycles } from '../machine/clock';
 import { setUartSendMode } from '../machine/uart';
-import { syncClockControls } from './clock-controls';
-import { byId } from './dom';
 import { exampleSources } from './example-sources';
-import { pipeSyncControls } from './pipeline-controls';
+import { redraw } from './views.svelte';
 
 export const SETTINGS_KEY = 'rvsim.settings.v1';
 const STORAGE_PREFIX = 'rvsim.';
 
 type Json = Record<string, unknown>;
 
-// Controls whose value is the setting itself.
-const COMPILER_FIELDS = ['godboltCompilerSelect', 'godboltOptSelect', 'godboltArchFlags'];
-const HDL_FIELDS = ['hdlGeneration', 'hdlRegPath'];
-
-function fieldValues(ids: string[]) {
-  const out: Record<string, string> = {};
-  for (const id of ids) {
-    const el = byId<HTMLInputElement | HTMLSelectElement>(id);
-    if (el) out[id] = el.value;
-  }
-  return out;
-}
-
+// The key names are those of the first snapshots, which named the
+// compiler and HDL fields after their controls.
 export function settingsSnapshot() {
-  const useM = byId<HTMLInputElement>('godboltUseM');
   return {
-    compiler: { ...fieldValues(COMPILER_FIELDS), useM: useM ? useM.checked : false },
+    compiler: { godboltCompilerSelect: compilerConfig.compiler, godboltOptSelect: compilerConfig.opt,
+                godboltArchFlags: compilerConfig.archFlags, useM: compilerConfig.useM },
     layout: { ...layout },
     js: {
       arch: pipeline.arch, hazards: { ...pipeline.hazards }, predictor: { ...pipeline.predictor },
@@ -52,7 +40,7 @@ export function settingsSnapshot() {
     hdl: {
       trace: hdlConfig.traceEnabled, vcd: hdlConfig.dumpVcd, waveTop: hdlConfig.waveTop, liveWave: hdlConfig.liveWave,
       compare: hdlConfig.compareEnabled, synth: hdlConfig.synthEnabled, cycles: { ...hdlCyclesFor },
-      ...fieldValues(HDL_FIELDS),
+      hdlGeneration: hdlConfig.generation, hdlRegPath: hdlConfig.regPath,
     },
   };
 }
@@ -87,16 +75,7 @@ function assignKnown(into: Json, from: unknown, ok: (k: string, v: unknown) => b
   }
 }
 
-function setFields(values: unknown) {
-  if (!isObj(values)) return;
-  for (const [id, v] of Object.entries(values)) {
-    const el = byId<HTMLInputElement | HTMLSelectElement>(id);
-    if (!el || typeof v !== 'string') continue;
-    // A select keeps its value only if it still offers it.
-    if (el instanceof HTMLSelectElement && ![...el.options].some(o => o.value === v)) continue;
-    el.value = v;
-  }
-}
+const oneOf = (v: unknown, options: [string, string][]) => typeof v === 'string' && options.some(o => o[0] === v);
 
 export function restoreSettings() {
   let s: unknown = null;
@@ -107,9 +86,11 @@ export function restoreSettings() {
   if (!isObj(s)) return;
 
   if (isObj(s.compiler)) {
-    setFields(s.compiler);
-    const useM = byId<HTMLInputElement>('godboltUseM');
-    if (useM && typeof s.compiler.useM === 'boolean') useM.checked = s.compiler.useM;
+    const c = s.compiler;
+    if (oneOf(c.godboltCompilerSelect, COMPILERS)) compilerConfig.compiler = c.godboltCompilerSelect as string;
+    if (oneOf(c.godboltOptSelect, OPT_LEVELS)) compilerConfig.opt = c.godboltOptSelect as string;
+    if (typeof c.godboltArchFlags === 'string') compilerConfig.archFlags = c.godboltArchFlags;
+    if (typeof c.useM === 'boolean') compilerConfig.useM = c.useM;
   }
   assignKnown(layout as unknown as Json, s.layout, (_k, v) => num(v, 0, 0xFFFFFFFF));
 
@@ -150,10 +131,10 @@ export function restoreSettings() {
     hdlConfig.compareEnabled = flag(h.compare, hdlConfig.compareEnabled);
     hdlConfig.synthEnabled = flag(h.synth, hdlConfig.synthEnabled);
     assignKnown(hdlCyclesFor as unknown as Json, h.cycles, (_k, v) => num(v, 1, Number.MAX_SAFE_INTEGER));
-    setFields({ hdlGeneration: h.hdlGeneration, hdlRegPath: h.hdlRegPath });
+    if (oneOf(h.hdlGeneration, HDL_GENERATIONS)) hdlConfig.generation = h.hdlGeneration as string;
+    if (typeof h.hdlRegPath === 'string') hdlConfig.regPath = h.hdlRegPath;
   }
-  pipeSyncControls();
-  syncClockControls();
+  redraw('settings');
 }
 
 // Every setting and the whole layout back to the defaults. The page

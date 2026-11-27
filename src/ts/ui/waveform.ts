@@ -16,7 +16,7 @@ import { program, ui } from '../machine/state';
 import { updateDatapathPanelAvailability, updateVizButton } from './datapath';
 import { setStatus } from './editor';
 import { updateWaveformPanelAvailability } from './examples-language';
-import { downloadTextFile } from './execution';
+import { downloadTextFile, setSettingsRegFound } from './execution';
 import { escapeHtml, mobileMode, panelDock, setMobileTab, setPanelVisible } from './panels';
 import { updateToolbarButtonStates } from './run-control';
 import { byId, targetEl } from './dom';
@@ -428,8 +428,6 @@ export function updateWaveAvailability() {
 // with no run recorded yet, the next Run produces it anyway.
 export function waveEnableVcdAndRerun() {
   setHdlDumpVcd(true);
-  const cb = byId<HTMLInputElement>('hdlVcd');
-  if (cb) cb.checked = true;
   if (hdlRec.trace) hdlQueueResim('re-simulated with the VCD dump on');
 }
 
@@ -957,32 +955,26 @@ export function hdlDownloadTestbench() {
 // Cycles per Run is remembered for Verilator, Icarus, and Icarus with
 // post-synthesis simulation.
 export function hdlCyclesKey() { return hdlConfig.simulator === 'icarus' && hdlConfig.synthEnabled ? 'synth' : hdlConfig.simulator; }
-export function hdlShowCycles() {
+export function hdlPickCycleBudget() {
   hdlConfig.cycleBudget = hdlCyclesFor[hdlCyclesKey()];
-  const cyc = byId<HTMLInputElement>('hdlCycles');
-  if (cyc) {
-    cyc.max = String(hdlConfig.simulator === 'verilator' ? HDL_VL_MAX_RUN : HDL_MAX_CYCLES);
-    cyc.value = String(hdlConfig.cycleBudget);
-  }
+  redraw('settings');
 }
+export function hdlMaxCycles() { return hdlConfig.simulator === 'verilator' ? HDL_VL_MAX_RUN : HDL_MAX_CYCLES; }
 export function setHdlCycles(v: string) {
   const n = parseInt(v, 10);
   if (!Number.isFinite(n) || n <= 0) return;
-  hdlConfig.cycleBudget = Math.min(n, hdlConfig.simulator === 'verilator' ? HDL_VL_MAX_RUN : HDL_MAX_CYCLES);
+  hdlConfig.cycleBudget = Math.min(n, hdlMaxCycles());
   hdlCyclesFor[hdlCyclesKey()] = hdlConfig.cycleBudget;
-  // Keep the field honest when the budget is set from anywhere else,
-  // including the automatic extension when stepping off the end.
-  const el = byId<HTMLInputElement>('hdlCycles');
-  if (el && parseInt(el.value, 10) !== hdlConfig.cycleBudget) el.value = String(hdlConfig.cycleBudget);
+  redraw('settings');
 }
 export function setHdlDumpVcd(on: boolean) {
   hdlConfig.dumpVcd = !!on;
   updateWaveView();
-  hdlRefreshDetail();
+  redraw('settings');
 }
-export function setHdlWaveTop(on: boolean) { hdlConfig.waveTop = !!on;   hdlRefreshDetail();
+export function setHdlWaveTop(on: boolean) { hdlConfig.waveTop = !!on;   redraw('settings');
 }
-export function setHdlLiveWave(v: string) { hdlConfig.liveWave = v === 'live' ? 'live' : 'pause';   hdlRefreshDetail();
+export function setHdlLiveWave(v: string) { hdlConfig.liveWave = v === 'live' ? 'live' : 'pause';   redraw('settings');
 }
 // ---- Detail presets -------------------------------------------------
 // Each sets the options that cost run time. They stay visible and can be
@@ -1007,32 +999,9 @@ export function hdlDetailMatch() {
   }
   return 'custom';
 }
-// Puts every control in step with the settings, which a preset or Reset
-// Defaults changes without touching the controls.
-export function hdlRefreshDetail() {
-  const check = (id: string, v: boolean) => { const el = byId<HTMLInputElement>(id); if (el && el.checked !== v) el.checked = v; };
-  const choose = (id: string, v: string) => { const el = byId<HTMLSelectElement>(id); if (el && el.value !== v) el.value = v; };
-  check('hdlTrace', hdlConfig.traceEnabled);
-  check('hdlVcd', hdlConfig.dumpVcd);
-  choose('hdlWaveTop', hdlConfig.waveTop ? 'top' : 'all');
-  choose('hdlLiveWave', hdlConfig.liveWave);
-  check('hdlCompare', hdlConfig.compareEnabled);
-  check('hdlSynth', hdlConfig.synthEnabled);
-  const scope = byId('hdlWaveScopeRow');
-  if (scope) scope.style.display = hdlConfig.dumpVcd ? 'flex' : 'none';
-  const lw = byId('hdlLiveWaveRow');
-  if (lw) lw.style.display = hdlConfig.dumpVcd && hdlConfig.simulator === 'verilator' ? 'flex' : 'none';
-  const sel = byId<HTMLSelectElement>('hdlDetail');
-  if (sel) {
-    const m = hdlDetailMatch();
-    const custom = sel.querySelector<HTMLOptionElement>('option[value="custom"]');
-    if (custom) custom.hidden = m !== 'custom';
-    sel.value = m;
-  }
-}
 export function setHdlDetail(name: string, quiet: boolean) {
   const p = HDL_DETAIL[name];
-  if (!p) { hdlRefreshDetail(); return; }
+  if (!p) { redraw('settings'); return; }
   const now = hdlDetailNow();
   const said: string[] = [];
   if (now.vcd !== p.vcd) said.push('waveform ' + (p.vcd ? 'on' : 'off'));
@@ -1047,7 +1016,7 @@ export function setHdlDetail(name: string, quiet: boolean) {
   setHdlLiveWave(p.live);
   setHdlCompare(p.compare);
   if (now.synth !== p.synth) setHdlSynth(p.synth);
-  hdlRefreshDetail();
+  redraw('settings');
   if (!quiet && said.length) hdlLog('Detail: ' + name[0].toUpperCase() + name.slice(1) + ' - ' + said.join(', ') + '.', 'sys');
 }
 
@@ -1058,18 +1027,15 @@ export function setHdlDetail(name: string, quiet: boolean) {
 export const hdlVerilatorAvail = !!(window.rvNative && window.rvNative.verilator);
 export const HDL_SIMULATOR_KEY = 'rvsim.hdlSimulator';
 
+export const HDL_SIMULATOR_TITLE = hdlVerilatorAvail
+  ? 'Icarus Verilog simulates four-state logic (x and z) and starts at once. Verilator first compiles ' +
+    'your design to C++, which takes several seconds each time the sources change, and then runs ' +
+    '20 to 100 times faster; it is two-state, so what Icarus shows as x is 0. Post-synthesis ' +
+    'simulation needs Icarus.'
+  : window.rvNative ? 'This build of the desktop app has no Verilator.'
+  : 'Verilator is available only in the desktop app.';
+
 export function hdlInitSimulator() {
-  const sel = byId<HTMLSelectElement>('hdlSimulator');
-  const row = byId('hdlSimulatorRow');
-  if (!sel || !row) return;
-  sel.disabled = !hdlVerilatorAvail;
-  row.title = hdlVerilatorAvail
-    ? 'Icarus Verilog simulates four-state logic (x and z) and starts at once. Verilator first compiles ' +
-      'your design to C++, which takes several seconds each time the sources change, and then runs ' +
-      '20 to 100 times faster; it is two-state, so what Icarus shows as x is 0. Post-synthesis ' +
-      'simulation needs Icarus.'
-    : window.rvNative ? 'This build of the desktop app has no Verilator.'
-    : 'Verilator is available only in the desktop app.';
   let saved: string | null = null;
   try { saved = localStorage.getItem(HDL_SIMULATOR_KEY); } catch (e) { /* private mode */ }
   setHdlSimulator(saved === 'verilator' ? 'verilator' : 'icarus', true);
@@ -1079,18 +1045,9 @@ export function setHdlSimulator(v: string, restoring = false) {
   if (v !== 'verilator' || !hdlVerilatorAvail) v = 'icarus';
   const changed = v !== hdlConfig.simulator;
   hdlConfig.simulator = v as typeof hdlConfig.simulator;
-  hdlShowCycles();
-  hdlRefreshDetail();
-  const sel = byId<HTMLSelectElement>('hdlSimulator');
-  if (sel) sel.value = v;
+  hdlPickCycleBudget();
   if (!restoring) { try { localStorage.setItem(HDL_SIMULATOR_KEY, v); } catch (e) { /* private mode */ } }
-  const synth = byId('hdlSynthCard');
-  if (synth) synth.style.display = v === 'verilator' ? 'none' : '';
-  if (v === 'verilator' && hdlConfig.synthEnabled) {
-    setHdlSynth(false);
-    const cb = byId<HTMLInputElement>('hdlSynth');
-    if (cb) cb.checked = false;
-  }
+  if (v === 'verilator' && hdlConfig.synthEnabled) setHdlSynth(false);
   if (changed) hdlDiscardTrace();
 }
 
@@ -1101,9 +1058,9 @@ export function setHdlTrace(on: boolean) {
   hdlConfig.traceEnabled = !!on;
   hdlDiscardTrace();
   updateToolbarButtonStates();
-  hdlRefreshDetail();
+  redraw('settings');
 }
-export function setHdlCompare(on: boolean) { hdlConfig.compareEnabled = !!on;   hdlRefreshDetail();
+export function setHdlCompare(on: boolean) { hdlConfig.compareEnabled = !!on;   redraw('settings');
 }
 // Ticking this is what triggers the one-off Yosys download. If a run has
 // already been recorded, synthesise and check it now instead of waiting
@@ -1111,9 +1068,9 @@ export function setHdlCompare(on: boolean) { hdlConfig.compareEnabled = !!on;   
 export function setHdlSynth(on: boolean) {
   const was = hdlConfig.synthEnabled;
   hdlConfig.synthEnabled = !!on;
-  hdlShowCycles();
+  hdlPickCycleBudget();
   updateToolbarButtonStates();
-  hdlRefreshDetail();
+  redraw('settings');
   if (!hdlConfig.synthEnabled || was) return;
   if (!hdlRec.trace || !hdlBuild.lastRtlOut) {
     loadYosysEngine().catch((e: unknown) => {
@@ -1140,18 +1097,21 @@ export function setHdlSynth(on: boolean) {
 }
 // The register path is compiled into the testbench as a hierarchical
 // reference, so changing it invalidates the cached binary.
-export function setHdlRegPath() { hdlBuild.vvpCache = null; hdlDiscardTrace(); }
+export function setHdlRegPath(v: string) {
+  hdlConfig.regPath = v;
+  hdlBuild.vvpCache = null;
+  hdlDiscardTrace();
+  redraw('settings');
+}
 
+// The standard is part of what identifies a compiled design, so the next
+// run compiles again by itself.
+export function setHdlGeneration(v: string) {
+  hdlConfig.generation = v;
+  redraw('settings');
+}
+
+// Settings shows the register file detection found in the sources.
 export function hdlRefreshRegPathHint() {
-  const el = byId<HTMLInputElement>('hdlRegPath');
-  if (!el) return;
-  const found = hdlDiscoverRegBank();
-  el.placeholder = found || 'e.g. dut.RV1.RegFile1.RegBank';
-  const hint = byId('hdlRegPathHint');
-  if (hint) {
-    hint.textContent = found
-      ? 'detected automatically: ' + found
-      : (hdlSources.files.length ? 'no 32-entry register array found - name the path to see registers'
-                         : 'load your sources to detect the register file');
-  }
+  setSettingsRegFound(hdlDiscoverRegBank());
 }

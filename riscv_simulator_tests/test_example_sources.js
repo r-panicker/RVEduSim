@@ -151,7 +151,7 @@ const file = (rel, text) => ({ name: rel.split('/').pop(), webkitRelativePath: r
   win.resetCurrentSettingsTab();
   await until(() => win.exampleSources.web.status === 'ok');
   await sleep(20);
-  check('Reset Defaults goes back to the site\'s examples', menu().Web && menu().Web.length === 7 && field.value === '');
+  check('Reset Tab goes back to the site\'s examples', menu().Web && menu().Web.length === 7 && field.value === '');
 
   console.log('\n[3] A folder on this computer');
   await win.examplesFolderPicked([

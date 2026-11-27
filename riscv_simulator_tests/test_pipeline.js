@@ -156,16 +156,16 @@ setTimeout(async () => {
     // from the start, including from the strip's ⚙ shortcut.
     const bpBox = doc.getElementById('pipeBpOn');
     bpBox.checked = true;
-    bpBox.dispatchEvent(new win.Event('change'));
+    bpBox.dispatchEvent(new win.Event('change', { bubbles: true }));
     const archSel = doc.getElementById('simMicroarch');
     archSel.value = 'multi';
-    archSel.dispatchEvent(new win.Event('change'));
+    archSel.dispatchEvent(new win.Event('change', { bubbles: true }));
     check('Settings\' pipeline and microarchitecture controls work before Settings is ever opened',
       ev('pipeline.predictor.on') === true && ev('pipeline.arch') === 'multi');
     bpBox.checked = false;
-    bpBox.dispatchEvent(new win.Event('change'));
+    bpBox.dispatchEvent(new win.Event('change', { bubbles: true }));
     archSel.value = 'single';
-    archSel.dispatchEvent(new win.Event('change'));
+    archSel.dispatchEvent(new win.Event('change', { bubbles: true }));
 
     // [1] All switches on: the pipeline computes what the functional model does.
     console.log('\n[1] With every hazard switch on, the pipeline matches the functional model');
