@@ -414,24 +414,39 @@ body.wave-in-panel #tab-waveform .wave-hdr .panel-hdr-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 40px;
+  min-width: 32px;
   min-height: 36px;
-  padding: 6px 10px;
+  padding: 6px 0;
   font-size: 14px;
   border: 1px solid #45475a;
 }
+body.wave-in-panel #tab-waveform .wave-hdr .wave-add-btn { padding: 6px 8px; }
 
+/* The controls keep to one row, the Cycle box giving up width; a note
+   about the run goes on a row of its own under them. */
 body.wave-in-panel #tab-waveform .wave-hdr {
   flex-wrap: wrap;
   gap: 6px;
   padding: 6px 8px;
 }
+body.wave-in-panel #tab-waveform .wave-hdr-info { order: 1; flex: 1 1 100%; white-space: normal; }
+body.wave-in-panel #tab-waveform .wave-hdr-actions { flex: 1 1 auto; min-width: 0; gap: 4px; }
+body.wave-in-panel #tab-waveform .wave-cycle { flex: 1 1 auto; min-width: 0; margin-right: 0; font-size: 12px; }
 
 body.wave-in-panel #tab-waveform .wave-hdr .wave-fold-btn { display: none; }
+@media (max-width: 380px) {
+  body.wave-in-panel #tab-waveform .wave-hdr { gap: 4px; padding: 6px; }
+  body.wave-in-panel #tab-waveform .wave-hdr-actions { gap: 3px; }
+  body.wave-in-panel #tab-waveform .wave-hdr .panel-hdr-btn { min-width: 28px; }
+  body.wave-in-panel #tab-waveform .wave-hdr .wave-add-btn { padding: 6px 6px; }
+}
 
 /* 16px, or a phone zooms the page in on focus. */
 body.wave-in-panel #tab-waveform .wave-cycle input {
-  width: 10ch;
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 4ch;
+  max-width: 10ch;
   min-height: 36px;
   font-size: 16px;
 }

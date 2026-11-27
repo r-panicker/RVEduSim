@@ -9,7 +9,9 @@
 #
 # Run it from the Actions tab, or push a tag named desktop-v*. The installers
 # are attached to the run as artifacts; a desktop-v* tag also gets a draft
-# GitHub release holding them.
+# GitHub release holding them. So does a run started with "release" ticked,
+# for desktop-v<version> (the version in desktop/app/tauri.conf.json) on the
+# commit it built: the tag itself is made when the draft is published.
 #
 # Signing is optional. Without secrets the macOS app is signed ad hoc (users
 # open it once with right-click > Open, or System Settings > Privacy &
@@ -23,6 +25,11 @@ name: Desktop app
 
 on:
   workflow_dispatch:
+    inputs:
+      release:
+        description: Make a draft release, tagged desktop-v<version> when published
+        type: boolean
+        default: false
   push:
     tags: ['desktop-v*']
 
@@ -212,12 +219,23 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    if: startsWith(github.ref, 'refs/tags/desktop-v') || inputs.release
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: desktop/app/tauri.conf.json
+          sparse-checkout-cone-mode: false
+      - id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=desktop-v$(jq -r .version desktop/app/tauri.conf.json)" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -225,6 +243,8 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           draft: true
+          tag_name: ${{ steps.tag.outputs.name }}
+          target_commitish: ${{ github.sha }}
           files: |
             dist/**/*.deb
             dist/**/*.AppImage

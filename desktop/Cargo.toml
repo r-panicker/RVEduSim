@@ -5,7 +5,7 @@ members = ["native", "app"]
 resolver = "2"
 
 [workspace.package]
-version = "24.184.0"
+version = "24.185.0"
 edition = "2021"
 license = "MIT"
 

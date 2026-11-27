@@ -742,10 +742,19 @@ export function drawWaveNames(p: ParsedVcd) {
   redraw('waveform');
 }
 
+// The smallest of 1, 2, 5, 10, 20, 50, ... that is at least n.
+export function waveNiceStep(n: number) {
+  let step = 1;
+  for (;;) {
+    for (const m of [1, 2, 5]) if (step * m >= n) return step * m;
+    step *= 10;
+  }
+}
+
 export function drawWaveforms() {
   const canvas = byId<HTMLCanvasElement>('waveCanvas');
   const p = waveParsed;
-  if (!canvas || !p || !document.body.classList.contains('wave-open')) return;
+  if (!canvas || !p || !(document.body.classList.contains('wave-open') || waveInPanel())) return;
   // The rows define the height; the body scrolls if the strip is shorter.
   // Set before measuring, so the first draw is already the right size.
   const needed = WAVE_AXIS_H + waveSignals.length * WAVE_ROW_H;
@@ -773,8 +782,10 @@ export function drawWaveforms() {
   // ---- cycle grid and axis ----
   ctx.font = '10px Consolas, "Courier New", monospace';
   ctx.textBaseline = 'middle';
-  // A label every cycle is unreadable below ~28px per cycle.
-  const labelEvery = Math.max(1, Math.ceil(28 / pxPerCycle));
+  // Labels step by 1, 2 or 5 times a power of ten, as widely as the
+  // longest number in view needs, so they never run into each other.
+  const labelW = ctx.measureText(String(Math.ceil(waveStart + waveSpan))).width + 10;
+  const labelEvery = waveNiceStep(labelW / pxPerCycle);
   // Minor lines closer than a few pixels are noise, and over a long
   // recording there would be one per cycle; step by the label spacing.
   const gridStep = pxPerCycle >= 4 ? 1 : labelEvery;

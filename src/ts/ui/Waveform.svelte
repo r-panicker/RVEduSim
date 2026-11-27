@@ -7,7 +7,7 @@
   import {
     waveView, wavePanning, waveOpen, toggleWavePicker, renderWavePicker, waveResetSignals, waveToggleSignal, waveRemoveSignal,
     waveEnableVcdAndRerun, wavePan, waveZoom, waveFit, toggleWaveDock, onWaveCycleKey, onWaveCycleBlur, onWaveWheel,
-    onWaveDown, onWaveMove, onWaveUp, onWaveCancel, drawWaveforms, waveApplyDockSize, updateWaveView,
+    onWaveDown, onWaveMove, onWaveUp, onWaveCancel, drawWaveforms, waveApplyDockSize, updateWaveView, waveInPanel,
   } from './waveform';
   import { on } from 'svelte/events';
 
@@ -22,7 +22,7 @@
   $effect(() => {
     if (document.body.dataset.booted) { waveApplyDockSize(); updateWaveView(); }
     if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => { if (waveOpen) drawWaveforms(); });
+    const ro = new ResizeObserver(() => { if (waveOpen || waveInPanel()) drawWaveforms(); });
     ro.observe(dock);
     return () => ro.disconnect();
   });

@@ -52,8 +52,10 @@ compiler, `RVSIM_ZIG_URL` replaces ziglang.org as the download base, and
 Windows, a dmg on macOS. Each carries only its own platform's Icarus and Verilator, so every
 platform is built on its own machine; the [workflow](../.github/workflows/desktop.yml) does
 that on GitHub's runners. Start it from the Actions tab, or push a tag
-`desktop-v<version>`, which also makes a draft release holding the installers. The version
-shown is `version` in `app/tauri.conf.json` (and `Cargo.toml`).
+`desktop-v<version>`, which also makes a draft release holding the installers. Started
+from the Actions tab with *release* ticked, it makes the same draft for the version in
+`app/tauri.conf.json`; publishing the draft creates the tag on the commit that was built.
+The version shown is `version` in `app/tauri.conf.json` (and `Cargo.toml`).
 
 The `.deb` depends on `libwebkit2gtk-4.1-0` and recommends `g++`; it is for Ubuntu 24.04
 and later. The AppImage carries WebKitGTK and runs on older systems too; the workflow builds
