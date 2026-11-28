@@ -17,7 +17,7 @@ import { updatePeripherals } from './peripherals';
 import { assembleOnly, resetAll, updateToolbarButtonStates } from './run-control';
 import { waveApplyDockSize } from './waveform';
 import { saveSettings } from './settings-store';
-import { BUILTIN_EXAMPLES, exampleSources, initExampleSources, onExampleSourcesChange, readExampleSource, webSourceName, type ExampleEntry, type ExampleSourceState } from './example-sources';
+import { BUILTIN_EXAMPLES, exampleSourceName, exampleSources, initExampleSources, onExampleSourcesChange, readExampleSource, webSourceName, type ExampleEntry, type ExampleSourceState } from './example-sources';
 import { byId } from './dom';
 import { redrawToolbar, toolbar, type ExampleMenuGroup, type ExampleMenuItem } from './toolbar-state';
 import { errorMessage } from '../errors';
@@ -41,7 +41,7 @@ export function switchTab(tab: string) {
 
 // Every example the menu offers now.
 export function exampleEntries(): ExampleEntry[] {
-  return [...BUILTIN_EXAMPLES, ...exampleSources.web.entries, ...exampleSources.local.entries];
+  return [...BUILTIN_EXAMPLES, ...exampleSources.web.flatMap(s => s.state.entries), ...exampleSources.local.flatMap(s => s.state.entries)];
 }
 export function findExample(key: string) { return exampleEntries().find(e => e.key === key) ?? null; }
 // The memory depths an example declares in its index.txt, if any.
@@ -61,25 +61,29 @@ function sourceItems(s: ExampleSourceState, lang: 'asm' | 'c'): ExampleMenuItem[
 export function updateExampleSelectorOptions() {
   const lang = editorState.language === 'c' ? 'c' : 'asm';
   toolbar.lang = lang;
+  // Two sections of the same name would read as one, so a repeated name
+  // is numbered.
+  const seen = new Map<string, number>();
+  const named = (n: string) => { const k = (seen.get(n) || 0) + 1; seen.set(n, k); return k > 1 ? n + ' (' + k + ')' : n; };
   const groups: ExampleMenuGroup[] = [
-    { label: 'Built in', items: sourceItems({ status: 'ok', error: '', entries: BUILTIN_EXAMPLES }, lang) },
-    { label: webSourceName(), items: sourceItems(exampleSources.web, lang) },
+    { label: named('Built in'), items: sourceItems({ status: 'ok', error: '', entries: BUILTIN_EXAMPLES }, lang) },
+    ...exampleSources.web.map(s => ({ label: named(webSourceName(s.url)), items: sourceItems(s.state, lang) })),
+    ...exampleSources.local.map(s => ({ label: named(s.folder.name), items: sourceItems(s.state, lang) })),
   ];
-  if (exampleSources.folder) groups.push({ label: exampleSources.folder.name, items: sourceItems(exampleSources.local, lang) });
   toolbar.examples = groups;
   redrawToolbar();
 }
 onExampleSourcesChange(updateExampleSelectorOptions);
 
-// Resolves once the web source has been read the first time; loading an
-// example by key waits for it, so a key from its index can be found.
+// Resolves once the web folders have been read the first time; loading an
+// example by key waits for them, so a key from an index can be found.
 let indexReady: () => void = () => {};
 export const exampleIndexReady = new Promise<void>(resolve => { indexReady = resolve; });
 
 // At boot, after the saved settings (the web URL among them) are back.
 export function startExampleSources() {
   initExampleSources();
-  const poll = () => (exampleSources.web.status === 'ok' || exampleSources.web.status === 'error') ? indexReady() : setTimeout(poll, 20);
+  const poll = () => exampleSources.web.every(s => s.state.status === 'ok' || s.state.status === 'error') ? indexReady() : setTimeout(poll, 20);
   poll();
 }
 
@@ -347,7 +351,7 @@ export async function loadExample(name: string) {
       setStatus(`No example '${name}' in the menu`, 'error');
       return;
     }
-    const where = entry.source === 'local' ? 'the folder ' + (exampleSources.folder?.name ?? '') : webSourceName();
+    const where = exampleSourceName(entry);
     setStatus(`Loading ${entry.label}\u2026`, 'info');
     try {
       source = await readExampleSource(entry);

@@ -23,7 +23,6 @@ the baked copy to match.
 | hello_jal | asm | Hello Subroutine | HelloWorld_jal_jalr.asm | 9 | 9 | Hello World with a subroutine |
 | circle_accel | asm | Circle & Accel | Circle_delay_accel.asm | 10 | 9 | Circle and delay accel |
 | image_display_accel | asm | Image Display & Accel | ImageDisplay_autoadvance_accel.asm | 9 | 14 | Image display autoadvance and accel |
-| week11sample | asm | Week 11 Sample | Week11Sample.asm | 9 | 9 | Week 11 Branch Prediction Example |
 | fibonacci_c | c | Fibonacci | fibonacci.c | 9 | 9 | Fibonacci sequence |
 | hello_world_c | c | Hello World | HelloWorld.c | 9 | 9 | UART command echo with a greeting |
 | hello_jal_c | c | Hello Subroutine | HelloWorld_jal_jalr.c | 9 | 9 | UART command echo, greeting printed by a function taking a parameter |

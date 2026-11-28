@@ -19,7 +19,7 @@
   import { setClkDivBits, setRunPace } from './clock-controls';
   import { setJsArch, setPipeHazard, setPipePredictor } from './pipeline-controls';
   import { resetEverything } from './settings-store';
-  import { exampleSources, examplesFolderPicked, forgetExamplesFolder, pickExamplesFolder, setExamplesWebUrl,
+  import { addWebSource, exampleSources, examplesFolderPicked, forgetExamplesFolder, pickExamplesFolder, removeWebSource, webSourceName,
     type ExampleSourceState } from './example-sources';
   import { setStatus } from './editor';
   import {
@@ -80,9 +80,18 @@
   }
   const ex = $derived.by(() => {
     viewRev.settings;
-    return { webUrl: exampleSources.webUrl, web: exampleSources.web, folder: exampleSources.folder && { ...exampleSources.folder },
-             local: exampleSources.local, desktop: !!window.rvNative };
+    return {
+      web: exampleSources.web.map(s => ({ id: s.id, url: s.url, name: webSourceName(s.url), state: s.state })),
+      local: exampleSources.local.map(s => ({ id: s.id, name: s.folder.name, pending: s.folder.pending, state: s.state })),
+      desktop: !!window.rvNative,
+    };
   });
+  // Why the URL typed to add was not taken, until it is changed.
+  let webAddError = $state('');
+  function onAddWeb(input: HTMLInputElement) {
+    webAddError = addWebSource(input.value);
+    if (!webAddError) input.value = '';
+  }
   const sourceStatus = (s: ExampleSourceState) => s.status === 'loading' ? 'reading…'
     : s.status === 'error' ? 'unavailable: ' + s.error
     : s.status === 'ok' ? s.entries.length + ' example' + (s.entries.length === 1 ? '' : 's') : '';
@@ -489,25 +498,41 @@
     </div>
     <!-- Tab 4: where the Example menu's programs come from (example-sources.ts). -->
     <div class="settings-tab-content" class:active={m.tab === 'examples'} id="settingsContent-examples">
-      <div class="sim-card ex-card">
-        <div class="ex-head"><label for="examplesWebUrl">Web folder</label><span class="ex-status" id="examplesWebStatus">{sourceStatus(ex.web)}</span></div>
+      <div class="sim-card ex-card" id="examplesWeb">
+        <div class="ex-head"><span>Web folders</span></div>
+        {#each ex.web as w (w.id)}
+          <div class="ex-row ex-source" data-source={w.id}>
+            <span class="ex-name" title={w.url || (ex.desktop ? 'The examples on the RVEduSim site' : "This site's own examples")}>{w.name}</span>
+            <span class="ex-status">{sourceStatus(w.state)}</span>
+            <button type="button" class="hdl-file-x" title="Remove this folder from the Example menu" onclick={() => removeWebSource(w.id)}>&times;</button>
+          </div>
+        {/each}
         <div class="ex-row">
-          <input id="examplesWebUrl" type="text" spellcheck="false" value={ex.webUrl}
-            placeholder={'Default: ' + (ex.desktop ? 'the RVEduSim site' : "this site's examples")}
+          <input id="examplesWebAdd" type="text" spellcheck="false" placeholder="A GitHub folder or https URL"
             title="A GitHub folder (github.com/owner/repo/tree/branch/folder), or any https folder laid out like examples/: index.txt, asm/ and c/"
-            onchange={e => setExamplesWebUrl(e.currentTarget.value)}>
-          <button type="button" class="hdl-btn" disabled={!ex.webUrl} onclick={() => setExamplesWebUrl('')}
-            title="Use the default examples again">Default</button>
+            oninput={() => { webAddError = ''; }} onkeydown={e => { if (e.key === 'Enter') onAddWeb(e.currentTarget); }}>
+          <button type="button" class="hdl-btn" id="examplesWebAddBtn"
+            onclick={e => onAddWeb(e.currentTarget.previousElementSibling as HTMLInputElement)}>Add</button>
         </div>
+        {#if webAddError}<span class="ex-status ex-error" id="examplesWebAddError">{webAddError}</span>{/if}
       </div>
-      <div class="sim-card ex-card">
-        <div class="ex-head"><span>Folder on this computer</span><span class="ex-status" id="examplesLocalStatus">{ex.folder ? sourceStatus(ex.local) : ''}</span></div>
+      <div class="sim-card ex-card" id="examplesLocal">
+        <div class="ex-head"><span>Folders on this computer</span></div>
+        {#each ex.local as f (f.id)}
+          <div class="ex-row ex-source" data-source={f.id}>
+            {#if f.pending}
+              <button type="button" class="hdl-btn ex-name" onclick={() => pickExamplesFolder(f.id)}
+                title="Read the folder again. The browser asks for permission first.">↻ {f.name}</button>
+            {:else}
+              <span class="ex-name">{f.name}</span>
+            {/if}
+            <span class="ex-status">{sourceStatus(f.state)}</span>
+            <button type="button" class="hdl-file-x" title="Forget this folder" onclick={() => forgetExamplesFolder(f.id)}>&times;</button>
+          </div>
+        {/each}
         <div class="ex-row">
           <button type="button" class="hdl-btn" id="examplesFolderBtn" onclick={() => pickExamplesFolder()}
-            title={ex.folder && ex.folder.pending ? 'Read the folder again. The browser asks for permission first.'
-              : 'Its .asm, .s and .c files, or the ones its index.txt lists, are added to the Example menu'}
-            >{ex.folder ? (ex.folder.pending ? '↻ ' : '') + ex.folder.name : 'folder…'}</button>
-          {#if ex.folder}<button type="button" class="hdl-file-x" title="Forget this folder" onclick={() => forgetExamplesFolder()}>&times;</button>{/if}
+            title="Its .asm, .s and .c files, or the ones its index.txt lists, are added to the Example menu">Add folder…</button>
           <input type="file" id="examplesFolderInput" webkitdirectory multiple style="display:none;"
             onchange={e => { const el = e.currentTarget; examplesFolderPicked(el.files ?? []).then(() => { el.value = ''; }); }}>
         </div>

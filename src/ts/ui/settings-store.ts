@@ -15,7 +15,7 @@ import { pipeline } from '../machine/pipeline';
 import { clock, layout, run, uart } from '../machine/state';
 import { uartCharCycles } from '../machine/clock';
 import { setUartSendMode } from '../machine/uart';
-import { exampleSources } from './example-sources';
+import { DEFAULT_WEB_SOURCES, exampleSources } from './example-sources';
 import { redraw } from './views.svelte';
 
 export const SETTINGS_KEY = 'rvsim.settings.v1';
@@ -35,7 +35,7 @@ export function settingsSnapshot() {
       cycles: { ...run.cycleConfig }, statementStepping: run.statementStepping, maxInstructions: run.maxInstructions,
     },
     clock: { divBits: clock.divBits, pace: clock.pace },
-    examples: { webUrl: exampleSources.webUrl },
+    examples: { web: exampleSources.webUrls.slice() },
     uart: { sendMode: uart.sendMode, charInstr: uart.charInstr, typedInstr: uart.typedInstr },
     hdl: {
       trace: hdlConfig.traceEnabled, vcd: hdlConfig.dumpVcd, waveTop: hdlConfig.waveTop, liveWave: hdlConfig.liveWave,
@@ -113,7 +113,16 @@ export function restoreSettings() {
     // The UART's character time follows the clock, unless it was set by hand.
     uart.charInstr = uartCharCycles();
   }
-  if (isObj(s.examples) && typeof s.examples.webUrl === 'string') exampleSources.webUrl = s.examples.webUrl.trim();
+  if (isObj(s.examples)) {
+    const e = s.examples;
+    if (Array.isArray(e.web) && e.web.every(u => typeof u === 'string')) exampleSources.webUrls = (e.web as string[]).map(u => u.trim());
+    // Saved when there was one web folder, which replaced the site's: the
+    // defaults now, and that folder too.
+    else if (typeof e.webUrl === 'string') {
+      const u = e.webUrl.trim();
+      exampleSources.webUrls = DEFAULT_WEB_SOURCES.concat(u && !DEFAULT_WEB_SOURCES.includes(u) ? [u] : []);
+    }
+  }
   if (isObj(s.uart)) {
     const u = s.uart;
     if (num(u.charInstr, 1, Number.MAX_SAFE_INTEGER)) uart.charInstr = u.charInstr as number;

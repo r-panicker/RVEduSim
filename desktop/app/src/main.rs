@@ -183,10 +183,19 @@ fn vl_live_read(app: AppState<'_>, id: u64, name: String, max: u64) -> Response 
     }
 }
 
-/// The settings key that remembers the folder of each kind: the Verilog
-/// sources ("hdl", the default) or the example programs ("examples").
+/// The settings key that remembers the folders of each kind: the Verilog
+/// sources' one ("hdl", the default), or the example programs' list.
 fn folder_key(kind: &Option<String>) -> &'static str {
-    if kind.as_deref() == Some("examples") { "examplesFolder" } else { "folder" }
+    if kind.as_deref() == Some("examples") { "examplesFolders" } else { "folder" }
+}
+
+/// The example folders remembered, from the list or the single folder an
+/// earlier version kept.
+fn examples_folders(settings: &serde_json::Map<String, Value>) -> Vec<String> {
+    match settings.get("examplesFolders") {
+        Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+        _ => settings.get("examplesFolder").and_then(Value::as_str).map(|s| vec![s.to_string()]).unwrap_or_default(),
+    }
 }
 
 #[tauri::command]
@@ -200,13 +209,28 @@ async fn folder_pick(app: AppState<'_>, handle: tauri::AppHandle, kind: Option<S
             Ok(d) => d,
             Err(_) => {
                 let mut d = handle.dialog().file();
-                if let Some(Value::String(f)) = app.settings.lock().unwrap().get(key) { d = d.set_directory(f); }
+                let last = match app.settings.lock().unwrap().get(key) {
+                    Some(Value::String(f)) => Some(f.clone()),
+                    Some(Value::Array(a)) => a.last().and_then(Value::as_str).map(String::from),
+                    _ => None,
+                };
+                if let Some(f) = last { d = d.set_directory(f); }
                 let Some(picked) = d.blocking_pick_folder() else { return Ok(None) };
                 picked.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned()
             }
         };
         app.allowed.lock().unwrap().insert(dir.clone());
-        app.settings.lock().unwrap().insert(key.into(), Value::String(dir.clone()));
+        {
+            let mut settings = app.settings.lock().unwrap();
+            if key == "examplesFolders" {
+                let mut list = examples_folders(&settings);
+                if !list.contains(&dir) { list.push(dir.clone()); }
+                settings.remove("examplesFolder");
+                settings.insert(key.into(), Value::Array(list.into_iter().map(Value::String).collect()));
+            } else {
+                settings.insert(key.into(), Value::String(dir.clone()));
+            }
+        }
         app.save_settings();
         Ok(Some(dir))
     }).await
@@ -219,9 +243,24 @@ async fn folder_read(app: AppState<'_>, dir: String, kind: Option<String>) -> Re
     blocking(move || Ok(read_folder_kind(&PathBuf::from(dir), &kind))).await
 }
 
+/// Forgets the HDL folder, or the example folder named (all of them when
+/// none is).
 #[tauri::command]
-fn folder_forget(app: AppState<'_>, kind: Option<String>) {
-    app.settings.lock().unwrap().remove(folder_key(&kind));
+fn folder_forget(app: AppState<'_>, kind: Option<String>, dir: Option<String>) {
+    {
+        let mut settings = app.settings.lock().unwrap();
+        let key = folder_key(&kind);
+        if key == "examplesFolders" {
+            let list: Vec<Value> = match &dir {
+                Some(d) => examples_folders(&settings).into_iter().filter(|f| f != d).map(Value::String).collect(),
+                None => Vec::new(),
+            };
+            settings.remove("examplesFolder");
+            settings.insert(key.into(), Value::Array(list));
+        } else {
+            settings.remove(key);
+        }
+    }
     app.save_settings();
 }
 
@@ -281,17 +320,17 @@ fn main() {
             let settings: serde_json::Map<String, Value> = std::fs::read_to_string(&settings_path).ok()
                 .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
             let folder = settings.get("folder").and_then(Value::as_str).map(String::from);
-            let examples_folder = settings.get("examplesFolder").and_then(Value::as_str).map(String::from);
+            let examples = examples_folders(&settings);
             let vl_version = vl_root.as_ref().and_then(|r| std::fs::read_to_string(r.join("VERSION")).ok())
                 .map(|v| v.split_whitespace().next().unwrap_or("").to_string());
             let info = json!({
                 "icarus": icarus.is_some(), "icarusVersion": icarus.as_ref().and_then(|i| i.version.clone()),
                 "verilator": vl_root.is_some(), "verilatorVersion": vl_version,
-                "folder": folder, "examplesFolder": examples_folder, "platform": platform(),
+                "folder": folder, "examplesFolders": examples, "platform": platform(),
             });
             let state = Arc::new(App {
                 icarus, vl_root, vl_cache: data.join("verilator"), verilator: OnceLock::new(), settings_path,
-                allowed: Mutex::new(folder.into_iter().chain(examples_folder.clone()).collect()), settings: Mutex::new(settings),
+                allowed: Mutex::new(folder.into_iter().chain(examples.iter().cloned()).collect()), settings: Mutex::new(settings),
             });
             app.manage(state);
 

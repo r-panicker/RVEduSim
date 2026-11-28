@@ -301,7 +301,7 @@ export const hdlFolderPickable = !!(window.rvNative || window.showDirectoryPicke
 export const hdlFolderLive = !!(window.rvNative || window.showDirectoryPicker);
 
 // IndexedDB holds the browser's folder handles, which localStorage cannot
-// store: the HDL sources' under hdlFolder, the examples' under examplesFolder.
+// store: the HDL sources' under hdlFolder, the example folders' under examplesFolders.
 export function hdlFolderStore(op: 'get' | 'put' | 'delete', value?: unknown, key = 'hdlFolder') {
   return new Promise<unknown>((resolve, reject) => {
     if (!window.indexedDB) { resolve(null); return; }

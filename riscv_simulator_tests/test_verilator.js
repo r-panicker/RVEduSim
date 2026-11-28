@@ -408,223 +408,231 @@ if (process.argv[2] === '--checkpoints') {
     check('…and leaves no compiler running (' + left.length + ' after ' + (Date.now() - k0) + ' ms)', left.length === 0);
     fs.copyFileSync(path.join(RV, EDIT), path.join(dir, EDIT));
 
-    console.log('\n[6] Live runs');
-    const steps2arch = t => arch(t);
-    win.setHdlSimulator('icarus');
-    check('Icarus keeps 200,000 cycles per run', doc.getElementById('hdlCycles').value === '200000');
-    win.setHdlSimulator('verilator');
-    check('Verilator defaults to 20,000,000', doc.getElementById('hdlCycles').value === '20000000');
-    check('The waveform setting shows with Verilator', doc.getElementById('hdlLiveWaveRow').style.display === 'flex');
-    win.setHdlDumpVcd(true);
-    win.setHdlCycles(300000);
-    win.resetAll();
-    await win.loadExample('dip_led');
-    win.setDipSwitches(0x00ad);
-    // A fresh live run, with the switches moved while it runs.
-    const liveRun = win.runHdlSimulation();
-    await until(() => win.getHdlTrace() && win.getHdlTrace().steps.length > 20000, 60000);
-    const movedAt = win.getHdlTrace().steps.length;
-    win.setDipSwitches(0x0072);
-    await liveRun;
-    const lt = win.getHdlTrace();
-    const st = win.hdlGetStim ? win.hdlGetStim() : null;
-    console.log('    live run: ' + lt.budget + ' cycles, switches moved after ' + movedAt + ' instructions');
-    check('A live run records to its cycle limit', lt.budget === 300000 && lt.steps.length > 250000);
-    win.hdlSeek(lt.steps.length);
-    check('The switch change took effect while it ran (LED 0x' + win.getLedState().toString(16) + ')', win.getLedState() === 0x72);
-    check('…and is on the input timeline at the cycle the model applied it',
-      lt.timeline.stim.length === 1 && lt.timeline.stim[0].value === 0x72 && lt.timeline.stim[0].cycle > 1000);
-    const liveArch = steps2arch(lt);
-    const replay = await win.hdlBuildTrace(300000, { quiet: true });
-    check('A replay of that timeline from reset records the same run', !!replay && steps2arch(replay) === liveArch);
-    check('The waveform was built on Pause and covers the last 50,000 cycles',
-      !!win.getHdlLastVcd() && /#2500000\b|#25000\d{2}/.test(win.getHdlLastVcd().slice(0, 200000)) && win.parseVcd(win.getHdlLastVcd()).vars.length > 50);
-    {
-      // The model must stop writing it, not only the page stop reading it:
-      // a dump left running fills /tmp at about 150 MB a second.
-      const said = () => consoleText(doc).some(l => /too fast to follow/.test(l));
-      win.setHdlCycles(20000000);
-      win.resetAll();
-      win.clearLog();
-      const flat = win.runHdlSimulation();
-      check('Followed live flat out, the waveform stops at 20 MB and says so', await until(said, 60000));
-      await sleep(500);                 // the model closes it at its next edge
-      const id = win.eval('hdlActivity.live && hdlActivity.live.id');
-      const size = async () => { const b = id && await win.rvNative.vlLiveRead(id, 'dump.vcd', 1); return b ? b.size : -1; };
-      const s1 = await size();
-      await sleep(1500);
-      const s2 = await size();
-      win.toggleRunPause();
-      await flat;
-      check('…and the model stops writing it (' + s1 + ' bytes, then ' + s2 + ')', s1 > 0 && s2 === s1 && s1 < 100e6);
+    // A function of its own, so that the recordings this section's runs
+    // resolve with are collected when it returns: an async function's
+    // locals stay reachable while it runs, block or no block, and together
+    // they are over a gigabyte, where Windows gives Node a 4 GB heap.
+    await (async () => {
+      console.log('\n[6] Live runs');
+      const steps2arch = t => arch(t);
+      win.setHdlSimulator('icarus');
+      check('Icarus keeps 200,000 cycles per run', doc.getElementById('hdlCycles').value === '200000');
+      win.setHdlSimulator('verilator');
+      check('Verilator defaults to 20,000,000', doc.getElementById('hdlCycles').value === '20000000');
+      check('The waveform setting shows with Verilator', doc.getElementById('hdlLiveWaveRow').style.display === 'flex');
+      win.setHdlDumpVcd(true);
       win.setHdlCycles(300000);
-    }
+      win.resetAll();
+      await win.loadExample('dip_led');
+      win.setDipSwitches(0x00ad);
+      // A fresh live run, with the switches moved while it runs.
+      const liveRun = win.runHdlSimulation();
+      await until(() => win.getHdlTrace() && win.getHdlTrace().steps.length > 20000, 60000);
+      const movedAt = win.getHdlTrace().steps.length;
+      win.setDipSwitches(0x0072);
+      await liveRun;
+      const lt = win.getHdlTrace();
+      const st = win.hdlGetStim ? win.hdlGetStim() : null;
+      console.log('    live run: ' + lt.budget + ' cycles, switches moved after ' + movedAt + ' instructions');
+      check('A live run records to its cycle limit', lt.budget === 300000 && lt.steps.length > 250000);
+      win.hdlSeek(lt.steps.length);
+      check('The switch change took effect while it ran (LED 0x' + win.getLedState().toString(16) + ')', win.getLedState() === 0x72);
+      check('…and is on the input timeline at the cycle the model applied it',
+        lt.timeline.stim.length === 1 && lt.timeline.stim[0].value === 0x72 && lt.timeline.stim[0].cycle > 1000);
+      const liveArch = steps2arch(lt);
+      const replay = await win.hdlBuildTrace(300000, { quiet: true });
+      check('A replay of that timeline from reset records the same run', !!replay && steps2arch(replay) === liveArch);
+      check('The waveform was built on Pause and covers the last 50,000 cycles',
+        !!win.getHdlLastVcd() && /#2500000\b|#25000\d{2}/.test(win.getHdlLastVcd().slice(0, 200000)) && win.parseVcd(win.getHdlLastVcd()).vars.length > 50);
+      {
+        // The model must stop writing it, not only the page stop reading it:
+        // a dump left running fills /tmp at about 150 MB a second.
+        const said = () => consoleText(doc).some(l => /too fast to follow/.test(l));
+        win.setHdlCycles(20000000);
+        win.resetAll();
+        win.clearLog();
+        const flat = win.runHdlSimulation();
+        check('Followed live flat out, the waveform stops at 20 MB and says so', await until(said, 60000));
+        await sleep(500);                 // the model closes it at its next edge
+        const id = win.eval('hdlActivity.live && hdlActivity.live.id');
+        const size = async () => { const b = id && await win.rvNative.vlLiveRead(id, 'dump.vcd', 1); return b ? b.size : -1; };
+        const s1 = await size();
+        await sleep(1500);
+        const s2 = await size();
+        win.toggleRunPause();
+        await flat;
+        check('…and the model stops writing it (' + s1 + ' bytes, then ' + s2 + ')', s1 > 0 && s2 === s1 && s1 < 100e6);
+        win.setHdlCycles(300000);
+      }
 
-    // Pause, paced to a slow clock.
-    win.resetAll();
-    win.setHdlCycles(2000000);
-    win.setClkDivBits(16);                           // 1.53 kHz
-    win.setRunPace('real');
-    win.setHdlLiveWave('live');
-    const paced = win.runHdlSimulation();
-    await until(() => /running live/.test(doc.getElementById('statusBar').textContent), 120000);
-    await sleep(1500);
-    const midVcd = win.getHdlLastVcd();
-    win.toggleRunPause();
-    await paced;
-    const pt = win.getHdlTrace();
-    console.log('    paced to 1.53 kHz for about 1.5 s: ' + pt.budget + ' cycles');
-    check('Real time paces the model to the clock (' + pt.budget + ' cycles in ~1.5 s at 1.53 kHz)', pt.budget > 1000 && pt.budget < 4000);
-    check('Pause ends the run where it was', /paused/i.test(doc.getElementById('statusBar').textContent) || pt.budget < 4000);
-    check('The waveform followed the run while it went', !!midVcd && midVcd.length > 0);
+      // Pause, paced to a slow clock.
+      win.resetAll();
+      win.setHdlCycles(2000000);
+      win.setClkDivBits(16);                           // 1.53 kHz
+      win.setRunPace('real');
+      win.setHdlLiveWave('live');
+      const paced = win.runHdlSimulation();
+      await until(() => /running live/.test(doc.getElementById('statusBar').textContent), 120000);
+      await sleep(1500);
+      const midVcd = win.getHdlLastVcd();
+      win.toggleRunPause();
+      await paced;
+      const pt = win.getHdlTrace();
+      console.log('    paced to 1.53 kHz for about 1.5 s: ' + pt.budget + ' cycles');
+      check('Real time paces the model to the clock (' + pt.budget + ' cycles in ~1.5 s at 1.53 kHz)', pt.budget > 1000 && pt.budget < 4000);
+      check('Pause ends the run where it was', /paused/i.test(doc.getElementById('statusBar').textContent) || pt.budget < 4000);
+      check('The waveform followed the run while it went', !!midVcd && midVcd.length > 0);
 
-    // Without the architectural trace a live run still shows the peripherals as it goes.
-    win.resetAll();
-    win.setHdlDetail('fastest', true);
-    win.setHdlCycles(50000000);
-    win.setRunPace('real');
-    // 25 MHz: a clock no machine keeps up with, but one a slow one still
-    // reaches a fraction of that shows above ×0.00.
-    win.setClkDivBits(2);
-    win.setDipSwitches(0x0011);
-    const noTrace = win.runHdlSimulation();
-    await until(() => /running live/.test(doc.getElementById('statusBar').textContent), 120000);
-    // LED[15:9] show PC[8:2], which the live helper reports every 30 ms (@@C).
-    const pcLedsV = () => [15, 14, 13, 12, 11, 10, 9].map(b => doc.getElementById('led' + b).classList.contains('on') ? 1 : 0).join('');
-    const pcsLive = new Set(), pcLedsOk = [];
-    for (let i = 0; i < 26; i++) {
-      await sleep(30);
-      const v = win.eval('cpu.pc') >>> 0;
-      pcsLive.add(v);
-      pcLedsOk.push(pcLedsV() === ((v >>> 2) & 0x7F).toString(2).padStart(7, '0'));
-    }
-    win.setDipSwitches(0x0022);
-    const ledLive = await until(() => win.getLedState() === 0x22, 5000);
-    const statsNt = doc.getElementById('statsBar').textContent;
-    win.toggleRunPause();
-    await noTrace;
-    check('With Detail Fastest (no trace) a live run still shows a switch change while it runs', ledLive);
-    check('…and the PC LEDs follow the run (' + [...pcsLive].map(x => x.toString(16)).join(' ') + ')',
-      pcsLive.size >= 2 && pcLedsOk.every(Boolean));
-    check('…and its fraction of real time is not stuck at 0 (' + (/×[\d.]+ real time/.exec(statsNt) || ['none'])[0] + ')',
-      !/×0\.00 real time/.test(statsNt) && /Cycles: [1-9]/.test(statsNt));
-    const ntEnd = win.getHdlTrace().budget;
-    win.setHdlCycles(300000);
-    const ntSeen = [];
-    const ntWatch = setInterval(() => ntSeen.push(doc.getElementById('statusBar').textContent), 5);
-    await win.runHdlSimulation();
-    clearInterval(ntWatch);
-    win.hdlSeek(0);
-    check('Without the trace, Run carries on from where it paused (' + ntEnd + ' to ' + win.getHdlTrace().budget + ')',
-      win.getHdlTrace().budget === ntEnd + 300000 && win.getLedState() === 0x22);
-    check('…from a checkpoint', ntEnd < 400000 || ntSeen.some(s => /replaying cycles [\d,]+ to /.test(s)));
-    win.setHdlCycles(50000000);
-    win.setHdlDetail('full', true);
+      // Without the architectural trace a live run still shows the peripherals as it goes.
+      win.resetAll();
+      win.setHdlDetail('fastest', true);
+      win.setHdlCycles(50000000);
+      win.setRunPace('real');
+      // 25 MHz: a clock no machine keeps up with, but one a slow one still
+      // reaches a fraction of that shows above ×0.00.
+      win.setClkDivBits(2);
+      win.setDipSwitches(0x0011);
+      const noTrace = win.runHdlSimulation();
+      await until(() => /running live/.test(doc.getElementById('statusBar').textContent), 120000);
+      // LED[15:9] show PC[8:2], which the live helper reports every 30 ms (@@C).
+      const pcLedsV = () => [15, 14, 13, 12, 11, 10, 9].map(b => doc.getElementById('led' + b).classList.contains('on') ? 1 : 0).join('');
+      const pcsLive = new Set(), pcLedsOk = [];
+      for (let i = 0; i < 26; i++) {
+        await sleep(30);
+        const v = win.eval('cpu.pc') >>> 0;
+        pcsLive.add(v);
+        pcLedsOk.push(pcLedsV() === ((v >>> 2) & 0x7F).toString(2).padStart(7, '0'));
+      }
+      win.setDipSwitches(0x0022);
+      const ledLive = await until(() => win.getLedState() === 0x22, 5000);
+      const statsNt = doc.getElementById('statsBar').textContent;
+      win.toggleRunPause();
+      await noTrace;
+      check('With Detail Fastest (no trace) a live run still shows a switch change while it runs', ledLive);
+      check('…and the PC LEDs follow the run (' + [...pcsLive].map(x => x.toString(16)).join(' ') + ')',
+        pcsLive.size >= 2 && pcLedsOk.every(Boolean));
+      check('…and its fraction of real time is not stuck at 0 (' + (/×[\d.]+ real time/.exec(statsNt) || ['none'])[0] + ')',
+        !/×0\.00 real time/.test(statsNt) && /Cycles: [1-9]/.test(statsNt));
+      const ntEnd = win.getHdlTrace().budget;
+      win.setHdlCycles(300000);
+      const ntSeen = [];
+      const ntWatch = setInterval(() => ntSeen.push(doc.getElementById('statusBar').textContent), 5);
+      await win.runHdlSimulation();
+      clearInterval(ntWatch);
+      win.hdlSeek(0);
+      check('Without the trace, Run carries on from where it paused (' + ntEnd + ' to ' + win.getHdlTrace().budget + ')',
+        win.getHdlTrace().budget === ntEnd + 300000 && win.getLedState() === 0x22);
+      check('…from a checkpoint', ntEnd < 400000 || ntSeen.some(s => /replaying cycles [\d,]+ to /.test(s)));
+      win.setHdlCycles(50000000);
+      win.setHdlDetail('full', true);
 
-    // Paced to a clock it cannot reach, the stats say how far behind it is.
-    win.resetAll();
-    win.setHdlLiveWave('pause');
-    win.setClkDivBits(0);                            // 100 MHz
-    win.setRunPace('real');
-    const fast = win.runHdlSimulation();
-    await until(() => /running live/.test(doc.getElementById('statusBar').textContent), 120000);
-    await sleep(2000);
-    const lagText = doc.getElementById('statsBar').textContent;
-    win.toggleRunPause();
-    await fast;
-    check('A live run behind its clock shows the fraction of real time (' + (/×[\d.]+ real time/.exec(lagText) || ['none'])[0] + ')',
-      /×0\.\d+ real time/.test(lagText));
-    win.resetAll();
-    win.setClkDivBits(16);
-    win.setHdlLiveWave('live');
-    const paced2 = win.runHdlSimulation();
-    await sleep(1500);
-    win.toggleRunPause();
-    await paced2;
+      // Paced to a clock it cannot reach, the stats say how far behind it is.
+      win.resetAll();
+      win.setHdlLiveWave('pause');
+      win.setClkDivBits(0);                            // 100 MHz
+      win.setRunPace('real');
+      const fast = win.runHdlSimulation();
+      await until(() => /running live/.test(doc.getElementById('statusBar').textContent), 120000);
+      await sleep(2000);
+      const lagText = doc.getElementById('statsBar').textContent;
+      win.toggleRunPause();
+      await fast;
+      check('A live run behind its clock shows the fraction of real time (' + (/×[\d.]+ real time/.exec(lagText) || ['none'])[0] + ')',
+        /×0\.\d+ real time/.test(lagText));
+      win.resetAll();
+      win.setClkDivBits(16);
+      win.setHdlLiveWave('live');
+      const paced2 = win.runHdlSimulation();
+      await sleep(1500);
+      win.toggleRunPause();
+      await paced2;
 
-    // Resume, flat out, from where the pause left it.
-    win.setRunPace('max');
-    win.setClkDivBits(5);
-    win.setHdlLiveWave('pause');
-    win.setHdlCycles(50000);
-    const b0 = win.getHdlTrace().budget;
-    await win.runHdlSimulation();
-    const rt = win.getHdlTrace();
-    check('Resume carries on from the end (' + b0 + ' to ' + rt.budget + ')', rt.budget === b0 + 50000);
-    const resumedArch = steps2arch(rt);
-    const replay2 = await win.hdlBuildTrace(rt.budget, { quiet: true });
-    check('…joined onto the recording exactly as a run from reset', !!replay2 && steps2arch(replay2) === resumedArch);
+      // Resume, flat out, from where the pause left it.
+      win.setRunPace('max');
+      win.setClkDivBits(5);
+      win.setHdlLiveWave('pause');
+      win.setHdlCycles(50000);
+      const b0 = win.getHdlTrace().budget;
+      await win.runHdlSimulation();
+      const rt = win.getHdlTrace();
+      check('Resume carries on from the end (' + b0 + ' to ' + rt.budget + ')', rt.budget === b0 + 50000);
+      const resumedArch = steps2arch(rt);
+      const replay2 = await win.hdlBuildTrace(rt.budget, { quiet: true });
+      check('…joined onto the recording exactly as a run from reset', !!replay2 && steps2arch(replay2) === resumedArch);
 
-    // A breakpoint stops a live run.
-    win.resetAll();
-    win.setHdlCycles(1000000);
-    const srcLines = win.editor.value.split('\n');
-    const bpLine = srcLines.findIndex(l => /^\s*sw\s+s4/.test(l)) + 1;
-    win.toggleBreakpoint(bpLine);
-    await win.runHdlSimulation();
-    const bt = win.getHdlTrace();
-    check('A breakpoint stops a live run on its line (' + bpLine + ')',
-      bpLine > 0 && win.getHdlIndex() < bt.steps.length && win.sourceLineForPc(bt.steps[win.getHdlIndex()].pc) === bpLine);
-    check('…long before the cycle limit (' + bt.budget + ')', bt.budget < 1000000);
-    win.toggleBreakpoint(bpLine);
+      // A breakpoint stops a live run.
+      win.resetAll();
+      win.setHdlCycles(1000000);
+      const srcLines = win.editor.value.split('\n');
+      const bpLine = srcLines.findIndex(l => /^\s*sw\s+s4/.test(l)) + 1;
+      win.toggleBreakpoint(bpLine);
+      await win.runHdlSimulation();
+      const bt = win.getHdlTrace();
+      check('A breakpoint stops a live run on its line (' + bpLine + ')',
+        bpLine > 0 && win.getHdlIndex() < bt.steps.length && win.sourceLineForPc(bt.steps[win.getHdlIndex()].pc) === bpLine);
+      check('…long before the cycle limit (' + bt.budget + ')', bt.budget < 1000000);
+      win.toggleBreakpoint(bpLine);
 
-    // UART typed while it runs.
-    win.resetAll();
-    await win.loadExample('hello_world');
-    win.setHdlCycles(2000000);
-    const ur = win.runHdlSimulation();
-    await until(() => win.getHdlTrace() && win.getHdlTrace().steps.length > 5000, 60000);
-    doc.getElementById('uartInputMode').value = 'ascii';
-    doc.getElementById('uartInputText').value = 'A\\r';
-    win.sendUartInput();
-    const termEl = doc.getElementById('uartTerminal');
-    // The reply is a couple of hundred thousand cycles of UART at its baud
-    // rate, so how long it takes depends on the machine; the run's own
-    // cycle limit bounds it.
-    let urDone = false;
-    ur.then(() => { urDone = true; });
-    await until(() => urDone || /Welcome/.test(String(termEl.innerText || termEl.textContent || '')), 120000);
-    if (!urDone) win.toggleRunPause();
-    await ur;
-    const term = String(termEl.innerText || termEl.textContent || '');
-    check('Typing into the UART console reaches the running model (' + JSON.stringify(term.slice(0, 40)) + ')', /Welcome|Hello|A/.test(term) && term.length > 5);
-    check('…and the bytes are on the timeline', win.getHdlTrace().timeline.rx.length >= 2);
+      // UART typed while it runs.
+      win.resetAll();
+      await win.loadExample('hello_world');
+      win.setHdlCycles(2000000);
+      const ur = win.runHdlSimulation();
+      await until(() => win.getHdlTrace() && win.getHdlTrace().steps.length > 5000, 60000);
+      doc.getElementById('uartInputMode').value = 'ascii';
+      doc.getElementById('uartInputText').value = 'A\\r';
+      win.sendUartInput();
+      const termEl = doc.getElementById('uartTerminal');
+      // The reply is a couple of hundred thousand cycles of UART at its baud
+      // rate, so how long it takes depends on the machine; the run's own
+      // cycle limit bounds it.
+      let urDone = false;
+      ur.then(() => { urDone = true; });
+      await until(() => urDone || /Welcome/.test(String(termEl.innerText || termEl.textContent || '')), 120000);
+      if (!urDone) win.toggleRunPause();
+      await ur;
+      const term = String(termEl.innerText || termEl.textContent || '');
+      check('Typing into the UART console reaches the running model (' + JSON.stringify(term.slice(0, 40)) + ')', /Welcome|Hello|A/.test(term) && term.length > 5);
+      check('…and the bytes are on the timeline', win.getHdlTrace().timeline.rx.length >= 2);
 
-    // A long run keeps only the most recent part of its recording.
-    win.resetAll();
-    await win.loadExample('dip_led');
-    win.setDipSwitches(0x00ad);
-    win.setHdlCycles(5000000);
-    const t5 = Date.now();
-    const longRun = win.runHdlSimulation();
-    await until(() => win.getHdlTrace() && (win.getHdlTrace().offset || 0) + win.getHdlTrace().steps.length > 3000000, 120000);
-    win.setDipSwitches(0x0033);
-    await longRun;
-    const lg = win.getHdlTrace();
-    console.log('    5,000,000 cycles live in ' + (Date.now() - t5) + ' ms; kept ' + lg.steps.length + ' instructions from ' + (lg.offset || 0));
-    check('A run past 2,000,000 cycles does not stop', lg.budget === 5000000);
-    check('…and keeps only the most recent part', lg.offset > 0 && lg.steps[lg.steps.length - 1].cyc - lg.steps[0].cyc <= 2500000);
-    win.hdlSeek(lg.steps.length);
-    const ledEnd = win.getLedState();
-    const instr = (/Instr:\s*(\d+)/.exec(doc.getElementById('statsBar').innerHTML) || [])[1];
-    check('The instruction count still counts from reset (' + instr + ')', +instr === lg.offset + lg.steps.length);
-    win.hdlSeek(0);
-    win.hdlSeek(lg.steps.length);
-    check('Seeking back to the start of what is kept and forward again gives the same state (LED 0x' + ledEnd.toString(16) + ')',
-      win.getLedState() === ledEnd && ledEnd === 0x33);
-    // An input moved while paused replays from reset but joins on at the change.
-    win.hdlSeek(lg.steps.length - 1000);
-    const t6 = Date.now();
-    win.setStatus('');
-    win.setDipSwitches(0x0044);
-    await until(() => /re-simulated/.test(doc.getElementById('statusBar').textContent), 60000);
-    await sleep(100);
-    console.log('    switch moved near the end of a trimmed recording: replayed in ' + (Date.now() - t6) + ' ms');
-    const rs = win.getHdlTrace();
-    win.hdlSeek(rs.steps.length);
-    check('…and the recording continues with the new switches (LED 0x' + win.getLedState().toString(16) + ')', win.getLedState() === 0x44);
+      // A long run keeps only the most recent part of its recording.
+      win.resetAll();
+      await win.loadExample('dip_led');
+      win.setDipSwitches(0x00ad);
+      win.setHdlCycles(5000000);
+      const t5 = Date.now();
+      const longRun = win.runHdlSimulation();
+      await until(() => win.getHdlTrace() && (win.getHdlTrace().offset || 0) + win.getHdlTrace().steps.length > 3000000, 120000);
+      win.setDipSwitches(0x0033);
+      await longRun;
+      const lg = win.getHdlTrace();
+      console.log('    5,000,000 cycles live in ' + (Date.now() - t5) + ' ms; kept ' + lg.steps.length + ' instructions from ' + (lg.offset || 0));
+      check('A run past 2,000,000 cycles does not stop', lg.budget === 5000000);
+      check('…and keeps only the most recent part', lg.offset > 0 && lg.steps[lg.steps.length - 1].cyc - lg.steps[0].cyc <= 2500000);
+      win.hdlSeek(lg.steps.length);
+      const ledEnd = win.getLedState();
+      const instr = (/Instr:\s*(\d+)/.exec(doc.getElementById('statsBar').innerHTML) || [])[1];
+      check('The instruction count still counts from reset (' + instr + ')', +instr === lg.offset + lg.steps.length);
+      win.hdlSeek(0);
+      win.hdlSeek(lg.steps.length);
+      check('Seeking back to the start of what is kept and forward again gives the same state (LED 0x' + ledEnd.toString(16) + ')',
+        win.getLedState() === ledEnd && ledEnd === 0x33);
+      // An input moved while paused replays from reset but joins on at the change.
+      win.hdlSeek(lg.steps.length - 1000);
+      const t6 = Date.now();
+      win.setStatus('');
+      win.setDipSwitches(0x0044);
+      await until(() => /re-simulated/.test(doc.getElementById('statusBar').textContent), 60000);
+      await sleep(100);
+      console.log('    switch moved near the end of a trimmed recording: replayed in ' + (Date.now() - t6) + ' ms');
+      const rs = win.getHdlTrace();
+      win.hdlSeek(rs.steps.length);
+      check('…and the recording continues with the new switches (LED 0x' + win.getLedState().toString(16) + ')', win.getLedState() === 0x44);
+    })();
 
     console.log('\n[7] Time through the page, Icarus against Verilator (model already built)');
+    ic.win.hdlDiscardTrace();
+    p.win.hdlDiscardTrace();
     for (const vcd of [true, false]) {
       for (const [name, q] of [['Icarus', ic], ['Verilator', p]]) {
         q.win.setHdlDumpVcd(vcd);

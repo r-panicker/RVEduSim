@@ -31,11 +31,12 @@ interface RvNative {
   vlLiveSend(id: number, line: string): Promise<void>;
   vlLiveRead(id: number, name: string, max: number): Promise<{ size: number; data?: Uint8Array } | null>;
   onVlLiveData(cb: (id: number, text: string) => void): void;
-  // kind: 'hdl' (the default) or 'examples'; each remembers its own folder.
+  // kind: 'hdl' (the default) or 'examples'. The HDL kind remembers one
+  // folder; examples, a list, from which forgetFolder takes the one named.
   pickFolder(kind?: 'hdl' | 'examples'): Promise<string | null>;
   readFolder(dir: string, kind?: 'hdl' | 'examples'): Promise<{ path: string; src: string }[]>;
-  forgetFolder(kind?: 'hdl' | 'examples'): Promise<void>;
-  rememberedExamplesFolder?: string | null;
+  forgetFolder(kind?: 'hdl' | 'examples', dir?: string): Promise<void>;
+  rememberedExamplesFolders?: string[];
 }
 
 // The parts of the File System Access API's directory handle the page uses.
@@ -44,6 +45,7 @@ interface DirHandle {
   entries(): AsyncIterable<[string, DirHandle | { kind: 'file'; getFile(): Promise<File> }]>;
   queryPermission(opts: { mode: 'read' }): Promise<string>;
   requestPermission(opts: { mode: 'read' }): Promise<string>;
+  isSameEntry(other: DirHandle): Promise<boolean>;
 }
 
 // What Compiler Explorer's compile API returns, as far as the page reads it.

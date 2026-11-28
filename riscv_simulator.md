@@ -53,10 +53,13 @@ Settings returns all of them to the defaults.
   assembling. Increase the Linker size, and for hardware the matching
   `IROM_DEPTH_BITS`/`DMEM_DEPTH_BITS` in the Wrapper. The simulator accepts sizes larger
   than the FPGA's block RAM can hold.
-- **Example sources…**, at the end of the Example menu, adds examples from a GitHub folder
+- **Example sources…**, at the end of the Example menu, lists where examples come from: the
+  simulator's own and the
+  [CG3207 lecture examples](https://github.com/NUS-CG3207/nus-cg3207.github.io/tree/main/docs/miscellaneous/LectureExamples)
+  by default. You can add more GitHub folders
   (`https://github.com/<owner>/<repo>/tree/<branch>/<folder>`) laid out like
   [the simulator's own](https://github.com/r-panicker/RVEduSim/tree/main/examples):
-  `index.txt`, `asm/` and `c/`. A folder on your computer can be added as well. It needs no
+  `index.txt`, `asm/` and `c/`. Folders on your computer can be added as well. They need no
   `index.txt`: without one, every `.asm`, `.s` and `.c` file in it is listed, and selecting one
   leaves the Linker sizes as they are. Examples are read afresh each time, so edits show up
   immediately.

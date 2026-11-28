@@ -27,7 +27,7 @@ import { pipeSetMode } from './pipeline-controls';
 import { assembleOnly, resetAll } from './run-control';
 import { hdlDownloadTestbench, hdlDownloadVcd, hdlPickCycleBudget, setHdlDetail, setHdlGeneration, setHdlRegPath, setHdlSimulator } from './waveform';
 import { saveSettings } from './settings-store';
-import { forgetExamplesFolder, setExamplesWebUrl } from './example-sources';
+import { DEFAULT_WEB_SOURCES, forgetAllExamplesFolders, setWebSources } from './example-sources';
 import { redraw } from './views.svelte';
 import { byId } from './dom';
 import { redrawToolbar, toolbar } from './toolbar-state';
@@ -310,8 +310,8 @@ export function resetCurrentSettingsTab() {
     if (changed) invalidateCompiledProgram('Compiler settings');
     setStatus('Compiler settings reset to defaults (Clang 20.1, -O0)', 'info');
   } else if (ui.settingsTab === 'examples') {
-    setExamplesWebUrl('');
-    forgetExamplesFolder();
+    setWebSources(DEFAULT_WEB_SOURCES);
+    forgetAllExamplesFolders();
     setStatus('Examples come from the built-in and default web sources again', 'info');
   } else if (ui.settingsTab === 'linker') {
     // Only the fields: Apply compares them against the live layout to
