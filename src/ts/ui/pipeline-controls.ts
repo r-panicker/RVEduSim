@@ -22,7 +22,7 @@ export const JS_ARCH_LOG: Record<typeof pipeline.arch, string> = {
 };
 export function setJsArch(name: string) {
   const a: typeof pipeline.arch = name in JS_ARCH_LOG ? name as typeof pipeline.arch : 'single';
-  if (a === pipeline.arch) { redrawPipeControls(); return; }
+  if (a === pipeline.arch) { pipeSettingsChanged(); return; }
   if (run.running) {
     run.running = false;
     if (run.timerId) { clearTimeout(run.timerId); run.timerId = null; }
@@ -31,22 +31,23 @@ export function setJsArch(name: string) {
   pipeline.on = a === 'pipe';
   resetAll();
   log(JS_ARCH_LOG[a], 'info');
-  redrawPipeControls();
-  if (typeof dpOnModeChange === 'function') dpOnModeChange();
+  pipeSettingsChanged();
   if (typeof dpOnStateChange === 'function') dpOnStateChange();
 }
 export function pipeSetMode(on: boolean) { setJsArch(on ? 'pipe' : 'single'); }
 
-// Settings and the strip's selector both show the microarchitecture.
-function redrawPipeControls() {
+// After any change to the pipeline's settings, by a control or by Reset
+// Tab: Settings and the strip show them, and the strip's diagram follows
+// them (its mode and drawing are dpOnModeChange's).
+export function pipeSettingsChanged() {
   redraw('settings');
   redraw('datapath');
+  if (typeof dpOnModeChange === 'function') dpOnModeChange();
 }
 
 export function setPipeHazard(key: keyof typeof pipeline.hazards, on: boolean) {
   pipeline.hazards[key] = on;
-  redraw('settings');
-  if (typeof dpOnModeChange === 'function') dpOnModeChange();
+  pipeSettingsChanged();
 }
 
 // A different predictor is different hardware: start the program again.
@@ -57,8 +58,7 @@ export function setPipePredictor(part: Partial<typeof pipeline.predictor>) {
     if (run.running) { run.running = false; if (run.timerId) { clearTimeout(run.timerId); run.timerId = null; } }
     resetAll();
   }
-  redraw('settings');
-  if (typeof dpOnModeChange === 'function') dpOnModeChange();
+  pipeSettingsChanged();
 }
 
 // The strip's ⚙: Settings, scrolled to the microarchitecture card.

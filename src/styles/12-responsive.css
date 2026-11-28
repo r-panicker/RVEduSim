@@ -171,7 +171,9 @@ Responsive Design & Mobile Optimization
   }
 
   .right-panel { position: relative; }
-  .right-panel > .tab-bar { padding-right: 44px; }
+  /* Room for the 🔍 button over the row's end, also when a tab is scrolled
+     into view, or the last one stops under it. */
+  .right-panel > .tab-bar { padding-right: 44px; scroll-padding-inline-end: 44px; }
   .mobile-find-btn:not([hidden]) {
     display: flex;
     align-items: center;

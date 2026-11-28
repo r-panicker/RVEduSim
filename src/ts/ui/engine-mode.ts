@@ -7,7 +7,7 @@ import { hdlAddFiles, hdlInitFolder, hdlSourcesChanged, updateHdlReadiness } fro
 import { hdlActivity, hdlRec, hdlSources } from '../hdl/state';
 import { cpu, program, run, ui } from '../machine/state';
 import { log, setStatus } from './editor';
-import { openSettingsModal, refreshSimSettingsScope, updateStats } from './execution';
+import { highlightCurrentLine, openSettingsModal, refreshSimSettingsScope, updateStats } from './execution';
 import { updateRegisters } from './panels';
 import { resetAll, updateToolbarButtonStates } from './run-control';
 import { hdlInitSimulator, hdlSimulatorName, initWaveDock, initWavePicker, updateWaveAvailability } from './waveform';
@@ -57,6 +57,8 @@ export function setSimEngineMode(mode: string) {
       setStatus('HDL mode - resumed the recording at instruction ' + hdlRec.idx, 'info');
     } else {
       setStatus('HDL mode - Run and Step execute your Verilog through ' + hdlSimulatorName(), 'info');
+      // The editor's stage letters are the JS pipeline's, which HDL mode does not show.
+      highlightCurrentLine();
     }
     loadHdlEngine().catch((e: unknown) => hdlLog(errorMessage(e), 'err'));
   } else {

@@ -37,6 +37,7 @@
     "test:m": "node test_m_extension.js",
     "test:native": "node test_hdl_native.js",
     "test:folder": "node test_hdl_folder_browser.js",
+    "test:state": "node test_state_consistency.js",
     "test:desktop": "node test_desktop_app.js",
     "test:verilator": "node test_verilator.js"
   },

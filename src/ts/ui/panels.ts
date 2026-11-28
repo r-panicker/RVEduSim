@@ -870,14 +870,20 @@ export function initPanelDock() {
   // Wire up the intra-panel column-resize separators (Registers /
   // Memory / Disassembly) and apply any persisted per-panel widths.
   initPanelColResizers();
+  let lastLayoutWidth = window.innerWidth;
   window.addEventListener('resize', () => {
     // While a form field is focused (UART console, memory address box,
     // find/replace, …), a mobile on-screen keyboard open/close fires a
     // window resize (visual viewport). Relayouting the panel stack during
     // typing would move the focused node and can dismiss the keyboard, so
     // skip every panel/layout adjustment in that case.
+    // A keyboard changes only the height, so a change of width (a window
+    // resized, a phone turned) is always laid out, or the page could stay
+    // in the other side's layout.
     const ae = document.activeElement as HTMLElement | null;
-    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable)) {
+    const widthChanged = window.innerWidth !== lastLayoutWidth;
+    lastLayoutWidth = window.innerWidth;
+    if (!widthChanged && ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable)) {
       return;
     }
     let moved = false;
@@ -893,8 +899,9 @@ export function initPanelDock() {
     updateWaveformPanelAvailability();
     if (document.body.dataset.booted) updateDatapathPanelAvailability();
     // Re-apply when crossing the mobile/desktop breakpoint so the layout
-    // switches between the tabbed mobile view and the dock/grid view.
-    if (mobileMode() || (panelDock.order.some(n => panelDock[n].visible))) {
+    // switches between the tabbed mobile view and the dock/grid view, even
+    // with every panel hidden.
+    if (mobileMode() !== dockView.mobile || mobileMode() || panelDock.order.some(n => panelDock[n].visible)) {
       applyPanelDock();
     }
   });

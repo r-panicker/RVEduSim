@@ -3099,7 +3099,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rvedusim"
-version = "24.187.0"
+version = "24.188.0"
 dependencies = [
  "base64 0.22.1",
  "gtk",
@@ -3114,7 +3114,7 @@ dependencies = [
 
 [[package]]
 name = "rvnative"
-version = "24.187.0"
+version = "24.188.0"
 dependencies = [
  "base64 0.22.1",
  "regex",

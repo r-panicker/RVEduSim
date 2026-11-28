@@ -1781,7 +1781,9 @@ export function initDatapath() {
   initFloatSteps();
   updateDatapathPanelAvailability();
   dpApplyOpen();
-  dpSync(true);
+  // The saved settings may have chosen the pipeline before the strip
+  // existed: the strip takes its mode from the pipeline here, and draws.
+  dpOnModeChange();
 }
 
 // Every action on the page ends in a toolbar refresh, and a register edit

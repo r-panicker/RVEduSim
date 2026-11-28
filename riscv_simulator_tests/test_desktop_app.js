@@ -61,7 +61,12 @@ function session(id) {
       const el = await wd('POST', s + '/element', { using: 'css selector', value: css });
       await wd('POST', s + '/element/' + Object.values(el)[0] + '/click', {});
     },
+    // A screenshot is for a person to look at, and is not checked. On CI,
+    // where nobody would see it, none is taken unless SHOT_DIR asks: there
+    // WebKitGTK's screenshot has been seen not to answer, which leaves the
+    // session's later commands waiting behind it.
     async shot(name) {
+      if (process.env.CI && !process.env.SHOT_DIR) return;
       const b64 = await wd('GET', s + '/screenshot');
       fs.writeFileSync(path.join(SHOT, name), Buffer.from(b64, 'base64'));
     },
